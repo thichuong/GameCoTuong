@@ -1,5 +1,6 @@
 mod app;
 mod components;
+mod engine;
 mod logic;
 
 use app::App;
