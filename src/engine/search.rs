@@ -98,7 +98,7 @@ impl AlphaBetaEngine {
         let mut best_score = -30000;
         let mut best_move_this_node = None; // Renamed to avoid conflict with `best_move` from TT
         let alpha_orig = alpha;
-        let mut moves_searched = 0;
+        let moves_searched = 0;
 
         for mv in moves {
             let mut next_board = board.clone();
@@ -386,7 +386,7 @@ impl Searcher for AlphaBetaEngine {
             let hash = board.zobrist_hash;
             let tt_move = self.tt.get_move(hash);
 
-            let moves = self.generate_moves(board, turn, tt_move, d as u8);
+            let moves = self.generate_moves(board, turn, tt_move, d);
 
             // Check time before starting a new depth
             if self.check_time() {

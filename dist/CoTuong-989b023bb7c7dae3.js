@@ -222,12 +222,12 @@ function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_
     wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___wasm_bindgen_6f3ca645d09a3199___JsValue_____(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___wasm_bindgen_6f3ca645d09a3199___JsValue_____(arg0, arg1, arg2);
-}
-
 function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_Event__Event_____(arg0, arg1, arg2) {
     wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_Event__Event_____(arg0, arg1, arg2);
+}
+
+function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___wasm_bindgen_6f3ca645d09a3199___JsValue_____(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___wasm_bindgen_6f3ca645d09a3199___JsValue_____(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke______(arg0, arg1) {
