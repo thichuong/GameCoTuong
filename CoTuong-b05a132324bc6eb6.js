@@ -218,16 +218,16 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-function wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2);
-}
-
-function wasm_bindgen__convert__closures_____invoke__h23c1c57810347815(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h23c1c57810347815(arg0, arg1, arg2);
-}
-
 function wasm_bindgen__convert__closures_____invoke__h61fb9972029c107e(arg0, arg1, arg2) {
     wasm.wasm_bindgen__convert__closures_____invoke__h61fb9972029c107e(arg0, arg1, arg2);
+}
+
+function wasm_bindgen__convert__closures_____invoke__hc655fd9f837f926c(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__hc655fd9f837f926c(arg0, arg1, arg2);
+}
+
+function wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h8781550333f72e9a(arg0, arg1, arg2, arg3) {
@@ -705,7 +705,7 @@ function __wbg_get_imports() {
     };
     imports.wbg.__wbindgen_cast_1d60ba84c0e612df = function(arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 1, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 2, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h28e761e40488ba60, wasm_bindgen__convert__closures_____invoke__h23c1c57810347815);
+        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ff409f6394318f1, wasm_bindgen__convert__closures_____invoke__hc655fd9f837f926c);
         return ret;
     };
     imports.wbg.__wbindgen_cast_672dc6952d2f152a = function(arg0, arg1) {
@@ -781,7 +781,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (typeof module_or_path === 'undefined') {
-        module_or_path = new URL('xiangqi-pwa_bg.wasm', import.meta.url);
+        module_or_path = new URL('CoTuong_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 
