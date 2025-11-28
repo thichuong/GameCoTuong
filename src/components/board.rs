@@ -278,9 +278,9 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                     background-color: {}; 
                     color: {}; 
                     border: 2px solid {};
-                    display: flex; 
-                    justify_content: center; 
-                    align_items: center; 
+                    display: grid; 
+                    place-items: center; 
+                    line-height: 1; 
                     font-size: 24px; 
                     font-family: 'KaiTi', '楷体', serif;
                     font-weight: bold;

@@ -8,8 +8,8 @@
   <link rel="manifest" href="manifest.json" />
   
 <script type="module">
-import init, * as bindings from '/xiangqi-pwa-c3ec4126ab40aecf.js';
-const wasm = await init({ module_or_path: '/xiangqi-pwa-c3ec4126ab40aecf_bg.wasm' });
+import init, * as bindings from '/xiangqi-pwa-87f86cb4d8dd9ae.js';
+const wasm = await init({ module_or_path: '/xiangqi-pwa-87f86cb4d8dd9ae_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -32,7 +32,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/xiangqi-pwa-c3ec4126ab40aecf.js" crossorigin="anonymous" integrity="sha384-lflQs+i9Ae2sT9zMrFKl+u6lBRb698V1QLuchPfzg/sGpufDTw69U70w/jvEJTj/"><link rel="preload" href="/xiangqi-pwa-c3ec4126ab40aecf_bg.wasm" crossorigin="anonymous" integrity="sha384-Bw9HEPaJJLahnzT3q49VwoJ3K4MmSeiF34eguvx8j2DA/R2ejxWf3KzcQiTKB41/" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/xiangqi-pwa-87f86cb4d8dd9ae.js" crossorigin="anonymous" integrity="sha384-lflQs+i9Ae2sT9zMrFKl+u6lBRb698V1QLuchPfzg/sGpufDTw69U70w/jvEJTj/"><link rel="preload" href="/xiangqi-pwa-87f86cb4d8dd9ae_bg.wasm" crossorigin="anonymous" integrity="sha384-KlhY0BGyQuaIwJ01vFf5LqRyaK3g1GjmUcc255R/4AAQBvcdXnURv6jvcMk8nzoU" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>
