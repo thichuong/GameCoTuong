@@ -13,6 +13,7 @@ pub struct GameState {
     pub board: Board,
     pub turn: Color,
     pub status: GameStatus,
+    pub last_move: Option<((usize, usize), (usize, usize))>,
 }
 
 impl Default for GameState {
@@ -28,6 +29,7 @@ impl GameState {
             board: Board::new(),
             turn: Color::Red,
             status: GameStatus::Playing,
+            last_move: None,
         }
     }
 
@@ -53,6 +55,7 @@ impl GameState {
 
         self.board = next_board;
         self.turn = self.turn.opposite();
+        self.last_move = Some(((from_row, from_col), (to_row, to_col)));
 
         self.update_status();
 

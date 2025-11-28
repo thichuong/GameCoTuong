@@ -9,41 +9,34 @@ pub fn BoardView(
 ) -> impl IntoView {
     let (selected, set_selected) = create_signal(Option::<(usize, usize)>::None);
 
-    let cell_size = 50; // px
-    let grid_width = 9 * cell_size;
-    let grid_height = 10 * cell_size;
-    let half_cell = cell_size / 2;
-
-    // Style for the container
-    let container_style = format!(
-        "
+    // Robust sizing:
+    // - Mobile: 96vw (almost full width)
+    // - Desktop: Constrained by height (80vh) to prevent scrolling.
+    // - Aspect Ratio: 9/10 (0.9)
+    // - Width = min(96vw, 80vh * 0.9) = min(96vw, 72vh)
+    let container_style = "
         position: relative;
-        width: {}px;
-        height: {}px;
-        background-color: #eecfa1; /* Wood color */
+        width: min(96vw, 72vh);
+        aspect-ratio: 9 / 10;
+        background-color: #eecfa1;
         border: 2px solid #5c3a1e;
         user-select: none;
-        margin: 20px;
+        margin: 0 auto;
         box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-    ",
-        grid_width, grid_height
-    );
+        box-sizing: border-box;
+    ";
 
-    // Style for the pieces layer (CSS Grid)
-    let pieces_layer_style = format!(
-        "
+    let pieces_layer_style = "
         position: absolute;
         top: 0;
         left: 0;
         width: 100%;
         height: 100%;
         display: grid;
-        grid-template-columns: repeat(9, {}px);
-        grid-template-rows: repeat(10, {}px);
+        grid-template-columns: repeat(9, 1fr);
+        grid-template-rows: repeat(10, 1fr);
         z-index: 10;
-    ",
-        cell_size, cell_size
-    );
+    ";
 
     let handle_click = move |row: usize, col: usize| {
         let state = game_state.get();
@@ -57,7 +50,6 @@ pub fn BoardView(
                 if p.color == current_turn {
                     set_selected.set(Some((row, col)));
                 } else {
-                    // If a piece of the opposite color is clicked, try to move to it
                     let mut new_state = state.clone();
                     match new_state.make_move(from_row, from_col, row, col) {
                         Ok(_) => {
@@ -70,7 +62,6 @@ pub fn BoardView(
                     }
                 }
             } else {
-                // No piece clicked, try to move to empty square
                 let mut new_state = state.clone();
                 match new_state.make_move(from_row, from_col, row, col) {
                     Ok(_) => {
@@ -90,70 +81,62 @@ pub fn BoardView(
     };
 
     view! {
-        <div style="display: flex; flex-direction: column; align-items: center;">
+        <div style="display: flex; flex-direction: column; align-items: center; width: 100%; padding: 5px; box-sizing: border-box;">
             <div style=container_style>
                 // Layer 1: SVG Board Lines
-                <svg width=grid_width height=grid_height style="position: absolute; top: 0; left: 0; z-index: 1;">
+                <svg viewBox="0 0 450 500" style="display: block; width: 100%; height: 100%; z-index: 1;">
                     // Background
-                    <rect x="0" y="0" width=grid_width height=grid_height fill="#eecfa1" />
+                    <rect x="0" y="0" width="450" height="500" fill="#eecfa1" />
 
                     // Grid Lines
                     {
+                        let cell = 50;
+                        let half = 25;
+                        let width = 450;
+
                         let mut lines = Vec::new();
-                        // Horizontal lines (10 rows)
+                        // Horizontal lines
                         for r in 0..10 {
-                            let y = r * cell_size + half_cell;
-                            let x1 = half_cell;
-                            let x2 = grid_width - half_cell;
+                            let y = r * cell + half;
+                            let x1 = half;
+                            let x2 = width - half;
                             lines.push(view! { <line x1=x1 y1=y x2=x2 y2=y stroke="#5c3a1e" stroke-width="2" /> });
                         }
 
-                        // Vertical lines (9 cols)
+                        // Vertical lines
                         for c in 0..9 {
-                            let x = c * cell_size + half_cell;
-                            // Top half (rows 0-4 in visual, but 9-5 in logic? No, let's stick to visual coordinates)
-                            // Visual row 0 is top. Logic row 9 is top.
-                            // We render from top to bottom visually.
-                            // Top half: Visual y from half_cell to 4*cell_size + half_cell
-                            let y_top_start = half_cell;
-                            let y_top_end = 4 * cell_size + half_cell;
-
-                            // Bottom half: Visual y from 5*cell_size + half_cell to end
-                            let y_bot_start = 5 * cell_size + half_cell;
-                            let y_bot_end = 9 * cell_size + half_cell;
+                            let x = c * cell + half;
+                            let y_top_start = half;
+                            let y_top_end = 4 * cell + half;
+                            let y_bot_start = 5 * cell + half;
+                            let y_bot_end = 9 * cell + half;
 
                             if c == 0 || c == 8 {
-                                // Side lines go all the way
                                 lines.push(view! { <line x1=x y1=y_top_start x2=x y2=y_bot_end stroke="#5c3a1e" stroke-width="2" /> });
                             } else {
-                                // Inner lines interrupted by river
                                 lines.push(view! { <line x1=x y1=y_top_start x2=x y2=y_top_end stroke="#5c3a1e" stroke-width="2" /> });
                                 lines.push(view! { <line x1=x y1=y_bot_start x2=x y2=y_bot_end stroke="#5c3a1e" stroke-width="2" /> });
                             }
                         }
 
-                        // Palaces (X shapes)
-                        // Top Palace (Visual rows 0-2, cols 3-5)
-                        // (3,0) to (5,2) and (5,0) to (3,2)
-                        let p_start = 3 * cell_size + half_cell;
-                        let p_end = 5 * cell_size + half_cell;
-                        let r0 = half_cell;
-                        let r2 = 2 * cell_size + half_cell;
+                        // Palaces
+                        let p_start = 3 * cell + half;
+                        let p_end = 5 * cell + half;
+                        let r0 = half;
+                        let r2 = 2 * cell + half;
                         lines.push(view! { <line x1=p_start y1=r0 x2=p_end y2=r2 stroke="#5c3a1e" stroke-width="2" /> });
                         lines.push(view! { <line x1=p_end y1=r0 x2=p_start y2=r2 stroke="#5c3a1e" stroke-width="2" /> });
 
-                        // Bottom Palace (Visual rows 7-9, cols 3-5)
-                        let r7 = 7 * cell_size + half_cell;
-                        let r9 = 9 * cell_size + half_cell;
+                        let r7 = 7 * cell + half;
+                        let r9 = 9 * cell + half;
                         lines.push(view! { <line x1=p_start y1=r7 x2=p_end y2=r9 stroke="#5c3a1e" stroke-width="2" /> });
                         lines.push(view! { <line x1=p_end y1=r7 x2=p_start y2=r9 stroke="#5c3a1e" stroke-width="2" /> });
 
                         lines
                     }
 
-                    // River Text (Optional)
-                    <text x={grid_width / 4} y={grid_height / 2 + 8} font-family="serif" font-size="24" fill="#5c3a1e" text-anchor="middle" style="opacity: 0.5;">"楚 河"</text>
-                    <text x={grid_width * 3 / 4} y={grid_height / 2 + 8} font-family="serif" font-size="24" fill="#5c3a1e" text-anchor="middle" style="opacity: 0.5;">"漢 界"</text>
+                    <text x="112.5" y="258" font-family="serif" font-size="24" fill="#5c3a1e" text-anchor="middle" style="opacity: 0.5;">"楚 河"</text>
+                    <text x="337.5" y="258" font-family="serif" font-size="24" fill="#5c3a1e" text-anchor="middle" style="opacity: 0.5;">"漢 界"</text>
                 </svg>
 
                 // Layer 2: Pieces (Interactive)
@@ -162,17 +145,28 @@ pub fn BoardView(
                         let state = game_state.get();
                         let mut cells = Vec::new();
 
-                        // Render from top (row 9) to bottom (row 0)
                         for row in (0..10).rev() {
                             for col in 0..9 {
                                 let piece = state.board.get_piece(row, col);
                                 let is_selected = selected.get() == Some((row, col));
 
+                                let is_last_move = if let Some(((from_r, from_c), (to_r, to_c))) = state.last_move {
+                                    (row == from_r && col == from_c) || (row == to_r && col == to_c)
+                                } else {
+                                    false
+                                };
+
                                 cells.push(view! {
                                     <div
-                                        style="display: flex; justify_content: center; align_items: center; cursor: pointer;"
+                                        style="display: flex; justify_content: center; align_items: center; cursor: pointer; position: relative;"
                                         on:click=move |_| handle_click(row, col)
                                     >
+                                        {if is_last_move {
+                                            view! { <div style="position: absolute; width: 100%; height: 100%; background-color: rgba(255, 255, 0, 0.4); z-index: 15; border-radius: 50%;"></div> }.into_view()
+                                        } else {
+                                            view! {}.into_view()
+                                        }}
+
                                         {render_piece(piece, is_selected)}
                                     </div>
                                 });
@@ -183,7 +177,7 @@ pub fn BoardView(
                 </div>
             </div>
 
-            <div class="status" style="margin-top: 20px; font-size: 1.2em; color: #eee;">
+            <div class="status" style="margin-top: 10px; font-size: 1.2em; color: #eee;">
                 {move || {
                     let state = game_state.get();
                     match state.status {
@@ -268,10 +262,13 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                 }
             };
 
+            // Font size: clamp(min, preferred, max)
+            // 4.5vw is good for mobile.
+            // On desktop (e.g. 1000px wide board), we want ~40px.
             view! {
                 <div style=format!("
-                    width: 40px; 
-                    height: 40px; 
+                    width: 90%; 
+                    height: 90%; 
                     border-radius: 50%; 
                     background-color: {}; 
                     color: {}; 
@@ -279,7 +276,8 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                     display: grid; 
                     place-items: center; 
                     line-height: 1; 
-                    font-size: 24px; 
+                    font-size: clamp(14px, 4.5cqw, 45px); 
+                    container-type: size;
                     font-family: 'KaiTi', '楷体', serif;
                     font-weight: bold;
                     transition: transform 0.1s;
@@ -287,15 +285,14 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                     {};
                     {}
                 ", bg_color, color, border_color, shadow, scale)>
-                    {symbol}
+                    <span style="font-size: 60cqw;">{symbol}</span>
                 </div>
             }
         }
         None => view! {
-            // Transparent placeholder for click target
             <div style=format!("
-                width: 40px; 
-                height: 40px; 
+                width: 90%; 
+                height: 90%; 
                 border-radius: 50%; 
                 opacity: 0.3;
                 background-color: {};
