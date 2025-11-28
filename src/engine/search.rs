@@ -1,12 +1,13 @@
 use crate::engine::eval::SimpleEvaluator;
-use crate::engine::{Evaluator, Move, Searcher};
+use crate::engine::{Evaluator, Move, SearchLimit, Searcher};
 use crate::logic::board::{Board, Color};
 use crate::logic::game::GameState;
 use crate::logic::rules::is_valid_move;
-
 pub struct AlphaBetaEngine {
     evaluator: SimpleEvaluator,
     nodes_searched: u32,
+    start_time: f64,
+    time_limit: Option<f64>,
 }
 
 impl AlphaBetaEngine {
@@ -14,7 +15,30 @@ impl AlphaBetaEngine {
         Self {
             evaluator: SimpleEvaluator,
             nodes_searched: 0,
+            start_time: 0.0,
+            time_limit: None,
         }
+    }
+
+    fn now() -> f64 {
+        web_sys::window()
+            .expect("should have window")
+            .performance()
+            .expect("should have performance")
+            .now()
+    }
+
+    #[allow(clippy::manual_is_multiple_of)]
+    fn check_time(&self) -> bool {
+        if let Some(limit) = self.time_limit {
+            if self.nodes_searched % 1024 == 0 {
+                let elapsed = Self::now() - self.start_time;
+                if elapsed > limit {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn alpha_beta(
@@ -24,32 +48,31 @@ impl AlphaBetaEngine {
         mut alpha: i32,
         beta: i32,
         turn: Color,
-    ) -> i32 {
+    ) -> Option<i32> {
         self.nodes_searched += 1;
 
-        if depth == 0 {
-            return self.quiescence(board, alpha, beta, turn);
+        if self.check_time() {
+            return None; // Time out
         }
 
-        // TODO: Check for game over (mate/stalemate) - simplified for now
+        if depth == 0 {
+            return Some(self.quiescence(board, alpha, beta, turn));
+        }
 
         let moves = self.generate_moves(board, turn);
         if moves.is_empty() {
             // No moves: Checkmate or Stalemate
-            // For simplicity, return large negative if checked, 0 if stalemate
-            // We need is_in_check here, but let's assume worst case for now
-            return -20000 + (10 - depth as i32); // Prefer faster mate
+            return Some(-20000 + (10 - depth as i32));
         }
 
         let mut best_score = -30000;
 
         for mv in moves {
             let mut next_board = board.clone();
-            // Execute move (simplified, assume valid)
             let piece = next_board.grid[mv.from_row][mv.from_col].take().unwrap();
             next_board.grid[mv.to_row][mv.to_col] = Some(piece);
 
-            let score = -self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
+            let score = -self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite())?;
 
             if score > best_score {
                 best_score = score;
@@ -62,11 +85,14 @@ impl AlphaBetaEngine {
             }
         }
 
-        best_score
+        Some(best_score)
     }
 
     fn quiescence(&mut self, board: &Board, mut alpha: i32, beta: i32, turn: Color) -> i32 {
         self.nodes_searched += 1;
+
+        // Q-Search doesn't check time strictly to avoid partial evaluations,
+        // but we could add it if needed. For now, let it finish.
 
         let stand_pat = if turn == Color::Red {
             self.evaluator.evaluate(board)
@@ -81,7 +107,6 @@ impl AlphaBetaEngine {
             alpha = stand_pat;
         }
 
-        // Generate ONLY captures
         let captures = self.generate_captures(board, turn);
 
         for mv in captures {
@@ -108,13 +133,11 @@ impl AlphaBetaEngine {
             for c in 0..9 {
                 if let Some(p) = board.get_piece(r, c) {
                     if p.color == turn {
-                        // Brute force all targets (optimization needed later)
                         for tr in 0..10 {
                             for tc in 0..9 {
                                 if is_valid_move(board, r, c, tr, tc, turn).is_ok() {
-                                    // Score move for ordering (Captures first)
                                     let score = if let Some(_target) = board.get_piece(tr, tc) {
-                                        100 // Capture bonus
+                                        100
                                     } else {
                                         0
                                     };
@@ -132,13 +155,11 @@ impl AlphaBetaEngine {
                 }
             }
         }
-        // Sort descending by score
         moves.sort_by(|a, b| b.score.cmp(&a.score));
         moves
     }
 
     fn generate_captures(&self, board: &Board, turn: Color) -> Vec<Move> {
-        // Similar to generate_moves but only adds if target exists
         let mut moves = Vec::new();
         for r in 0..10 {
             for c in 0..9 {
@@ -155,7 +176,7 @@ impl AlphaBetaEngine {
                                             from_col: c,
                                             to_row: tr,
                                             to_col: tc,
-                                            score: 100, // All captures are good candidates
+                                            score: 100,
                                         });
                                     }
                                 }
@@ -170,15 +191,22 @@ impl AlphaBetaEngine {
 }
 
 impl Searcher for AlphaBetaEngine {
-    fn search(&mut self, game_state: &GameState, depth: u8) -> Option<Move> {
+    fn search(&mut self, game_state: &GameState, limit: SearchLimit) -> Option<Move> {
         self.nodes_searched = 0;
+        self.start_time = Self::now();
+
+        let (max_depth, time_limit) = match limit {
+            SearchLimit::Depth(d) => (d, None),
+            SearchLimit::Time(t) => (20, Some(t as f64)), // Max depth 20 for time limit
+        };
+        self.time_limit = time_limit;
+
         let board = &game_state.board;
         let turn = game_state.turn;
 
-        // Iterative Deepening (Simplified: just run depth 1..N)
         let mut best_move = None;
 
-        for d in 1..=depth {
+        for d in 1..=max_depth {
             let mut alpha = -30000;
             let beta = 30000;
             let mut current_best_move = None;
@@ -186,23 +214,42 @@ impl Searcher for AlphaBetaEngine {
 
             let moves = self.generate_moves(board, turn);
 
+            // Check time before starting a new depth
+            if self.check_time() {
+                break;
+            }
+
+            let mut time_out = false;
+
             for mv in moves {
                 let mut next_board = board.clone();
                 let piece = next_board.grid[mv.from_row][mv.from_col].take().unwrap();
                 next_board.grid[mv.to_row][mv.to_col] = Some(piece);
 
-                let score = -self.alpha_beta(&next_board, d - 1, -beta, -alpha, turn.opposite());
-
-                if score > best_score {
-                    best_score = score;
-                    current_best_move = Some(mv);
-                }
-                if score > alpha {
-                    alpha = score;
+                if let Some(score) =
+                    self.alpha_beta(&next_board, d - 1, -beta, -alpha, turn.opposite())
+                {
+                    let score = -score;
+                    if score > best_score {
+                        best_score = score;
+                        current_best_move = Some(mv);
+                    }
+                    if score > alpha {
+                        alpha = score;
+                    }
+                } else {
+                    time_out = true;
+                    break;
                 }
             }
 
-            if let Some(mv) = current_best_move {
+            if time_out {
+                // If we timed out during a depth, don't use partial results unless we have nothing else
+                if best_move.is_none() && current_best_move.is_some() {
+                    best_move = current_best_move;
+                }
+                break;
+            } else if let Some(mv) = current_best_move {
                 best_move = Some(mv);
                 // leptos::logging::log!("Depth {}: Best move {:?} Score {} Nodes {}", d, mv, best_score, self.nodes_searched);
             }

@@ -14,10 +14,17 @@ pub struct Move {
     pub score: i32,
 }
 
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub enum SearchLimit {
+    Depth(u8),
+    Time(u64), // milliseconds
+}
+
 pub trait Evaluator {
     fn evaluate(&self, board: &Board) -> i32;
 }
 
 pub trait Searcher {
-    fn search(&mut self, game_state: &GameState, depth: u8) -> Option<Move>;
+    fn search(&mut self, game_state: &GameState, limit: SearchLimit) -> Option<Move>;
 }
