@@ -10,7 +10,8 @@ leptos = { version = "0.6", features = ["csr"] }
 console_error_panic_hook = "0.1"
 log = "0.4"
 console_log = "1"
-web-sys = { version = "0.3", features = ["Performance", "Window"] }
+web-sys = { version = "0.3", features = ["Performance", "Window", "Blob", "Url", "Document", "Element", "HtmlElement", "HtmlAnchorElement"] }
+js-sys = "0.3"
 
 [workspace.lints.clippy]
 pedantic = "warn"

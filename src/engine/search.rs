@@ -1,5 +1,5 @@
 use crate::engine::eval::SimpleEvaluator;
-use crate::engine::{Evaluator, Move, SearchLimit, Searcher};
+use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, Color};
 use crate::logic::game::GameState;
 use crate::logic::rules::is_valid_move;
@@ -191,7 +191,11 @@ impl AlphaBetaEngine {
 }
 
 impl Searcher for AlphaBetaEngine {
-    fn search(&mut self, game_state: &GameState, limit: SearchLimit) -> Option<Move> {
+    fn search(
+        &mut self,
+        game_state: &GameState,
+        limit: SearchLimit,
+    ) -> Option<(Move, SearchStats)> {
         self.nodes_searched = 0;
         self.start_time = Self::now();
 
@@ -205,6 +209,7 @@ impl Searcher for AlphaBetaEngine {
         let turn = game_state.turn;
 
         let mut best_move = None;
+        let mut final_depth = 0;
 
         for d in 1..=max_depth {
             let mut alpha = -30000;
@@ -247,14 +252,25 @@ impl Searcher for AlphaBetaEngine {
                 // If we timed out during a depth, don't use partial results unless we have nothing else
                 if best_move.is_none() && current_best_move.is_some() {
                     best_move = current_best_move;
+                    final_depth = d;
                 }
                 break;
             } else if let Some(mv) = current_best_move {
                 best_move = Some(mv);
-                // leptos::logging::log!("Depth {}: Best move {:?} Score {} Nodes {}", d, mv, best_score, self.nodes_searched);
+                final_depth = d;
             }
         }
 
-        best_move
+        let elapsed = Self::now() - self.start_time;
+        best_move.map(|mv| {
+            (
+                mv,
+                SearchStats {
+                    depth: final_depth,
+                    nodes: self.nodes_searched,
+                    time_ms: elapsed as u64,
+                },
+            )
+        })
     }
 }

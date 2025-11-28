@@ -9,11 +9,23 @@ pub enum GameStatus {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct MoveRecord {
+    pub from: (usize, usize),
+    pub to: (usize, usize),
+    pub piece: crate::logic::board::Piece,
+    pub captured: Option<crate::logic::board::Piece>,
+    pub color: Color,
+    pub note: Option<String>, // For AI stats or other info
+}
+
+#[derive(Debug, Clone)]
 pub struct GameState {
     pub board: Board,
     pub turn: Color,
     pub status: GameStatus,
     pub last_move: Option<((usize, usize), (usize, usize))>,
+    pub history: Vec<MoveRecord>,
 }
 
 impl Default for GameState {
@@ -30,6 +42,7 @@ impl GameState {
             turn: Color::Red,
             status: GameStatus::Playing,
             last_move: None,
+            history: Vec::new(),
         }
     }
 
@@ -51,9 +64,19 @@ impl GameState {
         let piece = next_board.grid[from_row][from_col]
             .take()
             .ok_or(MoveError::NoPieceAtSource)?;
+        let captured = next_board.grid[to_row][to_col].take();
         next_board.grid[to_row][to_col] = Some(piece);
 
         self.board = next_board;
+        self.history.push(MoveRecord {
+            from: (from_row, from_col),
+            to: (to_row, to_col),
+            piece,
+            captured,
+            color: self.turn,
+            note: None,
+        });
+
         self.turn = self.turn.opposite();
         self.last_move = Some(((from_row, from_col), (to_row, to_col)));
 

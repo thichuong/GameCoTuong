@@ -21,10 +21,18 @@ pub enum SearchLimit {
     Time(u64), // milliseconds
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SearchStats {
+    pub depth: u8,
+    pub nodes: u32,
+    pub time_ms: u64,
+}
+
 pub trait Evaluator {
     fn evaluate(&self, board: &Board) -> i32;
 }
 
 pub trait Searcher {
-    fn search(&mut self, game_state: &GameState, limit: SearchLimit) -> Option<Move>;
+    fn search(&mut self, game_state: &GameState, limit: SearchLimit)
+        -> Option<(Move, SearchStats)>;
 }
