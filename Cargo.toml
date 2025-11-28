@@ -1,0 +1,18 @@
+[package]
+name = "xiangqi-pwa"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+leptos = { version = "0.6", features = ["csr"] }
+console_error_panic_hook = "0.1"
+log = "0.4"
+console_log = "1"
+
+[workspace.lints.clippy]
+pedantic = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+indexing_slicing = "warn"

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Xiangqi PWA</title>
+  <link rel="manifest" href="manifest.json" />
+  <link data-trunk rel="rust" data-wasm-opt="z" />
+  <link data-trunk rel="icon" href="public/icon.png" />
+  <link data-trunk rel="copy-dir" href="public" />
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background-color: #222;
+      color: #eee;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+  </style>
+</head>
+
+<body>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
+</body>
+
+</html>
