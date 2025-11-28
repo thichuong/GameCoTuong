@@ -1,7 +1,7 @@
 use crate::engine::eval::SimpleEvaluator;
 use crate::engine::{Evaluator, Move, Searcher};
 use crate::logic::board::{Board, Color};
-use crate::logic::game::{GameState, GameStatus};
+use crate::logic::game::GameState;
 use crate::logic::rules::is_valid_move;
 
 pub struct AlphaBetaEngine {
@@ -22,7 +22,7 @@ impl AlphaBetaEngine {
         board: &Board,
         depth: u8,
         mut alpha: i32,
-        mut beta: i32,
+        beta: i32,
         turn: Color,
     ) -> i32 {
         self.nodes_searched += 1;
@@ -113,7 +113,7 @@ impl AlphaBetaEngine {
                             for tc in 0..9 {
                                 if is_valid_move(board, r, c, tr, tc, turn).is_ok() {
                                     // Score move for ordering (Captures first)
-                                    let score = if let Some(target) = board.get_piece(tr, tc) {
+                                    let score = if let Some(_target) = board.get_piece(tr, tc) {
                                         100 // Capture bonus
                                     } else {
                                         0
