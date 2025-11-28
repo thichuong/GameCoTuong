@@ -10,6 +10,8 @@ pub struct AlphaBetaEngine {
     evaluator: SimpleEvaluator,
     tt: TranspositionTable,
     killer_moves: [[Option<Move>; 2]; 64], // Max depth 64
+    history_stack: Vec<u64>,
+    history_table: [[i32; 90]; 90], // [from][to]
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
@@ -21,6 +23,8 @@ impl AlphaBetaEngine {
             evaluator: SimpleEvaluator,
             tt: TranspositionTable::new(1), // 1MB (approx 65536 entries)
             killer_moves: [[None; 2]; 64],
+            history_stack: Vec::with_capacity(64),
+            history_table: [[0; 90]; 90],
             nodes_searched: 0,
             start_time: 0.0,
             time_limit: None,
@@ -71,17 +75,41 @@ impl AlphaBetaEngine {
         self.nodes_searched += 1;
 
         if self.check_time() {
+            // If we timeout, we might have pushed to stack?
+            // No, check_time is called at start.
+            // But if we recurse, we pushed.
+            // If check_time returns true, we return None.
+            // The caller (parent alpha_beta) will see None and propagate it.
+            // The parent MUST pop the stack if it pushed.
+            // My implementation:
+            // self.history_stack.push(hash);
+            // ...
+            // score = self.alpha_beta(...)
+            // if score is None -> return None.
+            // Wait, if I return None here, I haven't popped!
+            // I need to pop if I return None?
+            // No, `check_time` is at the very beginning, BEFORE push.
+            // So it's fine.
             return None; // Time out
         }
 
-        // TT Probe
+        // Repetition Check
         let hash = board.zobrist_hash;
+        if self.history_stack.contains(&hash) {
+            return Some(0);
+        }
+        self.history_stack.push(hash);
+
+        // TT Probe
         if let Some(score) = self.tt.probe(hash, depth, alpha, beta) {
+            self.history_stack.pop();
             return Some(score);
         }
 
         if depth == 0 {
-            return Some(self.quiescence(board, alpha, beta, turn));
+            let score = self.quiescence(board, alpha, beta, turn);
+            self.history_stack.pop();
+            return Some(score);
         }
 
         let mut best_move = None;
@@ -92,6 +120,7 @@ impl AlphaBetaEngine {
         let moves = self.generate_moves(board, turn, best_move, depth);
         if moves.is_empty() {
             // No moves: Checkmate or Stalemate
+            self.history_stack.pop();
             return Some(-20000 + (10 - depth as i32));
         }
 
@@ -107,16 +136,21 @@ impl AlphaBetaEngine {
             let mut score;
             if moves_searched == 0 {
                 // First move: Full window search
-                score = -self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite())?;
+                let val = self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
+                if val.is_none() {
+                    self.history_stack.pop();
+                    return None;
+                }
+                score = -val.unwrap();
             } else {
                 // Late moves: Null window search (PVS)
-                score = -self.alpha_beta(
-                    &next_board,
-                    depth - 1,
-                    -alpha - 1,
-                    -alpha,
-                    turn.opposite(),
-                )?;
+                let val =
+                    self.alpha_beta(&next_board, depth - 1, -alpha - 1, -alpha, turn.opposite());
+                if val.is_none() {
+                    self.history_stack.pop();
+                    return None;
+                }
+                score = -val.unwrap();
 
                 if score > alpha && score < beta {
                     // Fail high in null window, re-search with full window
@@ -126,8 +160,13 @@ impl AlphaBetaEngine {
                     // If score >= beta, we cutoff.
                     // If alpha < score < beta, we need exact score.
                     // Re-search:
-                    score =
-                        -self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite())?;
+                    let val =
+                        self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
+                    if val.is_none() {
+                        self.history_stack.pop();
+                        return None;
+                    }
+                    score = -val.unwrap();
                     // Use the re-search score if it's valid (it should be)
                     // But wait, if re_score returns None (timeout), we should propagate it.
                     // The ? operator handles None.
@@ -162,9 +201,13 @@ impl AlphaBetaEngine {
             }
             if alpha >= beta {
                 // Killer Heuristic: Store quiet move that caused cutoff
-                // A move is considered quiet if it's not a capture (score < 1000 for MVV-LVA)
-                if mv.score < 1000 {
+                // A move is considered quiet if it's not a capture (score < 1_000_000)
+                if mv.score < 1_000_000 {
                     self.store_killer(depth, mv);
+                    // History Heuristic
+                    let from = mv.from_row * 9 + mv.from_col;
+                    let to = mv.to_row * 9 + mv.to_col;
+                    self.history_table[from][to] += (depth as i32) * (depth as i32);
                 }
                 break; // Beta cutoff
             }
@@ -181,6 +224,7 @@ impl AlphaBetaEngine {
         self.tt
             .store(hash, depth, best_score, flag, best_move_this_node);
 
+        self.history_stack.pop();
         Some(best_score)
     }
 
@@ -243,7 +287,7 @@ impl AlphaBetaEngine {
                         for tr in 0..10 {
                             for tc in 0..9 {
                                 if is_valid_move(board, r, c, tr, tc, turn).is_ok() {
-                                    let mut score = 0;
+                                    let mut score;
 
                                     // Check if this is the hash move
                                     let is_hash_move = if let Some(bm) = best_move {
@@ -267,14 +311,22 @@ impl AlphaBetaEngine {
                                     });
 
                                     if is_hash_move {
-                                        score = 20000;
+                                        score = 2_000_000;
                                     } else if let Some(target) = board.get_piece(tr, tc) {
                                         // MVV-LVA
                                         let victim_val = get_piece_value(target.piece_type);
                                         let attacker_val = get_piece_value(p.piece_type);
-                                        score = 1000 + victim_val - (attacker_val / 10);
+                                        score = 1_000_000 + victim_val - (attacker_val / 10);
                                     } else if is_killer_move {
-                                        score = 15000;
+                                        score = 900_000;
+                                    } else {
+                                        // History Heuristic
+                                        let from = r * 9 + c;
+                                        let to = tr * 9 + tc;
+                                        score = self.history_table[from][to];
+                                        if score > 800_000 {
+                                            score = 800_000;
+                                        }
                                     }
 
                                     moves.push(Move {
@@ -363,6 +415,7 @@ impl Searcher for AlphaBetaEngine {
     ) -> Option<(Move, SearchStats)> {
         self.nodes_searched = 0;
         self.start_time = Self::now();
+        self.history_stack.clear();
 
         let (max_depth, time_limit) = match limit {
             SearchLimit::Depth(d) => (d, None),
