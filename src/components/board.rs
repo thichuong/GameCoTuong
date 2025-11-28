@@ -289,7 +289,7 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                     {};
                     {}
                 ", bg_color, color, border_color, shadow, scale)>
-                    <span style="margin-top: -4px;">{symbol}</span>
+                    {symbol}
                 </div>
             }
         }
