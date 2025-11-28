@@ -4,6 +4,10 @@ use crate::logic::game::GameState;
 pub mod eval;
 pub mod eval_constants;
 pub mod search;
+pub mod zobrist;
+
+#[cfg(test)]
+mod bench_test;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Move {

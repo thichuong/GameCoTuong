@@ -1,10 +1,13 @@
 use crate::engine::eval::SimpleEvaluator;
+use crate::engine::eval_constants::*;
+use crate::engine::zobrist::{TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
-use crate::logic::board::{Board, Color};
+use crate::logic::board::{Board, Color, PieceType};
 use crate::logic::game::GameState;
 use crate::logic::rules::is_valid_move;
 pub struct AlphaBetaEngine {
     evaluator: SimpleEvaluator,
+    tt: TranspositionTable,
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
@@ -14,6 +17,7 @@ impl AlphaBetaEngine {
     pub fn new() -> Self {
         Self {
             evaluator: SimpleEvaluator,
+            tt: TranspositionTable::new(1), // 1MB (approx 65536 entries)
             nodes_searched: 0,
             start_time: 0.0,
             time_limit: None,
@@ -55,27 +59,40 @@ impl AlphaBetaEngine {
             return None; // Time out
         }
 
+        // TT Probe
+        let hash = board.zobrist_hash;
+        if let Some(score) = self.tt.probe(hash, depth, alpha, beta) {
+            return Some(score);
+        }
+
         if depth == 0 {
             return Some(self.quiescence(board, alpha, beta, turn));
         }
 
-        let moves = self.generate_moves(board, turn);
+        let mut best_move = None;
+        if let Some(mv) = self.tt.get_move(hash) {
+            best_move = Some(mv);
+        }
+
+        let moves = self.generate_moves(board, turn, best_move);
         if moves.is_empty() {
             // No moves: Checkmate or Stalemate
             return Some(-20000 + (10 - depth as i32));
         }
 
         let mut best_score = -30000;
+        let mut best_move = None;
+        let alpha_orig = alpha;
 
         for mv in moves {
             let mut next_board = board.clone();
-            let piece = next_board.grid[mv.from_row][mv.from_col].take().unwrap();
-            next_board.grid[mv.to_row][mv.to_col] = Some(piece);
+            next_board.apply_move(&mv, turn);
 
             let score = -self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite())?;
 
             if score > best_score {
                 best_score = score;
+                best_move = Some(mv);
             }
             if score > alpha {
                 alpha = score;
@@ -84,6 +101,16 @@ impl AlphaBetaEngine {
                 break; // Beta cutoff
             }
         }
+
+        // TT Store
+        let flag = if best_score <= alpha_orig {
+            TTFlag::UpperBound
+        } else if best_score >= beta {
+            TTFlag::LowerBound
+        } else {
+            TTFlag::Exact
+        };
+        self.tt.store(hash, depth, best_score, flag, best_move);
 
         Some(best_score)
     }
@@ -111,8 +138,7 @@ impl AlphaBetaEngine {
 
         for mv in captures {
             let mut next_board = board.clone();
-            let piece = next_board.grid[mv.from_row][mv.from_col].take().unwrap();
-            next_board.grid[mv.to_row][mv.to_col] = Some(piece);
+            next_board.apply_move(&mv, turn);
 
             let score = -self.quiescence(&next_board, -beta, -alpha, turn.opposite());
 
@@ -127,7 +153,7 @@ impl AlphaBetaEngine {
         alpha
     }
 
-    fn generate_moves(&self, board: &Board, turn: Color) -> Vec<Move> {
+    fn generate_moves(&self, board: &Board, turn: Color, best_move: Option<Move>) -> Vec<Move> {
         let mut moves = Vec::new();
         for r in 0..10 {
             for c in 0..9 {
@@ -136,11 +162,29 @@ impl AlphaBetaEngine {
                         for tr in 0..10 {
                             for tc in 0..9 {
                                 if is_valid_move(board, r, c, tr, tc, turn).is_ok() {
-                                    let score = if let Some(_target) = board.get_piece(tr, tc) {
-                                        100
+                                    let mut score = 0;
+
+                                    // Check if this is the hash move
+                                    let is_hash_move = if let Some(bm) = best_move {
+                                        bm.from_row == r
+                                            && bm.from_col == c
+                                            && bm.to_row == tr
+                                            && bm.to_col == tc
                                     } else {
-                                        0
+                                        false
                                     };
+
+                                    if is_hash_move {
+                                        score = 20000;
+                                    } else if let Some(target) = board.get_piece(tr, tc) {
+                                        // MVV-LVA
+                                        // Victim value - Attacker value (small offset)
+                                        // We want to prioritize capturing high value pieces with low value pieces.
+                                        let victim_val = get_piece_value(target.piece_type);
+                                        let attacker_val = get_piece_value(p.piece_type);
+                                        score = 1000 + victim_val - (attacker_val / 10);
+                                    }
+
                                     moves.push(Move {
                                         from_row: r,
                                         from_col: c,
@@ -171,12 +215,16 @@ impl AlphaBetaEngine {
                                     if target.color != turn
                                         && is_valid_move(board, r, c, tr, tc, turn).is_ok()
                                     {
+                                        let victim_val = get_piece_value(target.piece_type);
+                                        let attacker_val = get_piece_value(p.piece_type);
+                                        let score = 1000 + victim_val - (attacker_val / 10);
+
                                         moves.push(Move {
                                             from_row: r,
                                             from_col: c,
                                             to_row: tr,
                                             to_col: tc,
-                                            score: 100,
+                                            score,
                                         });
                                     }
                                 }
@@ -186,7 +234,20 @@ impl AlphaBetaEngine {
                 }
             }
         }
+        moves.sort_by(|a, b| b.score.cmp(&a.score));
         moves
+    }
+}
+
+fn get_piece_value(pt: PieceType) -> i32 {
+    match pt {
+        PieceType::General => VAL_KING,
+        PieceType::Chariot => VAL_ROOK,
+        PieceType::Cannon => VAL_CANNON,
+        PieceType::Horse => VAL_HORSE,
+        PieceType::Elephant => VAL_ELEPHANT,
+        PieceType::Advisor => VAL_ADVISOR,
+        PieceType::Soldier => VAL_PAWN,
     }
 }
 
@@ -217,7 +278,11 @@ impl Searcher for AlphaBetaEngine {
             let mut current_best_move = None;
             let mut best_score = -30000;
 
-            let moves = self.generate_moves(board, turn);
+            // Try to get best move from TT for this depth (or previous)
+            let hash = board.zobrist_hash;
+            let tt_move = self.tt.get_move(hash);
+
+            let moves = self.generate_moves(board, turn, tt_move);
 
             // Check time before starting a new depth
             if self.check_time() {
@@ -228,8 +293,7 @@ impl Searcher for AlphaBetaEngine {
 
             for mv in moves {
                 let mut next_board = board.clone();
-                let piece = next_board.grid[mv.from_row][mv.from_col].take().unwrap();
-                next_board.grid[mv.to_row][mv.to_col] = Some(piece);
+                next_board.apply_move(&mv, turn);
 
                 if let Some(score) =
                     self.alpha_beta(&next_board, d - 1, -beta, -alpha, turn.opposite())

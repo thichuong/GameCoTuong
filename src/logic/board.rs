@@ -1,3 +1,6 @@
+use crate::engine::zobrist::ZobristKeys;
+use crate::engine::Move;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     Red,
@@ -36,6 +39,7 @@ pub struct Board {
     // 10 rows (0..9), 9 columns (0..8)
     // (0,0) is bottom-left from Red's perspective (if Red is at bottom)
     pub grid: [[Option<Piece>; 9]; 10],
+    pub zobrist_hash: u64,
 }
 
 impl Default for Board {
@@ -49,8 +53,10 @@ impl Board {
     pub fn new() -> Self {
         let mut board = Self {
             grid: [[None; 9]; 10],
+            zobrist_hash: 0,
         };
         board.setup_initial_position();
+        board.zobrist_hash = board.calculate_initial_hash();
         board
     }
 
@@ -114,5 +120,51 @@ impl Board {
             return None;
         }
         self.grid[row][col]
+    }
+
+    pub fn calculate_initial_hash(&self) -> u64 {
+        let keys = ZobristKeys::new();
+        let mut hash = 0;
+        for r in 0..10 {
+            for c in 0..9 {
+                if let Some(piece) = self.grid[r][c] {
+                    hash ^= keys.get_piece_key(piece.piece_type, piece.color, r, c);
+                }
+            }
+        }
+        // We assume Red starts, so we don't XOR side_key initially if Red is 0 and side_key is for Black?
+        // Actually, usually we XOR side_key if it's Black's turn.
+        // Let's assume Red starts and hash starts without side_key.
+        hash
+    }
+
+    pub fn apply_move(&mut self, mv: &Move, _turn: Color) {
+        let keys = ZobristKeys::new(); // In a real engine, we'd pass this in or have it static.
+                                       // Since we made it cheap to create (just constants/XorShift), it's okay-ish.
+                                       // But ideally we should have a static instance.
+                                       // For now, let's just create it. It's fast enough.
+
+        // 1. Remove piece from source
+        if let Some(piece) = self.grid[mv.from_row][mv.from_col] {
+            self.zobrist_hash ^=
+                keys.get_piece_key(piece.piece_type, piece.color, mv.from_row, mv.from_col);
+
+            // 2. Remove captured piece (if any)
+            if let Some(captured) = self.grid[mv.to_row][mv.to_col] {
+                self.zobrist_hash ^=
+                    keys.get_piece_key(captured.piece_type, captured.color, mv.to_row, mv.to_col);
+            }
+
+            // 3. Place piece at destination
+            self.zobrist_hash ^=
+                keys.get_piece_key(piece.piece_type, piece.color, mv.to_row, mv.to_col);
+
+            // Update grid
+            self.grid[mv.to_row][mv.to_col] = Some(piece);
+            self.grid[mv.from_row][mv.from_col] = None;
+        }
+
+        // 4. Switch turn hash
+        self.zobrist_hash ^= keys.side_key;
     }
 }
