@@ -1,6 +1,7 @@
 use crate::logic::board::{Color, Piece, PieceType};
 use crate::logic::game::GameState;
 use leptos::*;
+use std::time::Duration;
 
 #[component]
 pub fn BoardView(
@@ -8,6 +9,21 @@ pub fn BoardView(
     set_game_state: WriteSignal<GameState>,
 ) -> impl IntoView {
     let (selected, set_selected) = create_signal(Option::<(usize, usize)>::None);
+    let (anim_dest, set_anim_dest) = create_signal(Option::<(usize, usize)>::None);
+
+    // Trigger animation only when a move happens
+    create_effect(move |_| {
+        let state = game_state.get();
+        if let Some((_, (tr, tc))) = state.last_move {
+            set_anim_dest.set(Some((tr, tc)));
+            set_timeout(
+                move || {
+                    set_anim_dest.set(None);
+                },
+                Duration::from_millis(500),
+            );
+        }
+    });
 
     // Robust sizing:
     // - Mobile: 96vw (almost full width)
@@ -190,6 +206,8 @@ pub fn BoardView(
                                     false
                                 };
 
+                                let should_animate = anim_dest.get() == Some((row, col));
+
                                 cells.push(view! {
                                     <div
                                         style="display: flex; justify_content: center; align_items: center; cursor: pointer; position: relative;"
@@ -201,7 +219,7 @@ pub fn BoardView(
                                             view! {}.into_view()
                                         }}
 
-                                        {render_piece(piece, is_selected)}
+                                        {render_piece(piece, is_selected, should_animate)}
                                     </div>
                                 });
                             }
@@ -225,7 +243,7 @@ pub fn BoardView(
     }
 }
 
-fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
+fn render_piece(piece: Option<Piece>, is_selected: bool, is_last_move_dest: bool) -> impl IntoView {
     match piece {
         Some(p) => {
             let (color, bg_color, border_color) = match p.color {
@@ -296,11 +314,35 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                 }
             };
 
-            // Font size: clamp(min, preferred, max)
-            // 4.5vw is good for mobile.
-            // On desktop (e.g. 1000px wide board), we want ~40px.
+            // Animation class for slam effect
+            let anim_class = if is_last_move_dest { "piece-slam" } else { "" };
+
             view! {
-                <div style=format!("
+                <style>
+                    "
+                    .piece-hover {
+                        transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+                    }
+                    .piece-hover:hover {
+                        transform: translateY(-5px) scale(1.1) !important;
+                        box-shadow: 0 15px 25px rgba(0,0,0,0.4) !important;
+                        z-index: 100 !important;
+                    }
+                    
+                    @keyframes slam {
+                        0% { transform: scale(1.5); opacity: 0; }
+                        50% { transform: scale(1.1); opacity: 1; }
+                        100% { transform: scale(1); }
+                    }
+                    
+                    .piece-slam {
+                        animation: slam 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                    }
+                    "
+                </style>
+                <div
+                    class=format!("piece-hover {}", anim_class)
+                    style=format!("
                     width: 90%; 
                     height: 90%; 
                     border-radius: 50%; 
@@ -314,7 +356,6 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                     container-type: size;
                     font-family: 'KaiTi', '楷体', serif;
                     font-weight: bold;
-                    transition: transform 0.1s;
                     z-index: 20;
                     {};
                     {}
@@ -322,6 +363,7 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                     <span style="font-size: 60cqw;">{symbol}</span>
                 </div>
             }
+            .into_view()
         }
         None => view! {
             <div style=format!("
@@ -331,6 +373,7 @@ fn render_piece(piece: Option<Piece>, is_selected: bool) -> impl IntoView {
                 opacity: 0.3;
                 background-color: {};
             ", if is_selected { "#a8e6cf" } else { "transparent" })></div> 
-        },
+        }
+        .into_view(),
     }
 }

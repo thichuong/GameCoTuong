@@ -18,6 +18,7 @@ enum Difficulty {
 pub fn App() -> impl IntoView {
     let (game_state, set_game_state) = create_signal(GameState::new());
     let (difficulty, set_difficulty) = create_signal(Difficulty::Easy);
+    let (is_thinking, set_is_thinking) = create_signal(false);
 
     // AI Move Effect
     create_effect(move |_| {
@@ -25,6 +26,7 @@ pub fn App() -> impl IntoView {
         let diff = difficulty.get();
 
         if state.turn == Color::Black && state.status == GameStatus::Playing {
+            set_is_thinking.set(true);
             set_timeout(
                 move || {
                     let mut current_state = game_state.get();
@@ -55,6 +57,7 @@ pub fn App() -> impl IntoView {
                             }
                         }
                     }
+                    set_is_thinking.set(false);
                 },
                 Duration::from_millis(100),
             );
@@ -219,6 +222,24 @@ pub fn App() -> impl IntoView {
                 select:hover, button:hover {
                     background: #555;
                 }
+
+                .thinking-indicator {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 10px;
+                    color: #a8e6cf;
+                    font-weight: bold;
+                    margin: 10px 0;
+                    height: 24px;
+                    animation: pulse 1.5s infinite;
+                }
+
+                @keyframes pulse {
+                    0% { opacity: 0.6; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.6; }
+                }
                 "
             </style>
 
@@ -245,6 +266,20 @@ pub fn App() -> impl IntoView {
                 </div>
                 <button on:click=export_csv>"Xuất CSV"</button>
             </div>
+
+            {move || {
+                let style = if is_thinking.get() {
+                    "visibility: visible;"
+                } else {
+                    "visibility: hidden;"
+                };
+                view! {
+                    <div class="thinking-indicator" style=style>
+                        <span>"Máy đang nghĩ..."</span>
+                        <div style="width: 10px; height: 10px; background: #a8e6cf; border-radius: 50%; display: inline-block;"></div>
+                    </div>
+                }
+            }}
 
             <div class="game-layout">
                 // Log Panel (Order 1 in HTML, but reversed on mobile to be bottom)
