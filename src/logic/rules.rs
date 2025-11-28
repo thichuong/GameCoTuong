@@ -226,6 +226,7 @@ fn validate_advisor(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_elephant(
     board: &Board,
     color: Color,

@@ -9,7 +9,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <div class="game-container">
-            <h1>"Xiangqi PWA"</h1>
+            <h1>"Cờ Tướng"</h1>
             <BoardView game_state=game_state set_game_state=set_game_state />
         </div>
     }

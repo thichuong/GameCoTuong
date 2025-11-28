@@ -4,12 +4,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Xiangqi PWA</title>
+  <title>Cờ Tướng</title>
   <link rel="manifest" href="manifest.json" />
   
 <script type="module">
-import init, * as bindings from '/xiangqi-pwa-d58b1e88925a6919.js';
-const wasm = await init({ module_or_path: '/xiangqi-pwa-d58b1e88925a6919_bg.wasm' });
+import init, * as bindings from '/xiangqi-pwa-aef493c387e01944.js';
+const wasm = await init({ module_or_path: '/xiangqi-pwa-aef493c387e01944_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -32,7 +32,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/xiangqi-pwa-d58b1e88925a6919.js" crossorigin="anonymous" integrity="sha384-mVdy6kPzIkP5+Rf49mZUa60tMUk89f81VfAL09Kd7f0qtH1NiCliQE90ezI/q2r/"><link rel="preload" href="/xiangqi-pwa-d58b1e88925a6919_bg.wasm" crossorigin="anonymous" integrity="sha384-dBb6wenCFaYegnUaKdCm0vAPd7bX8KbZm7I9+BXH49XmO2+Ma2qQVYYLTtvOvWgk" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/xiangqi-pwa-aef493c387e01944.js" crossorigin="anonymous" integrity="sha384-UFcSgQPwhYPdVZQmR9Y3HH7ZgLuAGB3qcl5JBqFGXt4tROXBz4Xx4EpgVnyZbMT9"><link rel="preload" href="/xiangqi-pwa-aef493c387e01944_bg.wasm" crossorigin="anonymous" integrity="sha384-NwaTRdsFAQwC6vyjmpCaFwY4HEklnu9KIuxqGnRoP41lPxvW5WYi83EIotMgczUU" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>
