@@ -316,10 +316,8 @@ fn validate_cannon(
         if obstacles > 0 {
             return Err(MoveError::BlockedPath);
         }
-    } else {
-        if obstacles != 1 {
-            return Err(MoveError::BlockedPath);
-        }
+    } else if obstacles != 1 {
+        return Err(MoveError::BlockedPath);
     }
     Ok(())
 }
@@ -347,16 +345,14 @@ fn validate_soldier(
         if d_col != 0 || row_diff != forward {
             return Err(MoveError::InvalidMovePattern);
         }
-    } else {
-        if d_row + d_col != 1 {
-            return Err(MoveError::InvalidMovePattern);
-        }
+    } else if d_row + d_col != 1 {
+        return Err(MoveError::InvalidMovePattern);
     }
     Ok(())
 }
 
 fn is_in_palace(color: Color, row: usize, col: usize) -> bool {
-    if col < 3 || col > 5 {
+    if !(3..=5).contains(&col) {
         return false;
     }
     match color {
