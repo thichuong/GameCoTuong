@@ -135,6 +135,40 @@ pub fn BoardView(
                         lines
                     }
 
+                    // Last Move Trajectory Line
+                    {move || {
+                        let state = game_state.get();
+                        if let Some(((fr, fc), (tr, tc))) = state.last_move {
+                            let cell = 50;
+                            let half = 25;
+
+                            // Map logic coordinates to visual coordinates
+                            // Logic Row 0 -> Visual Y = 475 (Bottom)
+                            // Logic Row 9 -> Visual Y = 25 (Top)
+                            let x1 = fc * cell + half;
+                            let y1 = (9 - fr) * cell + half;
+                            let x2 = tc * cell + half;
+                            let y2 = (9 - tr) * cell + half;
+
+                            view! {
+                                <line
+                                    x1=x1 y1=y1
+                                    x2=x2 y2=y2
+                                    stroke="rgba(255, 165, 0, 0.6)"
+                                    stroke-width="6"
+                                    stroke-linecap="round"
+                                    style="pointer-events: none;"
+                                />
+                                // Optional: Dot at start
+                                <circle cx=x1 cy=y1 r="5" fill="rgba(255, 165, 0, 0.6)" />
+                                // Optional: Dot at end
+                                <circle cx=x2 cy=y2 r="5" fill="rgba(255, 165, 0, 0.6)" />
+                            }.into_view()
+                        } else {
+                            view!{}.into_view()
+                        }
+                    }}
+
                     <text x="112.5" y="258" font-family="serif" font-size="24" fill="#5c3a1e" text-anchor="middle" style="opacity: 0.5;">"楚 河"</text>
                     <text x="337.5" y="258" font-family="serif" font-size="24" fill="#5c3a1e" text-anchor="middle" style="opacity: 0.5;">"漢 界"</text>
                 </svg>
