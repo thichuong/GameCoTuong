@@ -82,11 +82,9 @@ pub fn BoardView(
                     }
                 }
             }
-        } else {
-            if let Some(p) = clicked_piece {
-                if p.color == current_turn {
-                    set_selected.set(Some((row, col)));
-                }
+        } else if let Some(p) = clicked_piece {
+            if p.color == current_turn {
+                set_selected.set(Some((row, col)));
             }
         }
     };

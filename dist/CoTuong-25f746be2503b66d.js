@@ -772,15 +772,15 @@ function __wbg_get_imports() {
         const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen_6f3ca645d09a3199___closure__destroy___dyn_core_46f35e066d77df9d___ops__function__FnMut__web_sys_b5aa4f4ccec7c833___features__gen_Event__Event____Output_______, wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_b5aa4f4ccec7c833___features__gen_Event__Event_____);
         return ret;
     };
-    imports.wbg.__wbindgen_cast_37abf4024aab3b73 = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 36, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 21, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen_6f3ca645d09a3199___closure__destroy___dyn_core_46f35e066d77df9d___ops__function__FnMut__web_sys_b5aa4f4ccec7c833___features__gen_MouseEvent__MouseEvent____Output_______, wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_b5aa4f4ccec7c833___features__gen_MouseEvent__MouseEvent_____);
-        return ret;
-    };
     imports.wbg.__wbindgen_cast_7e9c58eeb11b0a6f = function(arg0, arg1) {
         var v0 = getCachedStringFromWasm0(arg0, arg1);
         // Cast intrinsic for `Ref(CachedString) -> Externref`.
         const ret = v0;
+        return ret;
+    };
+    imports.wbg.__wbindgen_cast_95665164daa2408a = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 42, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen_6f3ca645d09a3199___closure__destroy___dyn_core_46f35e066d77df9d___ops__function__FnMut__web_sys_b5aa4f4ccec7c833___features__gen_MouseEvent__MouseEvent____Output_______, wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_b5aa4f4ccec7c833___features__gen_MouseEvent__MouseEvent_____);
         return ret;
     };
     imports.wbg.__wbindgen_cast_ab10518eebecf9a3 = function(arg0, arg1) {
@@ -845,7 +845,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (typeof module_or_path === 'undefined') {
-        module_or_path = new URL('xiangqi-pwa_bg.wasm', import.meta.url);
+        module_or_path = new URL('CoTuong_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 
