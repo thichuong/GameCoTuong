@@ -95,7 +95,7 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
-        <div class="game-container" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-height: 100vh; background-color: #222; color: #eee;">
+        <div class="game-container" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-height: 100vh; background-color: #222; color: #eee; display: flex; flex-direction: column; align-items: center;">
             <style>
                 "
                 .game-layout {
@@ -222,7 +222,7 @@ pub fn App() -> impl IntoView {
                 "
             </style>
 
-            <h1 style="margin: 20px 0; color: #f0d9b5; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">"Cờ Tướng"</h1>
+            <h1 style="margin: 20px 0; color: #f0d9b5; text-shadow: 0 2px 4px rgba(0,0,0,0.5); text-align: center;">"Cờ Tướng"</h1>
 
             <div class="controls-area">
                 <div>
