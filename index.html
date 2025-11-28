@@ -4,12 +4,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Xiangqi PWA</title>
+  <title>Cờ Tướng</title>
   <link rel="manifest" href="manifest.json" />
   
 <script type="module">
-import init, * as bindings from '/GameCoTuong/xiangqi-pwa-b46bcd692acca42.js';
-const wasm = await init({ module_or_path: '/GameCoTuong/xiangqi-pwa-b46bcd692acca42_bg.wasm' });
+import init, * as bindings from '/GameCoTuong/xiangqi-pwa-7b5e2b46b0ce012c.js';
+const wasm = await init({ module_or_path: '/GameCoTuong/xiangqi-pwa-7b5e2b46b0ce012c_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -32,7 +32,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/GameCoTuong/xiangqi-pwa-b46bcd692acca42.js" crossorigin="anonymous" integrity="sha384-5kEPq43OKZp3KP5PrnuTDVpUHspWcKYbdKqGGHmIDMOuXXGdqEODW5oI/jmnOJJl"><link rel="preload" href="/GameCoTuong/xiangqi-pwa-b46bcd692acca42_bg.wasm" crossorigin="anonymous" integrity="sha384-OA+bxLHJFmECMMGZ5+Owscb6GzapQchuC2c9CqSsFEATIMVh2VjOxam8XTwDgCU1" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/GameCoTuong/xiangqi-pwa-7b5e2b46b0ce012c.js" crossorigin="anonymous" integrity="sha384-+dmTusy5xwMy2zIdji9P+ylNXH2oVHka/UFTY8Ha2gvvM7hhr4wY3dV+z/6j6sD4"><link rel="preload" href="/GameCoTuong/xiangqi-pwa-7b5e2b46b0ce012c_bg.wasm" crossorigin="anonymous" integrity="sha384-opXnCJZTlulghdocFyyI5q1NVqfVlEiAqmW/o+NLNUx+jv/pg+3sG7EJTP0RMuzy" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>
