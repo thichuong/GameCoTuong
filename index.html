@@ -8,8 +8,8 @@
   <link rel="manifest" href="manifest.json" />
   
 <script type="module">
-import init, * as bindings from '/GameCoTuong/xiangqi-pwa-7b5e2b46b0ce012c.js';
-const wasm = await init({ module_or_path: '/GameCoTuong/xiangqi-pwa-7b5e2b46b0ce012c_bg.wasm' });
+import init, * as bindings from '/GameCoTuong/xiangqi-pwa-e774e147a65427f7.js';
+const wasm = await init({ module_or_path: '/GameCoTuong/xiangqi-pwa-e774e147a65427f7_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -32,7 +32,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/GameCoTuong/xiangqi-pwa-7b5e2b46b0ce012c.js" crossorigin="anonymous" integrity="sha384-+dmTusy5xwMy2zIdji9P+ylNXH2oVHka/UFTY8Ha2gvvM7hhr4wY3dV+z/6j6sD4"><link rel="preload" href="/GameCoTuong/xiangqi-pwa-7b5e2b46b0ce012c_bg.wasm" crossorigin="anonymous" integrity="sha384-opXnCJZTlulghdocFyyI5q1NVqfVlEiAqmW/o+NLNUx+jv/pg+3sG7EJTP0RMuzy" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/GameCoTuong/xiangqi-pwa-e774e147a65427f7.js" crossorigin="anonymous" integrity="sha384-oPQVtwH37HaF9YeFivjsV3xcyBlcevkxDj2vSEPdkbhUpryDWHTMpwFNh/XscIxV"><link rel="preload" href="/GameCoTuong/xiangqi-pwa-e774e147a65427f7_bg.wasm" crossorigin="anonymous" integrity="sha384-GUv+LPVxWXKghBfiw8j2gVQZyOXPnoXNNkzC3NH2yiF+Dg9Xqg6MmUhqoLGsYfI9" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>
