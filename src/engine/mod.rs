@@ -3,13 +3,14 @@ use crate::logic::game::GameState;
 
 pub mod eval;
 pub mod eval_constants;
+pub mod move_list;
 pub mod search;
 pub mod zobrist;
 
 #[cfg(test)]
 mod bench_test;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Move {
     pub from_row: usize,
     pub from_col: usize,

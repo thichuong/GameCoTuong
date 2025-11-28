@@ -218,20 +218,20 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke______(arg0, arg1) {
-    wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke______(arg0, arg1);
-}
-
-function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_Event__Event_____(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_Event__Event_____(arg0, arg1, arg2);
+function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___wasm_bindgen_6f3ca645d09a3199___JsValue_____(arg0, arg1, arg2) {
     wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___wasm_bindgen_6f3ca645d09a3199___JsValue_____(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2);
+function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_Event__Event_____(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___web_sys_123a3de906415ede___features__gen_Event__Event_____(arg0, arg1, arg2);
+}
+
+function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke______(arg0, arg1) {
+    wasm.wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke______(arg0, arg1);
 }
 
 function wasm_bindgen_6f3ca645d09a3199___convert__closures_____invoke___bool_(arg0, arg1) {
