@@ -119,19 +119,17 @@ impl TranspositionTable {
     pub fn probe(&self, key: u64, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
         let idx = (key as usize) % self.size;
         if let Some(entry) = &self.entries[idx] {
-            if entry.key == key {
-                if entry.depth >= depth {
-                    match entry.flag {
-                        TTFlag::Exact => return Some(entry.score),
-                        TTFlag::LowerBound => {
-                            if entry.score >= beta {
-                                return Some(entry.score);
-                            }
+            if entry.key == key && entry.depth >= depth {
+                match entry.flag {
+                    TTFlag::Exact => return Some(entry.score),
+                    TTFlag::LowerBound => {
+                        if entry.score >= beta {
+                            return Some(entry.score);
                         }
-                        TTFlag::UpperBound => {
-                            if entry.score <= alpha {
-                                return Some(entry.score);
-                            }
+                    }
+                    TTFlag::UpperBound => {
+                        if entry.score <= alpha {
+                            return Some(entry.score);
                         }
                     }
                 }

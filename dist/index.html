@@ -8,8 +8,8 @@
   <link rel="manifest" href="manifest.json" />
   
 <script type="module">
-import init, * as bindings from '/CoTuong-32f937cf8b519293.js';
-const wasm = await init({ module_or_path: '/CoTuong-32f937cf8b519293_bg.wasm' });
+import init, * as bindings from '/CoTuong-8de643e9a24dc9a2.js';
+const wasm = await init({ module_or_path: '/CoTuong-8de643e9a24dc9a2_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -32,7 +32,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/CoTuong-32f937cf8b519293.js" crossorigin="anonymous" integrity="sha384-jFoLwL/1D6+k7Gg0j78itOSH7bJJq8TmZAO0BQaqih77tDcUw1VQOCDlUBXHysm9"><link rel="preload" href="/CoTuong-32f937cf8b519293_bg.wasm" crossorigin="anonymous" integrity="sha384-SLJaHO/P3dP6SFA7Ekvy/pn/9yOL2q+/Um27jfb8PrpehJLtQkdUVaZ2HMTeDIfj" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/CoTuong-8de643e9a24dc9a2.js" crossorigin="anonymous" integrity="sha384-u3qmM4tinaqTUpFUNOYzOPsBbm3Ir4ZMKT2bJl/brflAGwB+KcAvpkpaWMff0uH+"><link rel="preload" href="/CoTuong-8de643e9a24dc9a2_bg.wasm" crossorigin="anonymous" integrity="sha384-6JLNVtOf3idt1O+t9d6SL0e7Kt8lElQzqRRUdLoAsdQiOp2CloKqUn0Nve2rMld3" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>
