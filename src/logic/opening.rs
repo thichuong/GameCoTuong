@@ -37,13 +37,13 @@ pub fn get_book_move(board: &Board, turn: Color) -> Option<((usize, usize), (usi
 
         // Response to Central Cannon (Black to move)
         // Red played C2.5 (2,7)->(2,4) or (2,1)->(2,4)
-        // FEN for (2,7)->(2,4): "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1C1P1P/1C7/9/RNBAKABNR b"
+        // FEN for (2,7)->(2,4): "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b"
         // Wait, let's calculate row 2 correctly.
         // Orig: 1C5C1. (0:1, 1:C, 2..6:5, 7:C, 8:1)
         // Move (2,7)->(2,4).
         // New: 0:1, 1:C, 2:1, 3:1, 4:C, 5:1, 6:1, 7:1, 8:1.
         // Groups: 1, C, 2, C, 4. -> "1C2C4"
-        "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1C1P1P/1C2C4/9/RNBAKABNR b" => {
+        "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b" => {
             let moves = vec![
                 // Screen Horse (Bình Phong Mã): H8+7 (9,7)->(7,6) or H2+3 (9,1)->(7,2)
                 ((9, 7), (7, 6)),
@@ -57,7 +57,7 @@ pub fn get_book_move(board: &Board, turn: Color) -> Option<((usize, usize), (usi
         // Orig: 1C5C1. Move (2,1)->(2,4).
         // New: 0:1, 1:1, 2:1, 3:1, 4:C, 5:1, 6:1, 7:C, 8:1.
         // Groups: 4, C, 2, C, 1. -> "4C2C1"
-        "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1C1P1P/4C2C1/9/RNBAKABNR b" => {
+        "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/4C2C1/9/RNBAKABNR b" => {
             let moves = vec![
                 // Screen Horse
                 ((9, 7), (7, 6)),
