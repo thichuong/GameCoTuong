@@ -74,7 +74,9 @@ impl ZobristKeys {
 
         // Index calculation:
         // ((pt_idx * 2 + c_idx) * 10 + row) * 9 + col
+        // Index calculation is guaranteed to be within bounds
         let idx = ((pt_idx * NUM_COLORS + c_idx) * NUM_ROWS + row) * NUM_COLS + col;
+        #[allow(clippy::indexing_slicing)]
         self.piece_keys[idx]
     }
 }
@@ -117,6 +119,7 @@ impl TranspositionTable {
     }
 
     pub fn probe(&self, key: u64, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
+        #[allow(clippy::cast_possible_truncation)]
         let idx = (key % (self.size as u64)) as usize;
         if let Some(entry) = self.entries.get(idx).and_then(|e| e.as_ref()) {
             if entry.key == key && entry.depth >= depth {
@@ -139,7 +142,9 @@ impl TranspositionTable {
     }
 
     pub fn get_move(&self, key: u64) -> Option<Move> {
+        #[allow(clippy::cast_possible_truncation)]
         let idx = (key % (self.size as u64)) as usize;
+        #[allow(clippy::indexing_slicing)]
         if let Some(entry) = &self.entries[idx] {
             if entry.key == key {
                 return entry.best_move;
@@ -156,6 +161,7 @@ impl TranspositionTable {
         flag: TTFlag,
         best_move: Option<Move>,
     ) {
+        #[allow(clippy::cast_possible_truncation)]
         let idx = (key % (self.size as u64)) as usize;
 
         // Replacement scheme: Always replace if new depth is greater or equal,

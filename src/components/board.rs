@@ -7,6 +7,7 @@ use leptos::{
 use std::time::Duration;
 
 #[component]
+#[allow(clippy::too_many_lines)]
 pub fn BoardView(
     game_state: ReadSignal<GameState>,
     set_game_state: WriteSignal<GameState>,
@@ -246,6 +247,7 @@ pub fn BoardView(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_piece(piece: Option<Piece>, is_selected: bool, is_last_move_dest: bool) -> impl IntoView {
     match piece {
         Some(p) => {

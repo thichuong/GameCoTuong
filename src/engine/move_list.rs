@@ -80,7 +80,8 @@ impl Index<usize> for MoveList {
     type Output = Move;
 
     fn index(&self, index: usize) -> &Self::Output {
-        self.moves.get(index).unwrap()
+        #[allow(clippy::expect_used)]
+        self.moves.get(index).expect("MoveList index out of bounds")
     }
 }
 

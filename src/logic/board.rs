@@ -1,3 +1,4 @@
+#![allow(clippy::indexing_slicing)]
 use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
 
@@ -35,6 +36,7 @@ pub struct Piece {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::indexing_slicing)]
 pub struct Board {
     // 10 rows (0..9), 9 columns (0..8)
     // (0,0) is bottom-left from Red's perspective (if Red is at bottom)

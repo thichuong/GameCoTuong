@@ -25,8 +25,8 @@ mod tests {
         let duration = start.elapsed();
 
         if let Some((_mv, stats)) = result {
-            println!("Depth 4 stats: {:?}", stats);
-            println!("Time taken: {:?}", duration);
+            println!("Depth 4 stats: {stats:?}");
+            println!("Time taken: {duration:?}");
             // Assert reasonable nodes/time
             // With TT and Move Ordering, Depth 4 should be very fast (< 100ms usually for initial position)
             // Previous engine might have been slower.

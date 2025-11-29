@@ -33,7 +33,7 @@ pub fn is_valid_move(
         .grid
         .get_mut(from_row)
         .and_then(|r| r.get_mut(from_col))
-        .and_then(|p| p.take())
+        .and_then(std::option::Option::take)
         .ok_or(MoveError::NoPieceAtSource)?;
 
     if let Some(cell) = next_board
@@ -242,7 +242,7 @@ fn validate_elephant(
     from_row: usize,
     from_col: usize,
     to_row: usize,
-    _to_col: usize,
+    to_col: usize,
     d_row: usize,
     d_col: usize,
 ) -> Result<(), MoveError> {
@@ -253,7 +253,7 @@ fn validate_elephant(
         return Err(MoveError::RiverRestriction);
     }
     let eye_row = usize::midpoint(from_row, to_row);
-    let eye_col = usize::midpoint(from_col, _to_col);
+    let eye_col = usize::midpoint(from_col, to_col);
     if board.get_piece(eye_row, eye_col).is_some() {
         return Err(MoveError::BlockedPath);
     }

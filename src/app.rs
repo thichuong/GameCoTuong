@@ -7,6 +7,7 @@ use leptos::{
     component, create_effect, create_signal, document, event_target_value, set_timeout, view,
     wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet,
 };
+use std::fmt::Write;
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 
@@ -18,6 +19,7 @@ enum Difficulty {
 }
 
 #[component]
+#[allow(clippy::too_many_lines)]
 pub fn App() -> impl IntoView {
     let (game_state, set_game_state) = create_signal(GameState::new());
     let (difficulty, set_difficulty) = create_signal(Difficulty::Easy);
@@ -106,7 +108,6 @@ pub fn App() -> impl IntoView {
                 .map(|p| format!("{:?}", p.piece_type))
                 .unwrap_or_default();
             let note = record.note.clone().unwrap_or_default();
-            use std::fmt::Write;
             let _ = writeln!(csv, "{turn},{from},{to},{piece},{captured},{note}");
         }
 

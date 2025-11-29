@@ -13,7 +13,10 @@ pub struct AlphaBetaEngine {
     tt: TranspositionTable,
     killer_moves: [[Option<Move>; 2]; 64], // Max depth 64
     history_stack: Vec<u64>,
-    pub history_table: Box<[[i32; 90]; 90]>, // [from][to]
+    pub history_table: Box<[[i32; 90]]>, // [from][to] flattened or slice of arrays?
+    // Actually, Box<[[i32; 90]; 90]> is a pointer to an array of arrays.
+    // vec![...].into_boxed_slice() returns Box<[[i32; 90]]> (slice of arrays).
+    // So type should be Box<[[i32; 90]]>.
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
@@ -26,7 +29,7 @@ impl AlphaBetaEngine {
             tt: TranspositionTable::new(1), // 1MB (approx 65536 entries)
             killer_moves: [[None; 2]; 64],
             history_stack: Vec::with_capacity(64),
-            history_table: Box::new([[0; 90]; 90]),
+            history_table: vec![[0; 90]; 90].into_boxed_slice(),
             nodes_searched: 0,
             start_time: 0.0,
             time_limit: None,
@@ -49,7 +52,7 @@ impl AlphaBetaEngine {
             let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap_or_default();
             #[allow(clippy::cast_precision_loss)]
             let time_ms = (since_the_epoch.as_secs() as f64) * 1000.0
-                + (since_the_epoch.subsec_nanos() as f64 / 1_000_000.0);
+                + (f64::from(since_the_epoch.subsec_nanos()) / 1_000_000.0);
             time_ms
         }
     }
@@ -288,7 +291,7 @@ impl AlphaBetaEngine {
     ) -> MoveList {
         let mut moves = MoveList::new();
         let killers = if (depth as usize) < self.killer_moves.len() {
-            &self.killer_moves[depth as usize]
+            self.killer_moves.get(depth as usize).unwrap_or(&[None; 2])
         } else {
             &[None; 2]
         };
@@ -336,7 +339,10 @@ impl AlphaBetaEngine {
                                         // History Heuristic
                                         let from = r * 9 + c;
                                         let to = tr * 9 + tc;
-                                        score = self.history_table[from][to];
+                                        #[allow(clippy::indexing_slicing)]
+                                        {
+                                            score = self.history_table[from][to];
+                                        }
                                         if score > 800_000 {
                                             score = 800_000;
                                         }
@@ -401,9 +407,11 @@ impl AlphaBetaEngine {
         }
         let d = depth as usize;
         // Shift: 0 -> 1, New -> 0
-        if self.killer_moves[d][0] != Some(mv) {
-            self.killer_moves[d][1] = self.killer_moves[d][0];
-            self.killer_moves[d][0] = Some(mv);
+        if let Some(killers) = self.killer_moves.get_mut(d) {
+            if killers[0] != Some(mv) {
+                killers[1] = killers[0];
+                killers[0] = Some(mv);
+            }
         }
     }
 }
@@ -432,6 +440,7 @@ impl Searcher for AlphaBetaEngine {
 
         let (max_depth, time_limit) = match limit {
             SearchLimit::Depth(d) => (d.min(63), None),
+            #[allow(clippy::cast_precision_loss)]
             SearchLimit::Time(t) => (20, Some(t as f64)), // Max depth 20 for time limit
         };
         self.time_limit = time_limit;
@@ -502,6 +511,7 @@ impl Searcher for AlphaBetaEngine {
                 SearchStats {
                     depth: final_depth,
                     nodes: self.nodes_searched,
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     time_ms: elapsed as u64,
                 },
             )
