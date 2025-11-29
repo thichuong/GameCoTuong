@@ -218,20 +218,20 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-function wasm_bindgen__convert__closures_____invoke__h342f7029518bc4f2(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h342f7029518bc4f2(arg0, arg1, arg2);
-}
-
-function wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2);
-}
-
 function wasm_bindgen__convert__closures_____invoke__h39796a8bf5c89d2f(arg0, arg1, arg2) {
     wasm.wasm_bindgen__convert__closures_____invoke__h39796a8bf5c89d2f(arg0, arg1, arg2);
 }
 
+function wasm_bindgen__convert__closures_____invoke__h342f7029518bc4f2(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h342f7029518bc4f2(arg0, arg1, arg2);
+}
+
 function wasm_bindgen__convert__closures_____invoke__h8ccdb1e62f3c0388(arg0, arg1) {
     wasm.wasm_bindgen__convert__closures_____invoke__h8ccdb1e62f3c0388(arg0, arg1);
+}
+
+function wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h8781550333f72e9a(arg0, arg1, arg2, arg3) {
@@ -909,7 +909,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (typeof module_or_path === 'undefined') {
-        module_or_path = new URL('CoTuong-a5d5a0aa8934979c_bg.wasm', import.meta.url);
+        module_or_path = new URL('CoTuong_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 
