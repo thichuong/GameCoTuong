@@ -1,8 +1,3 @@
-#![allow(
-    clippy::indexing_slicing,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
 use crate::logic::board::{Board, Color, PieceType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,10 +29,20 @@ pub fn is_valid_move(
     let mut next_board = board.clone();
     // We know the move is valid geometrically, so we can just move the piece
     // (We don't need to handle capture logic here other than overwriting)
-    let piece = next_board.grid[from_row][from_col]
-        .take()
+    let piece = next_board
+        .grid
+        .get_mut(from_row)
+        .and_then(|r| r.get_mut(from_col))
+        .and_then(|p| p.take())
         .ok_or(MoveError::NoPieceAtSource)?;
-    next_board.grid[to_row][to_col] = Some(piece);
+
+    if let Some(cell) = next_board
+        .grid
+        .get_mut(to_row)
+        .and_then(|r| r.get_mut(to_col))
+    {
+        *cell = Some(piece);
+    }
 
     if is_in_check(&next_board, turn) {
         return Err(MoveError::SelfCheck);
@@ -159,8 +164,8 @@ fn validate_piece_logic(
         }
     }
 
-    let d_row = (to_row as isize - from_row as isize).abs();
-    let d_col = (to_col as isize - from_col as isize).abs();
+    let d_row = to_row.abs_diff(from_row);
+    let d_col = to_col.abs_diff(from_col);
 
     match piece.piece_type {
         PieceType::General => validate_general(
@@ -202,8 +207,8 @@ fn validate_general(
     _from_col: usize,
     to_row: usize,
     to_col: usize,
-    d_row: isize,
-    d_col: isize,
+    d_row: usize,
+    d_col: usize,
 ) -> Result<(), MoveError> {
     if d_row + d_col != 1 {
         return Err(MoveError::InvalidMovePattern);
@@ -218,8 +223,8 @@ fn validate_advisor(
     color: Color,
     to_row: usize,
     to_col: usize,
-    d_row: isize,
-    d_col: isize,
+    d_row: usize,
+    d_col: usize,
 ) -> Result<(), MoveError> {
     if d_row != 1 || d_col != 1 {
         return Err(MoveError::InvalidMovePattern);
@@ -238,8 +243,8 @@ fn validate_elephant(
     from_col: usize,
     to_row: usize,
     _to_col: usize,
-    d_row: isize,
-    d_col: isize,
+    d_row: usize,
+    d_col: usize,
 ) -> Result<(), MoveError> {
     if d_row != 2 || d_col != 2 {
         return Err(MoveError::InvalidMovePattern);
@@ -261,8 +266,8 @@ fn validate_horse(
     from_col: usize,
     to_row: usize,
     to_col: usize,
-    d_row: isize,
-    d_col: isize,
+    d_row: usize,
+    d_col: usize,
 ) -> Result<(), MoveError> {
     if !((d_row == 2 && d_col == 1) || (d_row == 1 && d_col == 2)) {
         return Err(MoveError::InvalidMovePattern);
@@ -290,8 +295,8 @@ fn validate_chariot(
     from_col: usize,
     to_row: usize,
     to_col: usize,
-    d_row: isize,
-    d_col: isize,
+    d_row: usize,
+    d_col: usize,
 ) -> Result<(), MoveError> {
     if d_row != 0 && d_col != 0 {
         return Err(MoveError::InvalidMovePattern);
@@ -308,8 +313,8 @@ fn validate_cannon(
     from_col: usize,
     to_row: usize,
     to_col: usize,
-    d_row: isize,
-    d_col: isize,
+    d_row: usize,
+    d_col: usize,
 ) -> Result<(), MoveError> {
     if d_row != 0 && d_col != 0 {
         return Err(MoveError::InvalidMovePattern);
@@ -332,27 +337,28 @@ fn validate_soldier(
     from_row: usize,
     to_row: usize,
     _to_col: usize,
-    d_row: isize,
-    d_col: isize,
+    d_row: usize,
+    d_col: usize,
 ) -> Result<(), MoveError> {
-    let forward = match color {
-        Color::Red => 1,
-        Color::Black => -1,
-    };
-
-    let row_diff = to_row as isize - from_row as isize;
-
-    if (color == Color::Red && row_diff < 0) || (color == Color::Black && row_diff > 0) {
-        return Err(MoveError::InvalidMovePattern);
-    }
-
-    if !is_crossed_river(color, from_row) {
-        if d_col != 0 || row_diff != forward {
+    // 1. Check backward move
+    if color == Color::Red {
+        if to_row < from_row {
             return Err(MoveError::InvalidMovePattern);
         }
-    } else if d_row + d_col != 1 {
+    } else if to_row > from_row {
         return Err(MoveError::InvalidMovePattern);
     }
+
+    // 2. Check step size
+    if d_row + d_col != 1 {
+        return Err(MoveError::InvalidMovePattern);
+    }
+
+    // 3. Check side move before river
+    if !is_crossed_river(color, from_row) && d_col != 0 {
+        return Err(MoveError::InvalidMovePattern);
+    }
+
     Ok(())
 }
 

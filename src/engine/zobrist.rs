@@ -1,4 +1,3 @@
-#![allow(clippy::indexing_slicing, clippy::cast_possible_truncation)]
 use crate::engine::Move;
 use crate::logic::board::{Color, PieceType};
 
@@ -118,8 +117,8 @@ impl TranspositionTable {
     }
 
     pub fn probe(&self, key: u64, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
-        let idx = (key as usize) % self.size;
-        if let Some(entry) = &self.entries[idx] {
+        let idx = (key % (self.size as u64)) as usize;
+        if let Some(entry) = self.entries.get(idx).and_then(|e| e.as_ref()) {
             if entry.key == key && entry.depth >= depth {
                 match entry.flag {
                     TTFlag::Exact => return Some(entry.score),
@@ -140,7 +139,7 @@ impl TranspositionTable {
     }
 
     pub fn get_move(&self, key: u64) -> Option<Move> {
-        let idx = (key as usize) % self.size;
+        let idx = (key % (self.size as u64)) as usize;
         if let Some(entry) = &self.entries[idx] {
             if entry.key == key {
                 return entry.best_move;
@@ -157,14 +156,14 @@ impl TranspositionTable {
         flag: TTFlag,
         best_move: Option<Move>,
     ) {
-        let idx = (key as usize) % self.size;
+        let idx = (key % (self.size as u64)) as usize;
 
         // Replacement scheme: Always replace if new depth is greater or equal,
         // or if the current entry is from a different position (collision).
         // For simplicity, we'll just always replace for now, or maybe prefer deeper searches.
         // Common strategy: Replace if entry.depth <= depth
 
-        let replace = match &self.entries[idx] {
+        let replace = match self.entries.get(idx).and_then(|e| e.as_ref()) {
             None => true,
             Some(entry) => {
                 // If keys are different (collision), we might want to keep the deeper one?
@@ -179,13 +178,15 @@ impl TranspositionTable {
         };
 
         if replace {
-            self.entries[idx] = Some(TTEntry {
-                key,
-                depth,
-                score,
-                flag,
-                best_move,
-            });
+            if let Some(slot) = self.entries.get_mut(idx) {
+                *slot = Some(TTEntry {
+                    key,
+                    depth,
+                    score,
+                    flag,
+                    best_move,
+                });
+            }
         }
     }
 }

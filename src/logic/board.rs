@@ -1,4 +1,3 @@
-#![allow(clippy::indexing_slicing)]
 use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
 
@@ -159,10 +158,11 @@ impl Board {
 
     #[must_use]
     pub fn get_piece(&self, row: usize, col: usize) -> Option<Piece> {
-        if row >= 10 || col >= 9 {
-            return None;
-        }
-        self.grid[row][col]
+        self.grid
+            .get(row)
+            .and_then(|r| r.get(col))
+            .copied()
+            .flatten()
     }
 
     pub fn calculate_initial_hash(&self) -> u64 {
@@ -170,7 +170,13 @@ impl Board {
         let mut hash = 0;
         for r in 0..10 {
             for c in 0..9 {
-                if let Some(piece) = self.grid[r][c] {
+                if let Some(piece) = self
+                    .grid
+                    .get(r)
+                    .and_then(|row| row.get(c))
+                    .copied()
+                    .flatten()
+                {
                     hash ^= keys.get_piece_key(piece.piece_type, piece.color, r, c);
                 }
             }
@@ -188,12 +194,24 @@ impl Board {
                                        // For now, let's just create it. It's fast enough.
 
         // 1. Remove piece from source
-        if let Some(piece) = self.grid[mv.from_row][mv.from_col] {
+        if let Some(piece) = self
+            .grid
+            .get(mv.from_row)
+            .and_then(|r| r.get(mv.from_col))
+            .copied()
+            .flatten()
+        {
             self.zobrist_hash ^=
                 keys.get_piece_key(piece.piece_type, piece.color, mv.from_row, mv.from_col);
 
             // 2. Remove captured piece (if any)
-            if let Some(captured) = self.grid[mv.to_row][mv.to_col] {
+            if let Some(captured) = self
+                .grid
+                .get(mv.to_row)
+                .and_then(|r| r.get(mv.to_col))
+                .copied()
+                .flatten()
+            {
                 self.zobrist_hash ^=
                     keys.get_piece_key(captured.piece_type, captured.color, mv.to_row, mv.to_col);
             }
@@ -203,8 +221,17 @@ impl Board {
                 keys.get_piece_key(piece.piece_type, piece.color, mv.to_row, mv.to_col);
 
             // Update grid
-            self.grid[mv.to_row][mv.to_col] = Some(piece);
-            self.grid[mv.from_row][mv.from_col] = None;
+            // Move piece
+            if let Some(row) = self.grid.get_mut(mv.to_row) {
+                if let Some(cell) = row.get_mut(mv.to_col) {
+                    *cell = Some(piece);
+                }
+            }
+            if let Some(row) = self.grid.get_mut(mv.from_row) {
+                if let Some(cell) = row.get_mut(mv.from_col) {
+                    *cell = None;
+                }
+            }
         }
 
         // 4. Switch turn hash

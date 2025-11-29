@@ -1,4 +1,3 @@
-#![allow(clippy::indexing_slicing)]
 use crate::engine::eval_constants::{
     PST_CANNON, PST_HORSE, PST_PAWN, PST_ROOK, VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE,
     VAL_KING, VAL_PAWN, VAL_ROOK,
@@ -55,11 +54,12 @@ fn get_pst_value(piece: Piece, row: usize, col: usize) -> i32 {
                        // If PST is for Red, then Black at (9, c) is like Red at (0, c).
     };
 
-    match piece.piece_type {
-        PieceType::Soldier => PST_PAWN[r][c],
-        PieceType::Horse => PST_HORSE[r][c],
-        PieceType::Chariot => PST_ROOK[r][c],
-        PieceType::Cannon => PST_CANNON[r][c],
-        _ => 0,
-    }
+    let val = match piece.piece_type {
+        PieceType::Soldier => PST_PAWN.get(r).and_then(|row| row.get(c)),
+        PieceType::Horse => PST_HORSE.get(r).and_then(|row| row.get(c)),
+        PieceType::Chariot => PST_ROOK.get(r).and_then(|row| row.get(c)),
+        PieceType::Cannon => PST_CANNON.get(r).and_then(|row| row.get(c)),
+        _ => Some(&0),
+    };
+    *val.unwrap_or(&0)
 }

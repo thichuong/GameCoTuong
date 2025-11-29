@@ -1,4 +1,3 @@
-#![allow(clippy::indexing_slicing)]
 use crate::engine::Move;
 use std::ops::Index;
 
@@ -25,9 +24,11 @@ impl MoveList {
     }
 
     pub fn push(&mut self, mv: Move) {
-        if self.count < MAX_MOVES {
-            self.moves[self.count] = mv;
-            self.count += 1;
+        if self.count < self.moves.len() {
+            if let Some(slot) = self.moves.get_mut(self.count) {
+                *slot = mv;
+                self.count += 1;
+            }
         }
         // If we exceed MAX_MOVES, we just ignore (or could panic in debug).
         // For a chess engine, silent truncation of very rare cases might be acceptable
@@ -43,11 +44,14 @@ impl MoveList {
     }
 
     pub fn iter(&self) -> std::slice::Iter<'_, Move> {
-        self.moves[0..self.count].iter()
+        self.moves.get(0..self.count).unwrap_or(&[]).iter()
     }
 
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Move> {
-        self.moves[0..self.count].iter_mut()
+        self.moves
+            .get_mut(0..self.count)
+            .unwrap_or(&mut [])
+            .iter_mut()
     }
 
     // Helper for sorting
@@ -55,7 +59,9 @@ impl MoveList {
     where
         F: FnMut(&Move, &Move) -> std::cmp::Ordering,
     {
-        self.moves[0..self.count].sort_by(|a, b| compare(a, b));
+        if let Some(slice) = self.moves.get_mut(0..self.count) {
+            slice.sort_by(|a, b| compare(a, b));
+        }
     }
 }
 
@@ -74,7 +80,7 @@ impl Index<usize> for MoveList {
     type Output = Move;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.moves[index]
+        self.moves.get(index).unwrap()
     }
 }
 

@@ -1,11 +1,3 @@
-#![allow(
-    clippy::indexing_slicing,
-    clippy::cast_possible_truncation,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss
-)]
 use crate::engine::eval::SimpleEvaluator;
 use crate::engine::eval_constants::{
     VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE, VAL_KING, VAL_PAWN, VAL_ROOK,
@@ -54,10 +46,11 @@ impl AlphaBetaEngine {
         {
             use std::time::{SystemTime, UNIX_EPOCH};
             let start = SystemTime::now();
-            let since_the_epoch = start
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards");
-            since_the_epoch.as_secs_f64() * 1000.0
+            let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap_or_default();
+            #[allow(clippy::cast_precision_loss)]
+            let time_ms = (since_the_epoch.as_secs() as f64) * 1000.0
+                + (since_the_epoch.subsec_nanos() as f64 / 1_000_000.0);
+            time_ms
         }
     }
 
@@ -147,20 +140,24 @@ impl AlphaBetaEngine {
             if moves_searched == 0 {
                 // First move: Full window search
                 let val = self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
-                if val.is_none() {
-                    self.history_stack.pop();
-                    return None;
+                match val {
+                    None => {
+                        self.history_stack.pop();
+                        return None;
+                    }
+                    Some(v) => score = -v,
                 }
-                score = -val.unwrap();
             } else {
                 // Late moves: Null window search (PVS)
                 let val =
                     self.alpha_beta(&next_board, depth - 1, -alpha - 1, -alpha, turn.opposite());
-                if val.is_none() {
-                    self.history_stack.pop();
-                    return None;
+                match val {
+                    None => {
+                        self.history_stack.pop();
+                        return None;
+                    }
+                    Some(v) => score = -v,
                 }
-                score = -val.unwrap();
 
                 if score > alpha && score < beta {
                     // Fail high in null window, re-search with full window
@@ -172,11 +169,13 @@ impl AlphaBetaEngine {
                     // Re-search:
                     let val =
                         self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
-                    if val.is_none() {
-                        self.history_stack.pop();
-                        return None;
+                    match val {
+                        None => {
+                            self.history_stack.pop();
+                            return None;
+                        }
+                        Some(v) => score = -v,
                     }
-                    score = -val.unwrap();
                     // Use the re-search score if it's valid (it should be)
                     // But wait, if re_score returns None (timeout), we should propagate it.
                     // The ? operator handles None.
@@ -212,13 +211,17 @@ impl AlphaBetaEngine {
             if alpha >= beta {
                 // Killer Heuristic: Store quiet move that caused cutoff
                 // A move is considered quiet if it's not a capture (score < 1_000_000)
-                if mv.score < 1_000_000 {
-                    self.store_killer(depth, mv);
-                    // History Heuristic
-                    let from = mv.from_row * 9 + mv.from_col;
-                    let to = mv.to_row * 9 + mv.to_col;
-                    self.history_table[from][to] += i32::from(depth) * i32::from(depth);
+                // Store Killer Move
+                self.store_killer(depth, mv);
+                // History Heuristic
+                let from = mv.from_row * 9 + mv.from_col;
+                let to = mv.to_row * 9 + mv.to_col;
+                if let Some(row) = self.history_table.get_mut(from) {
+                    if let Some(score) = row.get_mut(to) {
+                        *score += i32::from(depth) * i32::from(depth);
+                    }
                 }
+
                 break; // Beta cutoff
             }
         }
