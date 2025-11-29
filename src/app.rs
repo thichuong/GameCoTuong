@@ -5,7 +5,7 @@ use crate::logic::board::Color;
 use crate::logic::game::{GameState, GameStatus};
 use leptos::{
     component, create_effect, create_signal, document, event_target_value, set_timeout, view,
-    wasm_bindgen, web_sys, IntoView, Props, SignalGet, SignalSet,
+    wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet,
 };
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -45,42 +45,44 @@ pub fn App() -> impl IntoView {
                         };
 
                         // 1. Check Opening Book
-                        use crate::logic::opening;
-                        let fen = current_state.board.to_fen_string(current_state.turn);
-                        web_sys::console::log_1(&format!("Current FEN: {fen}").into());
-                        let book_move =
-                            opening::get_book_move(&current_state.board, current_state.turn);
+                        {
+                            use crate::logic::opening;
+                            let fen = current_state.board.to_fen_string(current_state.turn);
+                            web_sys::console::log_1(&format!("Current FEN: {fen}").into());
+                            let book_move =
+                                opening::get_book_move(&current_state.board, current_state.turn);
 
-                        if let Some((from, to)) = book_move {
-                            if current_state.make_move(from.0, from.1, to.0, to.1).is_ok() {
-                                web_sys::console::log_1(&"📖 Book Move played".into());
-                                if let Some(last) = current_state.history.last_mut() {
-                                    last.note = Some("📖 Book Move".to_string());
+                            if let Some((from, to)) = book_move {
+                                if current_state.make_move(from.0, from.1, to.0, to.1).is_ok() {
+                                    web_sys::console::log_1(&"📖 Book Move played".into());
+                                    if let Some(last) = current_state.history.last_mut() {
+                                        last.note = Some("📖 Book Move".to_string());
+                                    }
+                                    set_game_state.set(current_state);
                                 }
-                                set_game_state.set(current_state);
-                            }
-                        } else if let Some((mv, stats)) = engine.search(&current_state, limit) {
-                            if current_state
-                                .make_move(mv.from_row, mv.from_col, mv.to_row, mv.to_col)
-                                .is_ok()
-                            {
-                                web_sys::console::log_1(
-                                    &format!(
-                                        "🤖 Engine Move: Depth {}, Nodes {} ({:.1}s)",
-                                        stats.depth,
-                                        stats.nodes,
-                                        stats.time_ms as f64 / 1000.0
-                                    )
-                                    .into(),
-                                );
-                                // Update the last move record with stats
-                                if let Some(last) = current_state.history.last_mut() {
-                                    last.note = Some(format!(
-                                        "🤖 Depth: {}, Nodes: {}, Time: {}ms",
-                                        stats.depth, stats.nodes, stats.time_ms
-                                    ));
+                            } else if let Some((mv, stats)) = engine.search(&current_state, limit) {
+                                if current_state
+                                    .make_move(mv.from_row, mv.from_col, mv.to_row, mv.to_col)
+                                    .is_ok()
+                                {
+                                    #[allow(clippy::cast_precision_loss)]
+                                    let time_s = stats.time_ms as f64 / 1000.0;
+                                    web_sys::console::log_1(
+                                        &format!(
+                                            "🤖 Engine Move: Depth {}, Nodes {} ({:.1}s)",
+                                            stats.depth, stats.nodes, time_s
+                                        )
+                                        .into(),
+                                    );
+                                    // Update the last move record with stats
+                                    if let Some(last) = current_state.history.last_mut() {
+                                        last.note = Some(format!(
+                                            "🤖 Depth: {}, Nodes: {}, Time: {}ms",
+                                            stats.depth, stats.nodes, stats.time_ms
+                                        ));
+                                    }
+                                    set_game_state.set(current_state);
                                 }
-                                set_game_state.set(current_state);
                             }
                         }
                     }
@@ -104,7 +106,8 @@ pub fn App() -> impl IntoView {
                 .map(|p| format!("{:?}", p.piece_type))
                 .unwrap_or_default();
             let note = record.note.clone().unwrap_or_default();
-            csv.push_str(&format!("{turn},{from},{to},{piece},{captured},{note}\n"));
+            use std::fmt::Write;
+            let _ = write!(csv, "{turn},{from},{to},{piece},{captured},{note}\n");
         }
 
         // Create download link

@@ -1,3 +1,4 @@
+#![allow(clippy::indexing_slicing)]
 use crate::logic::board::{Board, Color};
 use crate::logic::rules::{is_in_check, is_valid_move, MoveError};
 

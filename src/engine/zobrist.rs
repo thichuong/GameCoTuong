@@ -1,3 +1,4 @@
+#![allow(clippy::indexing_slicing, clippy::cast_possible_truncation)]
 use crate::engine::Move;
 use crate::logic::board::{Color, PieceType};
 
@@ -38,7 +39,7 @@ impl XorShift64 {
 // Since we want to avoid lazy_static dependency, we can just instantiate it in the Engine.
 impl ZobristKeys {
     pub fn new() -> Self {
-        let mut rng = XorShift64::new(123456789);
+        let mut rng = XorShift64::new(123_456_789);
         let mut piece_keys = [0; TABLE_SIZE];
         for key in &mut piece_keys {
             *key = rng.next();

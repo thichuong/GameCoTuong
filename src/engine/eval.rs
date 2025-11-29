@@ -1,3 +1,4 @@
+#![allow(clippy::indexing_slicing)]
 use crate::engine::eval_constants::{
     PST_CANNON, PST_HORSE, PST_PAWN, PST_ROOK, VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE,
     VAL_KING, VAL_PAWN, VAL_ROOK,
@@ -46,17 +47,20 @@ fn get_piece_value(piece: Piece, row: usize, col: usize) -> i32 {
 fn get_pst_value(piece: Piece, row: usize, col: usize) -> i32 {
     // For Red, use row/col directly.
     // For Black, mirror row/col.
-    let (r, _c) = if piece.color == Color::Red {
+    let (r, c) = if piece.color == Color::Red {
         (row, col)
     } else {
-        (9 - row, col) // Mirror row only for now (symmetric PSTs)
+        (9 - row, col) // Mirror row for Black, col is same for PST (symmetric?)
+                       // Actually PSTs are usually symmetric or defined for one side.
+                       // If PST is for Red, then Black at (9, c) is like Red at (0, c).
     };
 
-    match piece.piece_type {
-        PieceType::Soldier => PST_PAWN[r][_c],
-        PieceType::Horse => PST_HORSE[r][_c],
-        PieceType::Chariot => PST_ROOK[r][_c],
-        PieceType::Cannon => PST_CANNON[r][_c],
+    let val = match piece.piece_type {
+        PieceType::Soldier => PST_PAWN[r][c],
+        PieceType::Horse => PST_HORSE[r][c],
+        PieceType::Chariot => PST_ROOK[r][c],
+        PieceType::Cannon => PST_CANNON[r][c],
         _ => 0,
-    }
+    };
+    val
 }

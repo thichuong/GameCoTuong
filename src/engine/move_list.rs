@@ -1,3 +1,4 @@
+#![allow(clippy::indexing_slicing)]
 use crate::engine::Move;
 use std::ops::Index;
 

@@ -1,3 +1,11 @@
+#![allow(
+    clippy::indexing_slicing,
+    clippy::cast_possible_truncation,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
 use crate::engine::eval::SimpleEvaluator;
 use crate::engine::eval_constants::{
     VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE, VAL_KING, VAL_PAWN, VAL_ROOK,
@@ -13,7 +21,7 @@ pub struct AlphaBetaEngine {
     tt: TranspositionTable,
     killer_moves: [[Option<Move>; 2]; 64], // Max depth 64
     history_stack: Vec<u64>,
-    history_table: [[i32; 90]; 90], // [from][to]
+    pub history_table: Box<[[i32; 90]; 90]>, // [from][to]
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
@@ -26,7 +34,7 @@ impl AlphaBetaEngine {
             tt: TranspositionTable::new(1), // 1MB (approx 65536 entries)
             killer_moves: [[None; 2]; 64],
             history_stack: Vec::with_capacity(64),
-            history_table: [[0; 90]; 90],
+            history_table: Box::new([[0; 90]; 90]),
             nodes_searched: 0,
             start_time: 0.0,
             time_limit: None,
@@ -249,7 +257,7 @@ impl AlphaBetaEngine {
             alpha = stand_pat;
         }
 
-        let captures = self.generate_captures(board, turn);
+        let captures = Self::generate_captures(board, turn);
 
         for mv in captures {
             let mut next_board = board.clone();
@@ -349,7 +357,7 @@ impl AlphaBetaEngine {
         moves
     }
 
-    fn generate_captures(&self, board: &Board, turn: Color) -> MoveList {
+    fn generate_captures(board: &Board, turn: Color) -> MoveList {
         let mut moves = MoveList::new();
         for r in 0..10 {
             for c in 0..9 {

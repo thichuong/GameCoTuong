@@ -1,3 +1,4 @@
+#![allow(clippy::indexing_slicing)]
 use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
 
@@ -9,7 +10,7 @@ pub enum Color {
 
 impl Color {
     #[must_use]
-    pub fn opposite(&self) -> Self {
+    pub fn opposite(self) -> Self {
         match self {
             Self::Red => Self::Black,
             Self::Black => Self::Red,

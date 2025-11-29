@@ -1,3 +1,8 @@
+#![allow(
+    clippy::indexing_slicing,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 use crate::logic::board::{Board, Color, PieceType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,9 +69,8 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
         }
     }
 
-    let (g_row, g_col) = match general_pos {
-        Some(pos) => pos,
-        None => return true, // Should not happen, but if no general, you are in trouble
+    let Some((g_row, g_col)) = general_pos else {
+        return true;
     };
 
     // Check if any enemy piece can move to (g_row, g_col)

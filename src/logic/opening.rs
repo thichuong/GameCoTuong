@@ -11,7 +11,7 @@ pub fn get_book_move(board: &Board, turn: Color) -> Option<((usize, usize), (usi
     match fen.as_str() {
         // Starting Position (Red to move)
         "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w" => {
-            let moves = vec![
+            let moves = [
                 // Central Cannon (Pháo Đầu): C2.5
                 ((2, 1), (2, 4)), // C8 -> C5 (in array coords: row 2, col 1 -> row 2, col 4) ??
                 // Wait, array coords:
@@ -44,7 +44,7 @@ pub fn get_book_move(board: &Board, turn: Color) -> Option<((usize, usize), (usi
         // New: 0:1, 1:C, 2:1, 3:1, 4:C, 5:1, 6:1, 7:1, 8:1.
         // Groups: 1, C, 2, C, 4. -> "1C2C4"
         "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b" => {
-            let moves = vec![
+            let moves = [
                 // Screen Horse (Bình Phong Mã): H8+7 (9,7)->(7,6) or H2+3 (9,1)->(7,2)
                 ((9, 7), (7, 6)),
                 ((9, 1), (7, 2)),
@@ -58,7 +58,7 @@ pub fn get_book_move(board: &Board, turn: Color) -> Option<((usize, usize), (usi
         // New: 0:1, 1:1, 2:1, 3:1, 4:C, 5:1, 6:1, 7:C, 8:1.
         // Groups: 4, C, 2, C, 1. -> "4C2C1"
         "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/4C2C1/9/RNBAKABNR b" => {
-            let moves = vec![
+            let moves = [
                 // Screen Horse
                 ((9, 7), (7, 6)),
                 ((9, 1), (7, 2)),

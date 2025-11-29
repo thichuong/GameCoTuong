@@ -1,8 +1,8 @@
 use crate::logic::board::{Color, Piece, PieceType};
 use crate::logic::game::GameState;
 use leptos::{
-    component, create_effect, create_signal, set_timeout, view, IntoView, Props, ReadSignal,
-    SignalGet, SignalSet, WriteSignal,
+    component, create_effect, create_signal, set_timeout, view, IntoView, ReadSignal, SignalGet,
+    SignalSet, WriteSignal,
 };
 use std::time::Duration;
 
