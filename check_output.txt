@@ -1,0 +1,24 @@
+    Checking CoTuong v0.1.0 (/home/tchuong/Màn hình nền/GameCoTuong)
+error[E0382]: borrow of moved value: `current_state`
+   --> src/app.rs:128:57
+    |
+ 56 | ... let mut current_state = game_state.get();
+    |         ----------------- move occurs because `current_state` has type `GameState`, which does not implement the `Copy` trait
+...
+106 | ...                 set_game_state.set(current_state);
+    |                                        ------------- value moved here
+...
+128 | ...                 if let Some(last) = current_state.history.last_mut...
+    |                                         ^^^^^^^^^^^^^^^^^^^^^ value borrowed here after move
+
+warning: unused variable: `fen`
+  --> src/app.rs:95:33
+   |
+95 | ...                     let fen = current_state.board.to_fen_string(cur...
+   |                             ^^^ help: if this is intentional, prefix it with an underscore: `_fen`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0382`.
+warning: `CoTuong` (bin "CoTuong") generated 1 warning
+error: could not compile `CoTuong` (bin "CoTuong") due to 1 previous error; 1 warning emitted

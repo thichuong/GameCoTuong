@@ -1,13 +1,16 @@
 #[cfg(test)]
 mod tests {
+    use crate::engine::config::EngineConfig;
     use crate::engine::search::AlphaBetaEngine;
     use crate::engine::{SearchLimit, Searcher};
     use crate::logic::board::Board;
     use crate::logic::game::GameState;
+    use std::sync::Arc;
 
     #[test]
     fn test_engine_performance() {
-        let mut engine = AlphaBetaEngine::new();
+        let config = Arc::new(EngineConfig::default());
+        let mut engine = AlphaBetaEngine::new(config);
         let board = Board::new();
         let game_state = GameState {
             board,

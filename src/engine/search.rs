@@ -1,31 +1,29 @@
+use crate::engine::config::EngineConfig;
 use crate::engine::eval::SimpleEvaluator;
-use crate::engine::eval_constants::{
-    VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE, VAL_KING, VAL_PAWN, VAL_ROOK,
-};
 use crate::engine::move_list::MoveList;
 use crate::engine::zobrist::{TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, Color, PieceType};
 use crate::logic::game::GameState;
 use crate::logic::rules::is_valid_move;
+use std::sync::Arc;
 pub struct AlphaBetaEngine {
+    config: Arc<EngineConfig>,
     evaluator: SimpleEvaluator,
     tt: TranspositionTable,
     killer_moves: [[Option<Move>; 2]; 64], // Max depth 64
     history_stack: Vec<u64>,
-    pub history_table: Box<[[i32; 90]]>, // [from][to] flattened or slice of arrays?
-    // Actually, Box<[[i32; 90]; 90]> is a pointer to an array of arrays.
-    // vec![...].into_boxed_slice() returns Box<[[i32; 90]]> (slice of arrays).
-    // So type should be Box<[[i32; 90]]>.
+    pub history_table: Box<[[i32; 90]]>,
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
 }
 
 impl AlphaBetaEngine {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<EngineConfig>) -> Self {
         Self {
-            evaluator: SimpleEvaluator,
+            evaluator: SimpleEvaluator::new(config.clone()),
+            config,
             tt: TranspositionTable::new(1), // 1MB (approx 65536 entries)
             killer_moves: [[None; 2]; 64],
             history_stack: Vec::with_capacity(64),
@@ -263,7 +261,7 @@ impl AlphaBetaEngine {
             alpha = stand_pat;
         }
 
-        let captures = Self::generate_captures(board, turn);
+        let captures = self.generate_captures(board, turn);
 
         for mv in captures {
             let mut next_board = board.clone();
@@ -327,14 +325,15 @@ impl AlphaBetaEngine {
                                     });
 
                                     if is_hash_move {
-                                        score = 2_000_000;
+                                        score = self.config.score_hash_move;
                                     } else if let Some(target) = board.get_piece(tr, tc) {
                                         // MVV-LVA
-                                        let victim_val = get_piece_value(target.piece_type);
-                                        let attacker_val = get_piece_value(p.piece_type);
-                                        score = 1_000_000 + victim_val - (attacker_val / 10);
+                                        let victim_val = self.get_piece_value(target.piece_type);
+                                        let attacker_val = self.get_piece_value(p.piece_type);
+                                        score = self.config.score_capture_base + victim_val
+                                            - (attacker_val / 10);
                                     } else if is_killer_move {
-                                        score = 900_000;
+                                        score = self.config.score_killer_move;
                                     } else {
                                         // History Heuristic
                                         let from = r * 9 + c;
@@ -343,8 +342,8 @@ impl AlphaBetaEngine {
                                         {
                                             score = self.history_table[from][to];
                                         }
-                                        if score > 800_000 {
-                                            score = 800_000;
+                                        if score > self.config.score_history_max {
+                                            score = self.config.score_history_max;
                                         }
                                     }
 
@@ -366,7 +365,7 @@ impl AlphaBetaEngine {
         moves
     }
 
-    fn generate_captures(board: &Board, turn: Color) -> MoveList {
+    fn generate_captures(&self, board: &Board, turn: Color) -> MoveList {
         let mut moves = MoveList::new();
         for r in 0..10 {
             for c in 0..9 {
@@ -378,9 +377,10 @@ impl AlphaBetaEngine {
                                     if target.color != turn
                                         && is_valid_move(board, r, c, tr, tc, turn).is_ok()
                                     {
-                                        let victim_val = get_piece_value(target.piece_type);
-                                        let attacker_val = get_piece_value(p.piece_type);
-                                        let score = 1000 + victim_val - (attacker_val / 10);
+                                        let victim_val = self.get_piece_value(target.piece_type);
+                                        let attacker_val = self.get_piece_value(p.piece_type);
+                                        let score = self.config.score_capture_base + victim_val
+                                            - (attacker_val / 10);
 
                                         moves.push(Move {
                                             from_row: r,
@@ -414,17 +414,17 @@ impl AlphaBetaEngine {
             }
         }
     }
-}
 
-fn get_piece_value(pt: PieceType) -> i32 {
-    match pt {
-        PieceType::General => VAL_KING,
-        PieceType::Chariot => VAL_ROOK,
-        PieceType::Cannon => VAL_CANNON,
-        PieceType::Horse => VAL_HORSE,
-        PieceType::Elephant => VAL_ELEPHANT,
-        PieceType::Advisor => VAL_ADVISOR,
-        PieceType::Soldier => VAL_PAWN,
+    fn get_piece_value(&self, pt: PieceType) -> i32 {
+        match pt {
+            PieceType::General => self.config.val_king,
+            PieceType::Chariot => self.config.val_rook,
+            PieceType::Cannon => self.config.val_cannon,
+            PieceType::Horse => self.config.val_horse,
+            PieceType::Elephant => self.config.val_elephant,
+            PieceType::Advisor => self.config.val_advisor,
+            PieceType::Soldier => self.config.val_pawn,
+        }
     }
 }
 

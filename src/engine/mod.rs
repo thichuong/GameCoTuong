@@ -1,6 +1,7 @@
 use crate::logic::board::Board;
 use crate::logic::game::GameState;
 
+pub mod config;
 pub mod eval;
 pub mod eval_constants;
 pub mod move_list;
