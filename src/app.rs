@@ -61,6 +61,7 @@ pub fn App() -> impl IntoView {
             set_is_thinking.set(true);
             set_timeout(
                 move || {
+                    const MAX_RETRIES: usize = 5;
                     let mut current_state = game_state.get();
                     // Re-check condition inside timeout to avoid race conditions
                     let current_mode = game_mode.get();
@@ -117,7 +118,6 @@ pub fn App() -> impl IntoView {
                         // Retry Loop
                         let mut excluded_moves = Vec::new();
                         let mut loop_count = 0;
-                        const MAX_RETRIES: usize = 5;
 
                         while loop_count < MAX_RETRIES {
                             loop_count += 1;
@@ -131,7 +131,7 @@ pub fn App() -> impl IntoView {
                                     mv.to_row,
                                     mv.to_col,
                                 ) {
-                                    Ok(_) => {
+                                    Ok(()) => {
                                         #[allow(clippy::cast_precision_loss)]
                                         let time_s = stats.time_ms as f64 / 1000.0;
                                         web_sys::console::log_1(
@@ -156,8 +156,7 @@ pub fn App() -> impl IntoView {
                                         {
                                             web_sys::console::log_1(
                                                 &format!(
-                                                    "⚠️ Move rejected (3-fold), retrying... {:?}",
-                                                    mv
+                                                    "⚠️ Move rejected (3-fold), retrying... {mv:?}"
                                                 )
                                                 .into(),
                                             );
@@ -165,7 +164,7 @@ pub fn App() -> impl IntoView {
                                             // Continue loop to search again
                                         } else {
                                             web_sys::console::log_1(
-                                                &format!("❌ Move error: {:?}", e).into(),
+                                                &format!("❌ Move error: {e:?}").into(),
                                             );
                                             break; // Other error, stop
                                         }
