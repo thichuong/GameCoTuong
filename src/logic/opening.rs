@@ -36,16 +36,37 @@ pub fn get_book_move(board: &Board, turn: Color) -> Option<((usize, usize), (usi
         }
 
         // Response to Central Cannon (Black to move)
-        // Red played C2.5 (2,1)->(2,4)
-        // FEN: rnbakabnr/9/1c5c1/p1p1p1p1p/9/4C4/P1P1P1P1P/1C7/9/RNBAKABNR b
-        // Wait, calculating FEN manually is hard.
-        // Let's just implement a few common responses based on exact FENs I can verify or generic logic?
-        // The user asked for specific responses.
-        // "Screen Horse (Bình Phong Mã): (9, 1) -> (7, 2)"
-        // Black is at top (rows 5-9).
-        // Black Horses at row 9, cols 1 and 7.
-        // Move (9, 1) -> (7, 2) is H8+7.
-        // Move (9, 7) -> (7, 6) is H2+3.
+        // Red played C2.5 (2,7)->(2,4) or (2,1)->(2,4)
+        // FEN for (2,7)->(2,4): "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1C1P1P/1C7/9/RNBAKABNR b"
+        // Wait, let's calculate row 2 correctly.
+        // Orig: 1C5C1. (0:1, 1:C, 2..6:5, 7:C, 8:1)
+        // Move (2,7)->(2,4).
+        // New: 0:1, 1:C, 2:1, 3:1, 4:C, 5:1, 6:1, 7:1, 8:1.
+        // Groups: 1, C, 2, C, 4. -> "1C2C4"
+        "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1C1P1P/1C2C4/9/RNBAKABNR b" => {
+            let moves = vec![
+                // Screen Horse (Bình Phong Mã): H8+7 (9,7)->(7,6) or H2+3 (9,1)->(7,2)
+                ((9, 7), (7, 6)),
+                ((9, 1), (7, 2)),
+                // Same Direction Cannon (Thuận Pháo): C8.5 (7,7)->(7,4)
+                ((7, 7), (7, 4)),
+            ];
+            moves.choose(&mut rng).copied()
+        }
+        // Red played C8.5 (2,1)->(2,4)
+        // Orig: 1C5C1. Move (2,1)->(2,4).
+        // New: 0:1, 1:1, 2:1, 3:1, 4:C, 5:1, 6:1, 7:C, 8:1.
+        // Groups: 4, C, 2, C, 1. -> "4C2C1"
+        "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1C1P1P/4C2C1/9/RNBAKABNR b" => {
+            let moves = vec![
+                // Screen Horse
+                ((9, 7), (7, 6)),
+                ((9, 1), (7, 2)),
+                // Same Direction Cannon: C2.5 (7,1)->(7,4)
+                ((7, 1), (7, 4)),
+            ];
+            moves.choose(&mut rng).copied()
+        }
 
         // Let's rely on the user's provided coordinates if possible, but I need to match the FEN.
         // Since I can't easily predict the FEN for every move without running the engine,

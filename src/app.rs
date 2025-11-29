@@ -43,13 +43,16 @@ pub fn App() -> impl IntoView {
 
                         // 1. Check Opening Book
                         use crate::logic::opening;
+                        let fen = current_state.board.to_fen_string(current_state.turn);
+                        web_sys::console::log_1(&format!("Current FEN: {}", fen).into());
                         let book_move =
                             opening::get_book_move(&current_state.board, current_state.turn);
 
                         if let Some((from, to)) = book_move {
                             if current_state.make_move(from.0, from.1, to.0, to.1).is_ok() {
+                                web_sys::console::log_1(&"📖 Book Move played".into());
                                 if let Some(last) = current_state.history.last_mut() {
-                                    last.note = Some("Book Move".to_string());
+                                    last.note = Some("📖 Book Move".to_string());
                                 }
                                 set_game_state.set(current_state);
                             }
@@ -58,10 +61,19 @@ pub fn App() -> impl IntoView {
                                 .make_move(mv.from_row, mv.from_col, mv.to_row, mv.to_col)
                                 .is_ok()
                             {
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "🤖 Engine Move: Depth {}, Nodes {} ({:.1}s)",
+                                        stats.depth,
+                                        stats.nodes,
+                                        stats.time_ms as f64 / 1000.0
+                                    )
+                                    .into(),
+                                );
                                 // Update the last move record with stats
                                 if let Some(last) = current_state.history.last_mut() {
                                     last.note = Some(format!(
-                                        "Depth: {}, Nodes: {}, Time: {}ms",
+                                        "🤖 Depth: {}, Nodes: {}, Time: {}ms",
                                         stats.depth, stats.nodes, stats.time_ms
                                     ));
                                 }
