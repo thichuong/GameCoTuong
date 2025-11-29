@@ -121,11 +121,22 @@ impl AlphaBetaEngine {
             best_move = Some(mv);
         }
 
-        let moves = self.generate_moves(board, turn, best_move, depth);
+        let mut moves = self.generate_moves(board, turn, best_move, depth);
         if moves.is_empty() {
             // No moves: Checkmate or Stalemate
             self.history_stack.pop();
             return Some(-20000 + (10 - i32::from(depth)));
+        }
+
+        // Pruning: Discard ratio
+        if depth >= 3 && self.config.pruning_discard_ratio > 0 {
+            let total = moves.len();
+            let keep_ratio = 100 - self.config.pruning_discard_ratio;
+            let keep_count = (total * keep_ratio as usize) / 100;
+            let keep_count = keep_count.max(1); // Always keep at least the best move
+            if keep_count < total {
+                moves.truncate(keep_count);
+            }
         }
 
         let mut best_score = -30000;

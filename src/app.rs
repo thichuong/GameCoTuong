@@ -540,6 +540,7 @@ pub fn App() -> impl IntoView {
                                     {slider("Capture Base", config.score_capture_base, 0, 2000000, 100000, Box::new(move |v| { let mut c = red_config.get(); c.score_capture_base = v; set_red_config.set(c); }))}
                                     {slider("Killer Move", config.score_killer_move, 0, 2000000, 100000, Box::new(move |v| { let mut c = red_config.get(); c.score_killer_move = v; set_red_config.set(c); }))}
                                     {slider("History Max", config.score_history_max, 0, 2000000, 100000, Box::new(move |v| { let mut c = red_config.get(); c.score_history_max = v; set_red_config.set(c); }))}
+                                    {slider("Pruning Ratio (%)", config.pruning_discard_ratio, 0, 90, 5, Box::new(move |v| { let mut c = red_config.get(); c.pruning_discard_ratio = v; set_red_config.set(c); }))}
                                 </div>
                             }
                         }
@@ -564,6 +565,7 @@ pub fn App() -> impl IntoView {
                                     {slider("Capture Base", config.score_capture_base, 0, 2000000, 100000, Box::new(move |v| { let mut c = black_config.get(); c.score_capture_base = v; set_black_config.set(c); }))}
                                     {slider("Killer Move", config.score_killer_move, 0, 2000000, 100000, Box::new(move |v| { let mut c = black_config.get(); c.score_killer_move = v; set_black_config.set(c); }))}
                                     {slider("History Max", config.score_history_max, 0, 2000000, 100000, Box::new(move |v| { let mut c = black_config.get(); c.score_history_max = v; set_black_config.set(c); }))}
+                                    {slider("Pruning Ratio (%)", config.pruning_discard_ratio, 0, 90, 5, Box::new(move |v| { let mut c = black_config.get(); c.pruning_discard_ratio = v; set_black_config.set(c); }))}
                                 </div>
                             }
                         }
