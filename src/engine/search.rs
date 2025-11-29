@@ -68,6 +68,7 @@ impl AlphaBetaEngine {
         false
     }
 
+    #[allow(clippy::too_many_lines)]
     fn alpha_beta(
         &mut self,
         board: &Board,
@@ -132,7 +133,8 @@ impl AlphaBetaEngine {
         if depth >= 3 && self.config.pruning_discard_ratio > 0 {
             let total = moves.len();
             let keep_ratio = 100 - self.config.pruning_discard_ratio;
-            let keep_count = (total * keep_ratio as usize) / 100;
+            #[allow(clippy::cast_sign_loss)]
+            let keep_count = (total * (keep_ratio.max(0) as usize)) / 100;
             let keep_count = keep_count.max(1); // Always keep at least the best move
             if keep_count < total {
                 moves.truncate(keep_count);

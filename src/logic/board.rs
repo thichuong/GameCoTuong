@@ -1,4 +1,3 @@
-#![allow(clippy::indexing_slicing)]
 use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
 
@@ -52,7 +51,13 @@ impl Board {
         for r in (0..10).rev() {
             let mut empty_count = 0;
             for c in 0..9 {
-                if let Some(piece) = self.grid[r][c] {
+                if let Some(piece) = self
+                    .grid
+                    .get(r)
+                    .and_then(|row| row.get(c))
+                    .copied()
+                    .flatten()
+                {
                     if empty_count > 0 {
                         fen.push_str(&empty_count.to_string());
                         empty_count = 0;
@@ -133,28 +138,40 @@ impl Board {
 
         // Back row
         for (col, &pt) in pieces.iter().enumerate() {
-            self.grid[back_row][col] = Some(Piece {
-                piece_type: pt,
+            if let Some(cell) = self.grid.get_mut(back_row).and_then(|row| row.get_mut(col)) {
+                *cell = Some(Piece {
+                    piece_type: pt,
+                    color,
+                });
+            }
+        }
+
+        // Cannons
+        if let Some(cell) = self.grid.get_mut(cannon_row).and_then(|row| row.get_mut(1)) {
+            *cell = Some(Piece {
+                piece_type: PieceType::Cannon,
+                color,
+            });
+        }
+        if let Some(cell) = self.grid.get_mut(cannon_row).and_then(|row| row.get_mut(7)) {
+            *cell = Some(Piece {
+                piece_type: PieceType::Cannon,
                 color,
             });
         }
 
-        // Cannons
-        self.grid[cannon_row][1] = Some(Piece {
-            piece_type: PieceType::Cannon,
-            color,
-        });
-        self.grid[cannon_row][7] = Some(Piece {
-            piece_type: PieceType::Cannon,
-            color,
-        });
-
         // Soldiers
         for col in (0..9).step_by(2) {
-            self.grid[soldier_row][col] = Some(Piece {
-                piece_type: PieceType::Soldier,
-                color,
-            });
+            if let Some(cell) = self
+                .grid
+                .get_mut(soldier_row)
+                .and_then(|row| row.get_mut(col))
+            {
+                *cell = Some(Piece {
+                    piece_type: PieceType::Soldier,
+                    color,
+                });
+            }
         }
     }
 

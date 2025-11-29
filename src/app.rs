@@ -536,10 +536,10 @@ pub fn App() -> impl IntoView {
                                     {slider("Xe (Rook)", config.val_rook, 0, 1800, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_rook = v; set_red_config.set(c); }))}
                                     {slider("Tướng (King)", config.val_king, 5000, 20000, 100, Box::new(move |v| { let mut c = red_config.get(); c.val_king = v; set_red_config.set(c); }))}
                                     <hr style="border-color: #444; margin: 10px 0;"/>
-                                    {slider("Hash Move", config.score_hash_move, 0, 5000000, 100000, Box::new(move |v| { let mut c = red_config.get(); c.score_hash_move = v; set_red_config.set(c); }))}
-                                    {slider("Capture Base", config.score_capture_base, 0, 2000000, 100000, Box::new(move |v| { let mut c = red_config.get(); c.score_capture_base = v; set_red_config.set(c); }))}
-                                    {slider("Killer Move", config.score_killer_move, 0, 2000000, 100000, Box::new(move |v| { let mut c = red_config.get(); c.score_killer_move = v; set_red_config.set(c); }))}
-                                    {slider("History Max", config.score_history_max, 0, 2000000, 100000, Box::new(move |v| { let mut c = red_config.get(); c.score_history_max = v; set_red_config.set(c); }))}
+                                    {slider("Hash Move", config.score_hash_move, 0, 5_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_hash_move = v; set_red_config.set(c); }))}
+                                    {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_capture_base = v; set_red_config.set(c); }))}
+                                    {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_killer_move = v; set_red_config.set(c); }))}
+                                    {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_history_max = v; set_red_config.set(c); }))}
                                     {slider("Pruning Ratio (%)", config.pruning_discard_ratio, 0, 90, 5, Box::new(move |v| { let mut c = red_config.get(); c.pruning_discard_ratio = v; set_red_config.set(c); }))}
                                 </div>
                             }
@@ -561,10 +561,10 @@ pub fn App() -> impl IntoView {
                                     {slider("Xe (Rook)", config.val_rook, 0, 1800, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_rook = v; set_black_config.set(c); }))}
                                     {slider("Tướng (King)", config.val_king, 5000, 20000, 100, Box::new(move |v| { let mut c = black_config.get(); c.val_king = v; set_black_config.set(c); }))}
                                     <hr style="border-color: #444; margin: 10px 0;"/>
-                                    {slider("Hash Move", config.score_hash_move, 0, 5000000, 100000, Box::new(move |v| { let mut c = black_config.get(); c.score_hash_move = v; set_black_config.set(c); }))}
-                                    {slider("Capture Base", config.score_capture_base, 0, 2000000, 100000, Box::new(move |v| { let mut c = black_config.get(); c.score_capture_base = v; set_black_config.set(c); }))}
-                                    {slider("Killer Move", config.score_killer_move, 0, 2000000, 100000, Box::new(move |v| { let mut c = black_config.get(); c.score_killer_move = v; set_black_config.set(c); }))}
-                                    {slider("History Max", config.score_history_max, 0, 2000000, 100000, Box::new(move |v| { let mut c = black_config.get(); c.score_history_max = v; set_black_config.set(c); }))}
+                                    {slider("Hash Move", config.score_hash_move, 0, 5_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_hash_move = v; set_black_config.set(c); }))}
+                                    {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_capture_base = v; set_black_config.set(c); }))}
+                                    {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_killer_move = v; set_black_config.set(c); }))}
+                                    {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_history_max = v; set_black_config.set(c); }))}
                                     {slider("Pruning Ratio (%)", config.pruning_discard_ratio, 0, 90, 5, Box::new(move |v| { let mut c = black_config.get(); c.pruning_discard_ratio = v; set_black_config.set(c); }))}
                                 </div>
                             }
