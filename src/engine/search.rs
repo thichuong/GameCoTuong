@@ -274,10 +274,10 @@ impl AlphaBetaEngine {
         depth: u8,
     ) -> MoveList {
         let mut moves = MoveList::new();
-        let killers = if depth < 64 {
-            self.killer_moves[depth as usize]
+        let killers = if (depth as usize) < self.killer_moves.len() {
+            &self.killer_moves[depth as usize]
         } else {
-            [None; 2]
+            &[None; 2]
         };
 
         for r in 0..10 {
@@ -418,7 +418,7 @@ impl Searcher for AlphaBetaEngine {
         self.history_stack.clear();
 
         let (max_depth, time_limit) = match limit {
-            SearchLimit::Depth(d) => (d, None),
+            SearchLimit::Depth(d) => (d.min(63), None),
             SearchLimit::Time(t) => (20, Some(t as f64)), // Max depth 20 for time limit
         };
         self.time_limit = time_limit;

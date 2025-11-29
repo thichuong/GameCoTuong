@@ -108,17 +108,18 @@ pub fn App() -> impl IntoView {
         }
 
         // Create download link
-        let blob = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&csv.into()))
-            .expect("Failed to create blob");
-        let url = web_sys::Url::create_object_url_with_blob(&blob).expect("Failed to create URL");
-        let a = document().create_element("a").expect("Failed to create a");
-        let a = a
-            .dyn_into::<web_sys::HtmlAnchorElement>()
-            .expect("Failed to cast to HtmlAnchorElement");
-        a.set_href(&url);
-        a.set_download("xiangqi_game.csv");
-        a.click();
-        web_sys::Url::revoke_object_url(&url).expect("Failed to revoke URL");
+        if let Ok(blob) = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&csv.into())) {
+            if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
+                if let Ok(a) = document().create_element("a") {
+                    if let Ok(a) = a.dyn_into::<web_sys::HtmlAnchorElement>() {
+                        a.set_href(&url);
+                        a.set_download("xiangqi_game.csv");
+                        a.click();
+                        let _ = web_sys::Url::revoke_object_url(&url);
+                    }
+                }
+            }
+        }
     };
 
     view! {
