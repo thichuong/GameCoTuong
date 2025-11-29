@@ -55,12 +55,11 @@ fn get_pst_value(piece: Piece, row: usize, col: usize) -> i32 {
                        // If PST is for Red, then Black at (9, c) is like Red at (0, c).
     };
 
-    let val = match piece.piece_type {
+    match piece.piece_type {
         PieceType::Soldier => PST_PAWN[r][c],
         PieceType::Horse => PST_HORSE[r][c],
         PieceType::Chariot => PST_ROOK[r][c],
         PieceType::Cannon => PST_CANNON[r][c],
         _ => 0,
-    };
-    val
+    }
 }

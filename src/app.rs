@@ -107,7 +107,7 @@ pub fn App() -> impl IntoView {
                 .unwrap_or_default();
             let note = record.note.clone().unwrap_or_default();
             use std::fmt::Write;
-            let _ = write!(csv, "{turn},{from},{to},{piece},{captured},{note}\n");
+            let _ = writeln!(csv, "{turn},{from},{to},{piece},{captured},{note}");
         }
 
         // Create download link
