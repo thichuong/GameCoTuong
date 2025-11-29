@@ -1,4 +1,5 @@
 #![allow(clippy::indexing_slicing)]
+use crate::engine::Move;
 use crate::logic::board::{Board, Color};
 use crate::logic::rules::{is_in_check, is_valid_move, MoveError};
 
@@ -18,6 +19,7 @@ pub struct MoveRecord {
     pub captured: Option<crate::logic::board::Piece>,
     pub color: Color,
     pub note: Option<String>, // For AI stats or other info
+    pub hash: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -62,11 +64,44 @@ impl GameState {
 
         // Execute move
         let mut next_board = self.board.clone();
-        let piece = next_board.grid[from_row][from_col]
-            .take()
+
+        // Construct Move for apply_move
+        let mv = Move {
+            from_row,
+            from_col,
+            to_row,
+            to_col,
+            score: 0,
+        };
+
+        // Capture piece info before apply_move
+        let piece = next_board
+            .get_piece(from_row, from_col)
             .ok_or(MoveError::NoPieceAtSource)?;
-        let captured = next_board.grid[to_row][to_col].take();
-        next_board.grid[to_row][to_col] = Some(piece);
+        let captured = next_board.get_piece(to_row, to_col);
+
+        next_board.apply_move(&mv, self.turn);
+
+        // 3-Fold Repetition Check
+        let initial_hash = Board::new().zobrist_hash;
+        let mut count = 0;
+
+        // Check history
+        count += self
+            .history
+            .iter()
+            .filter(|r| r.hash == next_board.zobrist_hash)
+            .count();
+
+        // Check initial state
+        if next_board.zobrist_hash == initial_hash {
+            count += 1;
+        }
+
+        // If we already have 2 occurrences (so this would be the 3rd), forbid it.
+        if count >= 2 {
+            return Err(MoveError::ThreeFoldRepetition);
+        }
 
         self.board = next_board;
         self.history.push(MoveRecord {
@@ -76,6 +111,7 @@ impl GameState {
             captured,
             color: self.turn,
             note: None,
+            hash: self.board.zobrist_hash,
         });
 
         self.turn = self.turn.opposite();

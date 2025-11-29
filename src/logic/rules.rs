@@ -11,6 +11,7 @@ pub enum MoveError {
     PalaceRestriction,
     RiverRestriction,
     SelfCheck,
+    ThreeFoldRepetition,
 }
 
 /// Checks if a move is valid, including rule logic and self-check prevention.
