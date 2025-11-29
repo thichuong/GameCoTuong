@@ -837,8 +837,8 @@ function __wbg_get_imports() {
         const ret = v0;
         return ret;
     };
-    imports.wbg.__wbindgen_cast_9c5831cc7a4da29e = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 62, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 63, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+    imports.wbg.__wbindgen_cast_c848a3d14de244ca = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 42, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 43, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
         const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__hadc3651f50dc65b9, wasm_bindgen__convert__closures_____invoke__h0a6025641646600a);
         return ret;
     };
@@ -904,7 +904,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (typeof module_or_path === 'undefined') {
-        module_or_path = new URL('CoTuong-f00a90132aaf6d55_bg.wasm', import.meta.url);
+        module_or_path = new URL('CoTuong_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 
