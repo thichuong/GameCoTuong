@@ -8,8 +8,8 @@
   <link rel="manifest" href="manifest.json" />
   
 <script type="module">
-import init, * as bindings from '/GameCoTuong/CoTuong-edb6e3d282df73f3.js';
-const wasm = await init({ module_or_path: '/GameCoTuong/CoTuong-edb6e3d282df73f3_bg.wasm' });
+import init, * as bindings from '/GameCoTuong/CoTuong-2d103d7b2c78aca5.js';
+const wasm = await init({ module_or_path: '/GameCoTuong/CoTuong-2d103d7b2c78aca5_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -32,7 +32,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/GameCoTuong/CoTuong-edb6e3d282df73f3.js" crossorigin="anonymous" integrity="sha384-gBHmZ4bHvs7MYTCD/HMRXeemXkPBxR4i1Kd64du2S2TKvDrMFTeGsiAIlk9g6Y1v"><link rel="preload" href="/GameCoTuong/CoTuong-edb6e3d282df73f3_bg.wasm" crossorigin="anonymous" integrity="sha384-+KqES8bTQCPA9LZtN6B2xjvke0GzH0/3Dqs6My7yXh+5jo4ffPsciMetrjrXiHa4" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/GameCoTuong/CoTuong-2d103d7b2c78aca5.js" crossorigin="anonymous" integrity="sha384-TyfGEc4IpkZ6uBBCoCegXe73ZbuGjLySwsMiCOWpzFoko9mC4Y9BaI73FECS5hYa"><link rel="preload" href="/GameCoTuong/CoTuong-2d103d7b2c78aca5_bg.wasm" crossorigin="anonymous" integrity="sha384-XQqz6L4ClJGRN46qoHVvYFVZ4FREcfwDI6P9oUL5kmstc6CQgL3yRVmKThJtInIT" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>
