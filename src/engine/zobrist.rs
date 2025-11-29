@@ -169,10 +169,10 @@ impl TranspositionTable {
                 // If keys are different (collision), we might want to keep the deeper one?
                 // Or just overwrite. Overwriting is standard for simple replacement.
                 // If keys are same, overwrite if new depth is better.
-                if entry.key != key {
-                    true // Collision, overwrite (or use buckets later)
-                } else {
+                if entry.key == key {
                     depth >= entry.depth
+                } else {
+                    true // Collision, overwrite (or use buckets later)
                 }
             }
         };

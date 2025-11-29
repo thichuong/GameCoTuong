@@ -243,8 +243,8 @@ fn validate_elephant(
     if is_crossing_river(color, to_row) {
         return Err(MoveError::RiverRestriction);
     }
-    let eye_row = (from_row + to_row) / 2;
-    let eye_col = (from_col + _to_col) / 2;
+    let eye_row = usize::midpoint(from_row, to_row);
+    let eye_col = usize::midpoint(from_col, _to_col);
     if board.get_piece(eye_row, eye_col).is_some() {
         return Err(MoveError::BlockedPath);
     }
@@ -264,12 +264,12 @@ fn validate_horse(
         return Err(MoveError::InvalidMovePattern);
     }
     let leg_row = if d_row == 2 {
-        (from_row + to_row) / 2
+        usize::midpoint(from_row, to_row)
     } else {
         from_row
     };
     let leg_col = if d_col == 2 {
-        (from_col + to_col) / 2
+        usize::midpoint(from_col, to_col)
     } else {
         from_col
     };

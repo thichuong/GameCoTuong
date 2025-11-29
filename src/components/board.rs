@@ -1,6 +1,9 @@
 use crate::logic::board::{Color, Piece, PieceType};
 use crate::logic::game::GameState;
-use leptos::*;
+use leptos::{
+    component, create_effect, create_signal, set_timeout, view, IntoView, Props, ReadSignal,
+    SignalGet, SignalSet, WriteSignal,
+};
 use std::time::Duration;
 
 #[component]
@@ -68,7 +71,7 @@ pub fn BoardView(
                 } else {
                     let mut new_state = state.clone();
                     match new_state.make_move(from_row, from_col, row, col) {
-                        Ok(_) => {
+                        Ok(()) => {
                             set_game_state.set(new_state);
                             set_selected.set(None);
                         }
@@ -80,7 +83,7 @@ pub fn BoardView(
             } else {
                 let mut new_state = state.clone();
                 match new_state.make_move(from_row, from_col, row, col) {
-                    Ok(_) => {
+                    Ok(()) => {
                         set_game_state.set(new_state);
                         set_selected.set(None);
                     }
@@ -234,7 +237,7 @@ pub fn BoardView(
                     let state = game_state.get();
                     match state.status {
                         crate::logic::game::GameStatus::Playing => format!("Turn: {:?}", state.turn),
-                        crate::logic::game::GameStatus::Checkmate(winner) => format!("Checkmate! {:?} Wins!", winner),
+                        crate::logic::game::GameStatus::Checkmate(winner) => format!("Checkmate! {winner:?} Wins!"),
                         crate::logic::game::GameStatus::Stalemate => "Stalemate!".to_string(),
                     }
                 }}

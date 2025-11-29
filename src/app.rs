@@ -3,7 +3,10 @@ use crate::engine::search::AlphaBetaEngine;
 use crate::engine::{SearchLimit, Searcher};
 use crate::logic::board::Color;
 use crate::logic::game::{GameState, GameStatus};
-use leptos::*;
+use leptos::{
+    component, create_effect, create_signal, document, event_target_value, set_timeout, view,
+    wasm_bindgen, web_sys, IntoView, Props, SignalGet, SignalSet,
+};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 
@@ -44,7 +47,7 @@ pub fn App() -> impl IntoView {
                         // 1. Check Opening Book
                         use crate::logic::opening;
                         let fen = current_state.board.to_fen_string(current_state.turn);
-                        web_sys::console::log_1(&format!("Current FEN: {}", fen).into());
+                        web_sys::console::log_1(&format!("Current FEN: {fen}").into());
                         let book_move =
                             opening::get_book_move(&current_state.board, current_state.turn);
 
@@ -101,10 +104,7 @@ pub fn App() -> impl IntoView {
                 .map(|p| format!("{:?}", p.piece_type))
                 .unwrap_or_default();
             let note = record.note.clone().unwrap_or_default();
-            csv.push_str(&format!(
-                "{},{},{},{},{},{}\n",
-                turn, from, to, piece, captured, note
-            ));
+            csv.push_str(&format!("{turn},{from},{to},{piece},{captured},{note}\n"));
         }
 
         // Create download link
@@ -331,12 +331,12 @@ pub fn App() -> impl IntoView {
                                     <li class="log-item">
                                         <div class="move-info">
                                             <span>{format!("{}. {} {}", i + 1, turn_icon, turn_text)}</span>
-                                            <span>{format!("{} ➝ {}", from_str, to_str)}</span>
+                                            <span>{format!("{from_str} ➝ {to_str}")}</span>
                                         </div>
-                                        {if !note.is_empty() {
-                                            view! { <div class="ai-stats">{note}</div> }.into_view()
-                                        } else {
+                                        {if note.is_empty() {
                                             view! {}.into_view()
+                                        } else {
+                                            view! { <div class="ai-stats">{note}</div> }.into_view()
                                         }}
                                     </li>
                                 }

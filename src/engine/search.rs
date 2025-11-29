@@ -1,5 +1,7 @@
 use crate::engine::eval::SimpleEvaluator;
-use crate::engine::eval_constants::*;
+use crate::engine::eval_constants::{
+    VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE, VAL_KING, VAL_PAWN, VAL_ROOK,
+};
 use crate::engine::move_list::MoveList;
 use crate::engine::zobrist::{TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
@@ -121,7 +123,7 @@ impl AlphaBetaEngine {
         if moves.is_empty() {
             // No moves: Checkmate or Stalemate
             self.history_stack.pop();
-            return Some(-20000 + (10 - depth as i32));
+            return Some(-20000 + (10 - i32::from(depth)));
         }
 
         let mut best_score = -30000;
@@ -207,7 +209,7 @@ impl AlphaBetaEngine {
                     // History Heuristic
                     let from = mv.from_row * 9 + mv.from_col;
                     let to = mv.to_row * 9 + mv.to_col;
-                    self.history_table[from][to] += (depth as i32) * (depth as i32);
+                    self.history_table[from][to] += i32::from(depth) * i32::from(depth);
                 }
                 break; // Beta cutoff
             }

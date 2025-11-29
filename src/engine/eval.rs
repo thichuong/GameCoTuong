@@ -1,4 +1,7 @@
-use crate::engine::eval_constants::*;
+use crate::engine::eval_constants::{
+    PST_CANNON, PST_HORSE, PST_PAWN, PST_ROOK, VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE,
+    VAL_KING, VAL_PAWN, VAL_ROOK,
+};
 use crate::engine::Evaluator;
 use crate::logic::board::{Board, Color, Piece, PieceType};
 
