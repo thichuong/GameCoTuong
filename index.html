@@ -1,24 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+<!DOCTYPE html><html lang="en"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cờ Tướng</title>
-  <link rel="manifest" href="manifest.json" />
-  
-<script type="module">
-import init, * as bindings from '/GameCoTuong/CoTuong-15b9bc60a5e721fa.js';
-const wasm = await init({ module_or_path: '/GameCoTuong/CoTuong-15b9bc60a5e721fa_bg.wasm' });
-
-
-window.wasmBindings = bindings;
-
-
-dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
-
-</script>
-  <link rel="icon" href="/GameCoTuong/icon-449220c3fb84c25f.png" integrity="sha384-RPfGqPXk7bylBvnJZQdSztxc3OP09j9TLscogq31VamDpd5GPPSWgCd56iZJEyVt"/>
+  <link rel="manifest" href="manifest.json">
+  <script type="module">import init from '/GameCoTuong/CoTuong-f5e1a36f958ad7a3.js';init('/GameCoTuong/CoTuong-f5e1a36f958ad7a3_bg.wasm');</script>
+  <link rel="icon" href="/GameCoTuong/icon-449220c3fb84c25f.png">
   
   <style>
     body {
@@ -32,7 +18,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/GameCoTuong/CoTuong-15b9bc60a5e721fa.js" crossorigin="anonymous" integrity="sha384-2N9UmVzctmBcRHFOKKHPZeVewPmV6t06moZ5vfZtC2jnY6POiDGpoL+S8/8aXEBK"><link rel="preload" href="/GameCoTuong/CoTuong-15b9bc60a5e721fa_bg.wasm" crossorigin="anonymous" integrity="sha384-YovGRD4OL99hiBbs049GvqOldNKYnkerRsVAUVeB5Y+20p+/s12CU5spIOZhrFQz" as="fetch" type="application/wasm"></head>
+
+<link rel="preload" href="/GameCoTuong/CoTuong-f5e1a36f958ad7a3_bg.wasm" as="fetch" type="application/wasm" crossorigin="">
+<link rel="modulepreload" href="/GameCoTuong/CoTuong-f5e1a36f958ad7a3.js"></head>
 
 <body>
   <script>
@@ -40,6 +28,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       navigator.serviceWorker.register('/sw.js');
     }
   </script>
-</body>
 
-</html>
+
+</body></html>
