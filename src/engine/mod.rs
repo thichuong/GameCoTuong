@@ -39,6 +39,10 @@ pub trait Evaluator {
 }
 
 pub trait Searcher {
-    fn search(&mut self, game_state: &GameState, limit: SearchLimit)
-        -> Option<(Move, SearchStats)>;
+    fn search(
+        &mut self,
+        game_state: &GameState,
+        limit: SearchLimit,
+        excluded_moves: &[Move],
+    ) -> Option<(Move, SearchStats)>;
 }

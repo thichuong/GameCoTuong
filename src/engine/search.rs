@@ -446,6 +446,7 @@ impl Searcher for AlphaBetaEngine {
         &mut self,
         game_state: &GameState,
         limit: SearchLimit,
+        excluded_moves: &[Move],
     ) -> Option<(Move, SearchStats)> {
         self.nodes_searched = 0;
         self.start_time = Self::now();
@@ -474,7 +475,19 @@ impl Searcher for AlphaBetaEngine {
             let hash = board.zobrist_hash;
             let tt_move = self.tt.get_move(hash);
 
-            let moves = self.generate_moves(board, turn, tt_move, d);
+            let mut moves = self.generate_moves(board, turn, tt_move, d);
+
+            // Filter excluded moves at root
+            if !excluded_moves.is_empty() {
+                moves.retain(|m| {
+                    !excluded_moves.iter().any(|ex| {
+                        m.from_row == ex.from_row
+                            && m.from_col == ex.from_col
+                            && m.to_row == ex.to_row
+                            && m.to_col == ex.to_col
+                    })
+                });
+            }
 
             // Check time before starting a new depth
             if self.check_time() {

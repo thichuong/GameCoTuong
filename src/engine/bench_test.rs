@@ -20,11 +20,11 @@ mod tests {
         };
 
         // Warmup
-        engine.search(&game_state, SearchLimit::Depth(2));
+        engine.search(&game_state, SearchLimit::Depth(2), &[]);
 
         // Measure Depth 4
         let start = std::time::Instant::now();
-        let result = engine.search(&game_state, SearchLimit::Depth(4));
+        let result = engine.search(&game_state, SearchLimit::Depth(4), &[]);
         let duration = start.elapsed();
 
         if let Some((_mv, stats)) = result {

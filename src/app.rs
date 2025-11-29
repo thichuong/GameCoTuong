@@ -114,28 +114,65 @@ pub fn App() -> impl IntoView {
                             }
                         }
 
-                        if let Some((mv, stats)) = engine.search(&current_state, limit) {
-                            if current_state
-                                .make_move(mv.from_row, mv.from_col, mv.to_row, mv.to_col)
-                                .is_ok()
+                        // Retry Loop
+                        let mut excluded_moves = Vec::new();
+                        let mut loop_count = 0;
+                        const MAX_RETRIES: usize = 5;
+
+                        while loop_count < MAX_RETRIES {
+                            loop_count += 1;
+
+                            if let Some((mv, stats)) =
+                                engine.search(&current_state, limit, &excluded_moves)
                             {
-                                #[allow(clippy::cast_precision_loss)]
-                                let time_s = stats.time_ms as f64 / 1000.0;
-                                web_sys::console::log_1(
-                                    &format!(
-                                        "🤖 Engine Move: Depth {}, Nodes {} ({:.1}s)",
-                                        stats.depth, stats.nodes, time_s
-                                    )
-                                    .into(),
-                                );
-                                // Update the last move record with stats
-                                if let Some(last) = current_state.history.last_mut() {
-                                    last.note = Some(format!(
-                                        "🤖 Depth: {}, Nodes: {}, Time: {}ms",
-                                        stats.depth, stats.nodes, stats.time_ms
-                                    ));
+                                match current_state.make_move(
+                                    mv.from_row,
+                                    mv.from_col,
+                                    mv.to_row,
+                                    mv.to_col,
+                                ) {
+                                    Ok(_) => {
+                                        #[allow(clippy::cast_precision_loss)]
+                                        let time_s = stats.time_ms as f64 / 1000.0;
+                                        web_sys::console::log_1(
+                                            &format!(
+                                                "🤖 Engine Move: Depth {}, Nodes {} ({:.1}s)",
+                                                stats.depth, stats.nodes, time_s
+                                            )
+                                            .into(),
+                                        );
+                                        // Update the last move record with stats
+                                        if let Some(last) = current_state.history.last_mut() {
+                                            last.note = Some(format!(
+                                                "🤖 Depth: {}, Nodes: {}, Time: {}ms",
+                                                stats.depth, stats.nodes, stats.time_ms
+                                            ));
+                                        }
+                                        set_game_state.set(current_state);
+                                        break; // Success, exit loop
+                                    }
+                                    Err(e) => {
+                                        if e == crate::logic::rules::MoveError::ThreeFoldRepetition
+                                        {
+                                            web_sys::console::log_1(
+                                                &format!(
+                                                    "⚠️ Move rejected (3-fold), retrying... {:?}",
+                                                    mv
+                                                )
+                                                .into(),
+                                            );
+                                            excluded_moves.push(mv);
+                                            // Continue loop to search again
+                                        } else {
+                                            web_sys::console::log_1(
+                                                &format!("❌ Move error: {:?}", e).into(),
+                                            );
+                                            break; // Other error, stop
+                                        }
+                                    }
                                 }
-                                set_game_state.set(current_state);
+                            } else {
+                                break; // No move found
                             }
                         }
                     }

@@ -40,3 +40,39 @@ fn test_three_fold_repetition() {
     let result = game.make_move(8, 0, 9, 0);
     assert_eq!(result, Err(MoveError::ThreeFoldRepetition));
 }
+
+#[test]
+fn test_engine_excludes_moves() {
+    use crate::engine::config::EngineConfig;
+    use crate::engine::search::AlphaBetaEngine;
+    use crate::engine::{Move, SearchLimit, Searcher};
+    use std::sync::Arc;
+
+    let config = Arc::new(EngineConfig::default());
+    let mut engine = AlphaBetaEngine::new(config);
+    let game = GameState::new();
+
+    // 1. Search for best move (usually Red Pawn 2->5 or Cannon 2->5)
+    // Let's just see what it returns first
+    let (best_move, _) = engine.search(&game, SearchLimit::Depth(2), &[]).unwrap();
+
+    // 2. Exclude that move and search again
+    let excluded = vec![best_move];
+    let (next_best, _) = engine
+        .search(&game, SearchLimit::Depth(2), &excluded)
+        .unwrap();
+
+    // 3. Assert they are different
+    assert_ne!(
+        best_move, next_best,
+        "Engine should pick a different move when best move is excluded"
+    );
+
+    // 4. Assert next_best is NOT the excluded move
+    assert!(
+        next_best.from_row != best_move.from_row
+            || next_best.from_col != best_move.from_col
+            || next_best.to_row != best_move.to_row
+            || next_best.to_col != best_move.to_col
+    );
+}

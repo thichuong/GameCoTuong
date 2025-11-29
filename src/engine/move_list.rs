@@ -69,6 +69,21 @@ impl MoveList {
             slice.sort_by(|a, b| compare(a, b));
         }
     }
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&Move) -> bool,
+    {
+        let mut i = 0;
+        while i < self.count {
+            if !f(&self.moves[i]) {
+                // Remove element at i by swapping with last element
+                self.count -= 1;
+                self.moves[i] = self.moves[self.count];
+            } else {
+                i += 1;
+            }
+        }
+    }
 }
 
 // Implement IntoIterator for &MoveList
