@@ -41,7 +41,19 @@ pub fn App() -> impl IntoView {
                             Difficulty::Hard => SearchLimit::Time(5000),
                         };
 
-                        if let Some((mv, stats)) = engine.search(&current_state, limit) {
+                        // 1. Check Opening Book
+                        use crate::logic::opening;
+                        let book_move =
+                            opening::get_book_move(&current_state.board, current_state.turn);
+
+                        if let Some((from, to)) = book_move {
+                            if current_state.make_move(from.0, from.1, to.0, to.1).is_ok() {
+                                if let Some(last) = current_state.history.last_mut() {
+                                    last.note = Some("Book Move".to_string());
+                                }
+                                set_game_state.set(current_state);
+                            }
+                        } else if let Some((mv, stats)) = engine.search(&current_state, limit) {
                             if current_state
                                 .make_move(mv.from_row, mv.from_col, mv.to_row, mv.to_col)
                                 .is_ok()

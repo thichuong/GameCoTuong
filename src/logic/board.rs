@@ -42,9 +42,51 @@ pub struct Board {
     pub zobrist_hash: u64,
 }
 
-impl Default for Board {
-    fn default() -> Self {
-        Self::new()
+impl Board {
+    pub fn to_fen_string(&self, turn: Color) -> String {
+        let mut fen = String::new();
+        // 1. Piece placement
+        // Iterate from rank 9 (top) to 0 (bottom)
+        for r in (0..10).rev() {
+            let mut empty_count = 0;
+            for c in 0..9 {
+                if let Some(piece) = self.grid[r][c] {
+                    if empty_count > 0 {
+                        fen.push_str(&empty_count.to_string());
+                        empty_count = 0;
+                    }
+                    let char_code = match piece.piece_type {
+                        PieceType::General => 'k',
+                        PieceType::Advisor => 'a',
+                        PieceType::Elephant => 'b',
+                        PieceType::Horse => 'n',
+                        PieceType::Chariot => 'r',
+                        PieceType::Cannon => 'c',
+                        PieceType::Soldier => 'p',
+                    };
+                    let final_char = if piece.color == Color::Red {
+                        char_code.to_ascii_uppercase()
+                    } else {
+                        char_code
+                    };
+                    fen.push(final_char);
+                } else {
+                    empty_count += 1;
+                }
+            }
+            if empty_count > 0 {
+                fen.push_str(&empty_count.to_string());
+            }
+            if r > 0 {
+                fen.push('/');
+            }
+        }
+
+        // 2. Turn
+        fen.push(' ');
+        fen.push(if turn == Color::Red { 'w' } else { 'b' }); // 'w' for Red (White equivalent), 'b' for Black
+
+        fen
     }
 }
 
