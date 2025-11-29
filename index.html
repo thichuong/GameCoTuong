@@ -1,10 +1,24 @@
-<!DOCTYPE html><html lang="en"><head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cờ Tướng</title>
-  <link rel="manifest" href="manifest.json">
-  <script type="module">import init from '/GameCoTuong/CoTuong-f5e1a36f958ad7a3.js';init('/GameCoTuong/CoTuong-f5e1a36f958ad7a3_bg.wasm');</script>
-  <link rel="icon" href="/GameCoTuong/icon-449220c3fb84c25f.png">
+  <link rel="manifest" href="manifest.json" />
+  
+<script type="module">
+import init, * as bindings from '/GameCoTuong/CoTuong-e42ad9d2752330b9.js';
+const wasm = await init({ module_or_path: '/GameCoTuong/CoTuong-e42ad9d2752330b9_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+  <link rel="icon" href="/GameCoTuong/icon-449220c3fb84c25f.png" integrity="sha384-RPfGqPXk7bylBvnJZQdSztxc3OP09j9TLscogq31VamDpd5GPPSWgCd56iZJEyVt"/>
   
   <style>
     body {
@@ -18,9 +32,7 @@
       min-height: 100vh;
     }
   </style>
-
-<link rel="preload" href="/GameCoTuong/CoTuong-f5e1a36f958ad7a3_bg.wasm" as="fetch" type="application/wasm" crossorigin="">
-<link rel="modulepreload" href="/GameCoTuong/CoTuong-f5e1a36f958ad7a3.js"></head>
+<link rel="modulepreload" href="/GameCoTuong/CoTuong-e42ad9d2752330b9.js" crossorigin="anonymous" integrity="sha384-XZCYhgqI2C8RSxfsTUbo0rBrqxMKkEdNwIBaJwN63FMf67+jAeY0SvTHWckPzs0M"><link rel="preload" href="/GameCoTuong/CoTuong-e42ad9d2752330b9_bg.wasm" crossorigin="anonymous" integrity="sha384-bGIbWLAKkExEVY8chimDu9xT+UNbt+YcOP9zw/2l6sm0LpUJLvEH9BY2YrnrcJV5" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>
@@ -28,6 +40,6 @@
       navigator.serviceWorker.register('/sw.js');
     }
   </script>
+</body>
 
-
-</body></html>
+</html>
