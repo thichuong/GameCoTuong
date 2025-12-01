@@ -89,3 +89,17 @@ Engine hỗ trợ tải cấu hình từ chuỗi JSON. Điều này hữu ích c
 - Các giá trị `val_*` là điểm số quân cờ.
 - `pst_*` là bảng điểm vị trí (Piece Square Tables), có thể là mảng 2 chiều `[[f32; 9]; 10]` để scale giá trị mặc định.
 - `pruning_method`: 0 (Dynamic), 1 (LMR), 2 (Both).
+
+### Benchmarks (Hiệu năng)
+
+Để kiểm tra hiệu năng của Engine (NPS - Nodes Per Second), bạn có thể chạy lệnh sau:
+
+```bash
+cargo test --release -- engine::bench_test --nocapture
+```
+
+Lệnh này sẽ chạy các kịch bản test hiệu năng cho:
+1.  **Khai cuộc (Opening):** Tìm kiếm ở độ sâu 5.
+2.  **Tàn cuộc (Endgame):** Tìm kiếm ở độ sâu 7.
+
+Kết quả sẽ hiển thị số nodes đã duyệt, thời gian thực thi và chỉ số NPS.

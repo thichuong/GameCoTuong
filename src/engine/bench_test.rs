@@ -7,32 +7,116 @@ mod tests {
     use crate::logic::game::GameState;
     use std::sync::Arc;
 
+    use crate::logic::board::{Color, Piece, PieceType};
+
     #[test]
-    fn test_engine_performance() {
+    fn bench_opening() {
+        println!("--- Benchmarking Opening ---");
         let config = Arc::new(EngineConfig::default());
         let mut engine = AlphaBetaEngine::new(config);
         let board = Board::new();
         let game_state = GameState {
             board,
-            turn: crate::logic::board::Color::Red,
-            // Add other fields if needed, or use default if GameState has it
+            turn: Color::Red,
             ..Default::default()
         };
 
         // Warmup
         engine.search(&game_state, SearchLimit::Depth(2), &[]);
 
-        // Measure Depth 4
         let start = std::time::Instant::now();
-        let result = engine.search(&game_state, SearchLimit::Depth(4), &[]);
+        let result = engine.search(&game_state, SearchLimit::Depth(5), &[]); // Depth 5 for opening
         let duration = start.elapsed();
 
         if let Some((_mv, stats)) = result {
-            println!("Depth 4 stats: {stats:?}");
+            println!("Opening Depth 5 stats: {stats:?}");
             println!("Time taken: {duration:?}");
-            // Assert reasonable nodes/time
-            // With TT and Move Ordering, Depth 4 should be very fast (< 100ms usually for initial position)
-            // Previous engine might have been slower.
+            let nps = (stats.nodes as f64 / duration.as_secs_f64()) as u64;
+            println!("NPS: {nps}");
+        } else {
+            panic!("Search returned None");
+        }
+    }
+
+    #[test]
+    fn bench_endgame() {
+        println!("--- Benchmarking Endgame ---");
+        let config = Arc::new(EngineConfig::default());
+        let mut engine = AlphaBetaEngine::new(config);
+
+        // Setup Endgame Position
+        // Red: King(0,4), Rook(0,0), Horse(2,2), Pawn(6,4)
+        // Black: King(9,4), Advisor(9,3), Advisor(9,5), Cannon(7,4), Rook(9,8)
+        let mut board = Board {
+            grid: [[None; 9]; 10],
+            zobrist_hash: 0,
+            red_material: 0,
+            black_material: 0,
+            red_pst: 0,
+            black_pst: 0,
+        };
+
+        // Red Pieces
+        board.grid[0][4] = Some(Piece {
+            piece_type: PieceType::General,
+            color: Color::Red,
+        });
+        board.grid[0][0] = Some(Piece {
+            piece_type: PieceType::Chariot,
+            color: Color::Red,
+        });
+        board.grid[2][2] = Some(Piece {
+            piece_type: PieceType::Horse,
+            color: Color::Red,
+        });
+        board.grid[6][4] = Some(Piece {
+            piece_type: PieceType::Soldier,
+            color: Color::Red,
+        });
+
+        // Black Pieces
+        board.grid[9][4] = Some(Piece {
+            piece_type: PieceType::General,
+            color: Color::Black,
+        });
+        board.grid[9][3] = Some(Piece {
+            piece_type: PieceType::Advisor,
+            color: Color::Black,
+        });
+        board.grid[9][5] = Some(Piece {
+            piece_type: PieceType::Advisor,
+            color: Color::Black,
+        });
+        board.grid[7][4] = Some(Piece {
+            piece_type: PieceType::Cannon,
+            color: Color::Black,
+        });
+        board.grid[9][8] = Some(Piece {
+            piece_type: PieceType::Chariot,
+            color: Color::Black,
+        });
+
+        board.zobrist_hash = board.calculate_initial_hash();
+        board.calculate_initial_score();
+
+        let game_state = GameState {
+            board,
+            turn: Color::Red,
+            ..Default::default()
+        };
+
+        // Warmup
+        engine.search(&game_state, SearchLimit::Depth(2), &[]);
+
+        let start = std::time::Instant::now();
+        let result = engine.search(&game_state, SearchLimit::Depth(7), &[]); // Deeper search for endgame
+        let duration = start.elapsed();
+
+        if let Some((_mv, stats)) = result {
+            println!("Endgame Depth 7 stats: {stats:?}");
+            println!("Time taken: {duration:?}");
+            let nps = (stats.nodes as f64 / duration.as_secs_f64()) as u64;
+            println!("NPS: {nps}");
         } else {
             panic!("Search returned None");
         }
