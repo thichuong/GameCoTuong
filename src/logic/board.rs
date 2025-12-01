@@ -1,5 +1,6 @@
 use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
+use crate::logic::eval_constants::{get_piece_value, get_pst_value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
@@ -41,6 +42,10 @@ pub struct Board {
     // (0,0) is bottom-left from Red's perspective (if Red is at bottom)
     pub grid: [[Option<Piece>; 9]; 10],
     pub zobrist_hash: u64,
+    pub red_material: i32,
+    pub black_material: i32,
+    pub red_pst: i32,
+    pub black_pst: i32,
 }
 
 impl Board {
@@ -103,9 +108,14 @@ impl Board {
         let mut board = Self {
             grid: [[None; 9]; 10],
             zobrist_hash: 0,
+            red_material: 0,
+            black_material: 0,
+            red_pst: 0,
+            black_pst: 0,
         };
         board.setup_initial_position();
         board.zobrist_hash = board.calculate_initial_hash();
+        board.calculate_initial_score();
         board
     }
 
@@ -185,7 +195,7 @@ impl Board {
     }
 
     pub fn calculate_initial_hash(&self) -> u64 {
-        let keys = ZobristKeys::new();
+        let keys = ZobristKeys::get();
         let mut hash = 0;
         for r in 0..10 {
             for c in 0..9 {
@@ -206,8 +216,37 @@ impl Board {
         hash
     }
 
+    pub fn calculate_initial_score(&mut self) {
+        self.red_material = 0;
+        self.black_material = 0;
+        self.red_pst = 0;
+        self.black_pst = 0;
+
+        for r in 0..10 {
+            for c in 0..9 {
+                if let Some(piece) = self.get_piece(r, c) {
+                    let val = get_piece_value(piece.piece_type);
+                    let pst = get_pst_value(piece.piece_type, piece.color, r, c);
+
+                    if piece.color == Color::Red {
+                        self.red_material += val;
+                        self.red_pst += pst;
+                    } else {
+                        self.black_material += val;
+                        self.black_pst += pst;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn apply_null_move(&mut self) {
+        let keys = ZobristKeys::get();
+        self.zobrist_hash ^= keys.side_key;
+    }
+
     pub fn apply_move(&mut self, mv: &Move, _turn: Color) {
-        let keys = ZobristKeys::new(); // In a real engine, we'd pass this in or have it static.
+        let keys = ZobristKeys::get(); // Use global static instance
                                        // Since we made it cheap to create (just constants/XorShift), it's okay-ish.
                                        // But ideally we should have a static instance.
                                        // For now, let's just create it. It's fast enough.
@@ -223,6 +262,15 @@ impl Board {
             self.zobrist_hash ^=
                 keys.get_piece_key(piece.piece_type, piece.color, mv.from_row, mv.from_col);
 
+            // Update Score (Remove from source)
+            let pst_from = get_pst_value(piece.piece_type, piece.color, mv.from_row, mv.from_col);
+
+            if piece.color == Color::Red {
+                self.red_pst -= pst_from;
+            } else {
+                self.black_pst -= pst_from;
+            }
+
             // 2. Remove captured piece (if any)
             if let Some(captured) = self
                 .grid
@@ -233,11 +281,32 @@ impl Board {
             {
                 self.zobrist_hash ^=
                     keys.get_piece_key(captured.piece_type, captured.color, mv.to_row, mv.to_col);
+
+                // Update Score (Remove captured)
+                let cap_val = get_piece_value(captured.piece_type);
+                let cap_pst =
+                    get_pst_value(captured.piece_type, captured.color, mv.to_row, mv.to_col);
+
+                if captured.color == Color::Red {
+                    self.red_material -= cap_val;
+                    self.red_pst -= cap_pst;
+                } else {
+                    self.black_material -= cap_val;
+                    self.black_pst -= cap_pst;
+                }
             }
 
             // 3. Place piece at destination
             self.zobrist_hash ^=
                 keys.get_piece_key(piece.piece_type, piece.color, mv.to_row, mv.to_col);
+
+            // Update Score (Add to dest)
+            let pst_to = get_pst_value(piece.piece_type, piece.color, mv.to_row, mv.to_col);
+            if piece.color == Color::Red {
+                self.red_pst += pst_to;
+            } else {
+                self.black_pst += pst_to;
+            }
 
             // Update grid
             // Move piece

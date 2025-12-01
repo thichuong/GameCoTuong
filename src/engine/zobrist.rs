@@ -34,10 +34,17 @@ impl XorShift64 {
     }
 }
 
-// Global instance of ZobristKeys (lazy_static or just a function to create it)
-// Since we want to avoid lazy_static dependency, we can just instantiate it in the Engine.
+use std::sync::OnceLock;
+
+// Global instance of ZobristKeys
+static ZOBRIST_KEYS: OnceLock<ZobristKeys> = OnceLock::new();
+
 impl ZobristKeys {
-    pub fn new() -> Self {
+    pub fn get() -> &'static Self {
+        ZOBRIST_KEYS.get_or_init(Self::new)
+    }
+
+    fn new() -> Self {
         let mut rng = XorShift64::new(123_456_789);
         let mut piece_keys = [0; TABLE_SIZE];
         for key in &mut piece_keys {

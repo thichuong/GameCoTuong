@@ -70,3 +70,34 @@ pub const PST_CANNON: [[i32; 9]; 10] = [
     [ 10,  10,  10,  10,  10,  10,  10,  10,  10],
     [  0,   0,   0,   0,   0,   0,   0,   0,   0],
 ];
+
+use crate::logic::board::{Color, PieceType};
+
+pub fn get_piece_value(pt: PieceType) -> i32 {
+    match pt {
+        PieceType::General => VAL_KING,
+        PieceType::Advisor => VAL_ADVISOR,
+        PieceType::Elephant => VAL_ELEPHANT,
+        PieceType::Horse => VAL_HORSE,
+        PieceType::Chariot => VAL_ROOK,
+        PieceType::Cannon => VAL_CANNON,
+        PieceType::Soldier => VAL_PAWN,
+    }
+}
+
+pub fn get_pst_value(pt: PieceType, color: Color, row: usize, col: usize) -> i32 {
+    let (r, c) = if color == Color::Red {
+        (row, col)
+    } else {
+        (9 - row, col)
+    };
+
+    let val = match pt {
+        PieceType::Soldier => PST_PAWN.get(r).and_then(|row| row.get(c)),
+        PieceType::Horse => PST_HORSE.get(r).and_then(|row| row.get(c)),
+        PieceType::Chariot => PST_ROOK.get(r).and_then(|row| row.get(c)),
+        PieceType::Cannon => PST_CANNON.get(r).and_then(|row| row.get(c)),
+        _ => Some(&0),
+    };
+    *val.unwrap_or(&0)
+}

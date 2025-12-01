@@ -117,6 +117,37 @@ impl AlphaBetaEngine {
             return Some(score);
         }
 
+        // Null Move Pruning
+        // Conditions:
+        // 1. Depth >= 3 (avoid pruning at low depths)
+        // 2. Not in check (null move is illegal in check)
+        // 3. Not a mate score (beta < 15000)
+        // 4. Not in PV? (We don't track PV explicitly here yet, but beta-alpha > 1 usually implies PV)
+        //    For simplicity, we just do it if depth >= 3.
+        if depth >= 3 && beta.abs() < 15000 && !crate::logic::rules::is_in_check(board, turn) {
+            let r = 2; // Reduction
+            let mut next_board = board.clone();
+            next_board.apply_null_move();
+
+            // Null window search with reduced depth
+            // We pass -beta, -beta+1 because we want to prove that null move is >= beta (fail high)
+            if let Some(score) = self.alpha_beta(
+                &next_board,
+                depth - 1 - r,
+                -beta,
+                -beta + 1,
+                turn.opposite(),
+            ) {
+                if -score >= beta {
+                    self.history_stack.pop();
+                    return Some(beta); // Cutoff
+                }
+            } else {
+                self.history_stack.pop();
+                return None; // Time out
+            }
+        }
+
         let mut best_move = None;
         if let Some(mv) = self.tt.get_move(hash) {
             best_move = Some(mv);
