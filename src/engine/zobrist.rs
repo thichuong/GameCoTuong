@@ -76,6 +76,11 @@ impl ZobristKeys {
         // ((pt_idx * 2 + c_idx) * 10 + row) * 9 + col
         // Index calculation is guaranteed to be within bounds
         let idx = ((pt_idx * NUM_COLORS + c_idx) * NUM_ROWS + row) * NUM_COLS + col;
+        // Safety: idx is calculated from bounded enums and valid row/col ranges.
+        // pt_idx < 7, c_idx < 2, row < 10, col < 9.
+        // Max idx = ((6*2+1)*10+9)*9+8 = (13*10+9)*9+8 = 139*9+8 = 1251+8 = 1259.
+        // TABLE_SIZE = 7*2*10*9 = 1260.
+        // So idx is always < TABLE_SIZE.
         #[allow(clippy::indexing_slicing)]
         self.piece_keys[idx]
     }
@@ -119,6 +124,7 @@ impl TranspositionTable {
     }
 
     pub fn probe(&self, key: u64, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
+        // Safety: key % size is always < size. size is usize.
         #[allow(clippy::cast_possible_truncation)]
         let idx = (key % (self.size as u64)) as usize;
         if let Some(entry) = self.entries.get(idx).and_then(|e| e.as_ref()) {
@@ -142,6 +148,7 @@ impl TranspositionTable {
     }
 
     pub fn get_move(&self, key: u64) -> Option<Move> {
+        // Safety: key % size is always < size.
         #[allow(clippy::cast_possible_truncation)]
         let idx = (key % (self.size as u64)) as usize;
         #[allow(clippy::indexing_slicing)]
@@ -161,6 +168,7 @@ impl TranspositionTable {
         flag: TTFlag,
         best_move: Option<Move>,
     ) {
+        // Safety: key % size is always < size.
         #[allow(clippy::cast_possible_truncation)]
         let idx = (key % (self.size as u64)) as usize;
 

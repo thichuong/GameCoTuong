@@ -137,6 +137,9 @@ impl AlphaBetaEngine {
             // Base = 8
             let d = f32::from(depth);
             let multiplier = self.config.pruning_multiplier;
+            // Safety: depth is u8 (max 255), multiplier is f32 (max 2.0).
+            // 8 + 255^2 * 2.0 ≈ 130,000, which fits easily in usize.
+            // All inputs are positive, so no sign loss.
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let limit = (8.0 + d * d * multiplier) as usize;
             let limit = limit.min(moves.len());
