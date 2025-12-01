@@ -100,8 +100,117 @@ pub fn BoardView(
         }
     };
 
+    let get_piece_symbol = |p: PieceType, c: Color| -> &'static str {
+        match p {
+            PieceType::General => {
+                if c == Color::Red {
+                    "帥"
+                } else {
+                    "將"
+                }
+            }
+            PieceType::Advisor => {
+                if c == Color::Red {
+                    "仕"
+                } else {
+                    "士"
+                }
+            }
+            PieceType::Elephant => {
+                if c == Color::Red {
+                    "相"
+                } else {
+                    "象"
+                }
+            }
+            PieceType::Horse => {
+                if c == Color::Red {
+                    "傌"
+                } else {
+                    "馬"
+                }
+            }
+            PieceType::Chariot => {
+                if c == Color::Red {
+                    "俥"
+                } else {
+                    "車"
+                }
+            }
+            PieceType::Cannon => {
+                if c == Color::Red {
+                    "炮"
+                } else {
+                    "砲"
+                }
+            }
+            PieceType::Soldier => {
+                if c == Color::Red {
+                    "兵"
+                } else {
+                    "卒"
+                }
+            }
+        }
+    };
+
+    let captured_row_style = "
+        display: flex;
+        justify-content: center;
+        gap: 5px;
+        width: 100%;
+        min-height: 30px;
+        margin: 5px 0;
+        flex-wrap: wrap;
+    ";
+
+    let captured_piece_style = |c: Color| {
+        format!(
+            "
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background-color: #f0d9b5;
+        color: {};
+        border: 1px solid {};
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-family: 'KaiTi', '楷体', serif;
+        font-weight: bold;
+        font-size: 18px;
+        line-height: 1;
+        box-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+    ",
+            if c == Color::Red { "#c00" } else { "#000" },
+            if c == Color::Red { "#c00" } else { "#000" }
+        )
+    };
+
     view! {
         <div style="display: flex; flex-direction: column; align-items: center; width: 100%; padding: 5px; box-sizing: border-box;">
+            // Black's Lost Pieces (Top)
+            <div style=captured_row_style>
+                {move || {
+                    let state = game_state.get();
+                    let mut black_lost = Vec::new();
+                    for record in &state.history {
+                        if let Some(p) = record.captured {
+                            if p.color == Color::Black {
+                                black_lost.push(p);
+                            }
+                        }
+                    }
+                    black_lost.iter().map(|p| {
+                        view! {
+                            <div style=captured_piece_style(Color::Black)>
+                                {get_piece_symbol(p.piece_type, Color::Black)}
+                            </div>
+                        }
+                    }).collect::<Vec<_>>()
+                }}
+            </div>
+
             <div style=container_style>
                 // Layer 1: SVG Board Lines
                 <svg viewBox="0 0 450 500" style="display: block; width: 100%; height: 100%; z-index: 1;">
@@ -233,6 +342,28 @@ pub fn BoardView(
                 </div>
             </div>
 
+            // Red's Lost Pieces (Bottom)
+            <div style=captured_row_style>
+                {move || {
+                    let state = game_state.get();
+                    let mut red_lost = Vec::new();
+                    for record in &state.history {
+                        if let Some(p) = record.captured {
+                            if p.color == Color::Red {
+                                red_lost.push(p);
+                            }
+                        }
+                    }
+                    red_lost.iter().map(|p| {
+                        view! {
+                            <div style=captured_piece_style(Color::Red)>
+                                {get_piece_symbol(p.piece_type, Color::Red)}
+                            </div>
+                        }
+                    }).collect::<Vec<_>>()
+                }}
+            </div>
+
             <div class="status" style="margin-top: 10px; font-size: 1.2em; color: #eee;">
                 {move || {
                     let state = game_state.get();
@@ -257,12 +388,12 @@ fn render_piece(piece: Option<Piece>, is_selected: bool, is_last_move_dest: bool
             };
 
             let scale = if is_selected {
-                "transform: scale(1.15);"
+                "transform: translateY(-5px) scale(1.15);"
             } else {
                 ""
             };
             let shadow = if is_selected {
-                "box-shadow: 0 0 10px #a8e6cf, 2px 2px 5px rgba(0,0,0,0.4);"
+                "box-shadow: 0 0 15px #ffeb3b, 0 0 5px #ffeb3b, 2px 5px 10px rgba(0,0,0,0.5); border-color: #ffeb3b;"
             } else {
                 "box-shadow: 1px 1px 4px rgba(0,0,0,0.4);"
             };
@@ -328,11 +459,7 @@ fn render_piece(piece: Option<Piece>, is_selected: bool, is_last_move_dest: bool
                     .piece-hover {
                         transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
                     }
-                    .piece-hover:hover {
-                        transform: translateY(-5px) scale(1.1) !important;
-                        box-shadow: 0 15px 25px rgba(0,0,0,0.4) !important;
-                        z-index: 100 !important;
-                    }
+                    /* Removed hover effect on mouseover as per user request */
                     
                     @keyframes slam {
                         0% { transform: scale(1.5); opacity: 0; }

@@ -2,7 +2,7 @@ use crate::components::board::BoardView;
 use crate::engine::config::EngineConfig;
 use crate::engine::search::AlphaBetaEngine;
 use crate::engine::{SearchLimit, Searcher};
-use crate::logic::board::Color;
+use crate::logic::board::{Color, PieceType};
 use crate::logic::game::{GameState, GameStatus};
 use leptos::{
     component, create_effect, create_signal, document, event_target_value, set_timeout, view,
@@ -40,6 +40,60 @@ pub fn App() -> impl IntoView {
     // Dual Configs
     let (red_config, set_red_config) = create_signal(EngineConfig::default());
     let (black_config, set_black_config) = create_signal(EngineConfig::default());
+
+    let get_piece_symbol = |p: PieceType, c: Color| -> &'static str {
+        match p {
+            PieceType::General => {
+                if c == Color::Red {
+                    "帥"
+                } else {
+                    "將"
+                }
+            }
+            PieceType::Advisor => {
+                if c == Color::Red {
+                    "仕"
+                } else {
+                    "士"
+                }
+            }
+            PieceType::Elephant => {
+                if c == Color::Red {
+                    "相"
+                } else {
+                    "象"
+                }
+            }
+            PieceType::Horse => {
+                if c == Color::Red {
+                    "傌"
+                } else {
+                    "馬"
+                }
+            }
+            PieceType::Chariot => {
+                if c == Color::Red {
+                    "俥"
+                } else {
+                    "車"
+                }
+            }
+            PieceType::Cannon => {
+                if c == Color::Red {
+                    "炮"
+                } else {
+                    "砲"
+                }
+            }
+            PieceType::Soldier => {
+                if c == Color::Red {
+                    "兵"
+                } else {
+                    "卒"
+                }
+            }
+        }
+    };
 
     // AI Move Effect
     create_effect(move |_| {
@@ -552,6 +606,49 @@ pub fn App() -> impl IntoView {
                     border-bottom: 1px solid #555;
                     padding-bottom: 10px;
                 }
+
+                .captured-panel {
+                    padding: 10px;
+                    background: #3a3a3a;
+                    border-bottom: 1px solid #555;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 5px;
+                }
+
+                .captured-row {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    font-size: 0.9em;
+                }
+
+                .captured-label {
+                    width: 60px;
+                    font-weight: bold;
+                    color: #aaa;
+                }
+
+                .captured-pieces {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 2px;
+                }
+
+                .captured-piece {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50%;
+                    background: #f0d9b5;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    font-family: 'KaiTi', '楷体', serif;
+                    font-weight: bold;
+                    font-size: 16px;
+                    line-height: 1;
+                    border: 1px solid #5c3a1e;
+                }
                 "
             </style>
 
@@ -650,6 +747,8 @@ pub fn App() -> impl IntoView {
                         <span>"Lịch sử nước đi"</span>
                         <span style="font-size: 0.8em; opacity: 0.7;">{move || format!("{} moves", game_state.get().history.len())}</span>
                     </div>
+
+
                     <ul class="log-list">
                         {move || {
                             game_state.get().history.iter().enumerate().rev().map(|(i, record)| {
@@ -668,7 +767,18 @@ pub fn App() -> impl IntoView {
                                     <li class="log-item">
                                         <div class="move-info">
                                             <span>{format!("{}. {} {}", i + 1, turn_icon, turn_text)}</span>
-                                            <span>{format!("{from_str} ➝ {to_str}")}</span>
+                                            <div style="display: flex; align-items: center; gap: 5px;">
+                                                <span>{format!("{from_str} ➝ {to_str}")}</span>
+                                                {if let Some(cap) = record.captured {
+                                                    view! {
+                                                        <span style="color: #ff9800; font-size: 0.9em; margin-left: 5px;">
+                                                            {format!("(Eat {})", get_piece_symbol(cap.piece_type, cap.color))}
+                                                        </span>
+                                                    }.into_view()
+                                                } else {
+                                                    view! {}.into_view()
+                                                }}
+                                            </div>
                                         </div>
                                         {if note.is_empty() {
                                             view! {}.into_view()
