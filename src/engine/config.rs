@@ -2,9 +2,10 @@ use crate::engine::eval_constants::{
     PST_CANNON, PST_HORSE, PST_PAWN, PST_ROOK, VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE,
     VAL_KING, VAL_PAWN, VAL_ROOK,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EngineConfig {
     // Evaluation Parameters
     pub val_pawn: i32,
@@ -256,5 +257,19 @@ mod tests {
 
         assert_eq!(config.val_pawn, 0);
         assert_eq!(config.val_rook, -VAL_ROOK);
+    }
+
+    #[test]
+    fn test_deserialize_absolute_config() {
+        let json = r#"{
+            "val_pawn": 123,
+            "val_king": 9999
+        }"#;
+
+        let config: EngineConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.val_pawn, 123);
+        assert_eq!(config.val_king, 9999);
+        // Check default values
+        assert_eq!(config.val_rook, VAL_ROOK);
     }
 }

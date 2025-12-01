@@ -6,11 +6,12 @@ use crate::logic::board::Color;
 use crate::logic::game::{GameState, GameStatus};
 use leptos::{
     component, create_effect, create_signal, document, event_target_value, set_timeout, view,
-    wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet,
+    wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet, WriteSignal,
 };
 use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Duration;
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,6 +306,69 @@ pub fn App() -> impl IntoView {
     // Helper to create setters for config fields
     // We need to clone the config, update field, and set it back.
     // Since we can't easily pass generic field accessors, we'll just inline the logic in the view or create specific closures.
+
+    let handle_file_upload = |setter: WriteSignal<EngineConfig>| {
+        move |ev: web_sys::Event| {
+            let target = ev
+                .target()
+                .unwrap()
+                .dyn_into::<web_sys::HtmlInputElement>()
+                .unwrap();
+            if let Some(files) = target.files() {
+                if let Some(file) = files.get(0) {
+                    let reader = web_sys::FileReader::new().unwrap();
+                    let reader_c = reader.clone();
+
+                    let on_load = Closure::wrap(Box::new(move |_e: web_sys::Event| {
+                        if let Ok(res) = reader_c.result() {
+                            if let Some(text) = res.as_string() {
+                                match serde_json::from_str::<EngineConfig>(&text) {
+                                    Ok(config) => {
+                                        web_sys::console::log_1(
+                                            &"Config loaded successfully".into(),
+                                        );
+                                        setter.set(config);
+                                    }
+                                    Err(e) => {
+                                        web_sys::console::log_1(
+                                            &format!("Error parsing config: {:?}", e).into(),
+                                        );
+                                        let _ = web_sys::window().unwrap().alert_with_message(
+                                            &format!("Error parsing JSON: {}", e),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }) as Box<dyn FnMut(_)>);
+
+                    reader.set_onload(Some(on_load.as_ref().unchecked_ref()));
+                    on_load.forget();
+
+                    reader.read_as_text(&file).unwrap();
+                }
+            }
+        }
+    };
+
+    let export_config = |config: EngineConfig, filename: &str| {
+        if let Ok(json) = serde_json::to_string_pretty(&config) {
+            if let Ok(blob) =
+                web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&json.into()))
+            {
+                if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
+                    if let Ok(a) = document().create_element("a") {
+                        if let Ok(a) = a.dyn_into::<web_sys::HtmlAnchorElement>() {
+                            a.set_href(&url);
+                            a.set_download(filename);
+                            a.click();
+                            let _ = web_sys::Url::revoke_object_url(&url);
+                        }
+                    }
+                }
+            }
+        }
+    };
 
     view! {
         <div class="game-container" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-height: 100vh; background-color: #222; color: #eee; display: flex; flex-direction: column; align-items: center;">
@@ -617,6 +681,11 @@ pub fn App() -> impl IntoView {
             <div class="config-panel">
                 <div class="config-column">
                     <div class="config-title" style="color: #ff6b6b;">"Cấu hình Đỏ (Red)"</div>
+                    <div style="margin-bottom: 15px; text-align: center;">
+                        <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
+                        <input type="file" accept=".json" on:change=handle_file_upload(set_red_config) style="color: #ccc;" />
+                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(red_config.get(), "red_config.json")>"Export JSON"</button>
+                    </div>
                     {
                         move || {
                             let config = red_config.get();
@@ -647,6 +716,11 @@ pub fn App() -> impl IntoView {
                 </div>
                 <div class="config-column">
                     <div class="config-title" style="color: #a8e6cf;">"Cấu hình Đen (Black)"</div>
+                    <div style="margin-bottom: 15px; text-align: center;">
+                        <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
+                        <input type="file" accept=".json" on:change=handle_file_upload(set_black_config) style="color: #ccc;" />
+                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(black_config.get(), "black_config.json")>"Export JSON"</button>
+                    </div>
                     {
                         move || {
                             let config = black_config.get();
