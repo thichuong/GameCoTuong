@@ -45,7 +45,7 @@ fn test_three_fold_repetition() {
 fn test_engine_excludes_moves() {
     use crate::engine::config::EngineConfig;
     use crate::engine::search::AlphaBetaEngine;
-    use crate::engine::{Move, SearchLimit, Searcher};
+    use crate::engine::{SearchLimit, Searcher};
     use std::sync::Arc;
 
     let config = Arc::new(EngineConfig::default());

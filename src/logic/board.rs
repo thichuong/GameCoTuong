@@ -257,3 +257,52 @@ impl Board {
         self.zobrist_hash ^= keys.side_key;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_initial_setup() {
+        let board = Board::new();
+        // Check Red General
+        let piece = board.get_piece(0, 4).unwrap();
+        assert_eq!(piece.piece_type, PieceType::General);
+        assert_eq!(piece.color, Color::Red);
+
+        // Check Black General
+        let piece = board.get_piece(9, 4).unwrap();
+        assert_eq!(piece.piece_type, PieceType::General);
+        assert_eq!(piece.color, Color::Black);
+    }
+
+    #[test]
+    fn test_fen_generation() {
+        let board = Board::new();
+        let fen = board.to_fen_string(Color::Red);
+        // Standard starting FEN
+        assert_eq!(
+            fen,
+            "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w"
+        );
+    }
+
+    #[test]
+    fn test_apply_move() {
+        let mut board = Board::new();
+        // Move Red Central Soldier forward
+        let mv = Move {
+            from_row: 3,
+            from_col: 4,
+            to_row: 4,
+            to_col: 4,
+            score: 0,
+        };
+        board.apply_move(&mv, Color::Red);
+
+        assert!(board.get_piece(3, 4).is_none());
+        let piece = board.get_piece(4, 4).unwrap();
+        assert_eq!(piece.piece_type, PieceType::Soldier);
+        assert_eq!(piece.color, Color::Red);
+    }
+}

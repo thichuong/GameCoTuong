@@ -202,4 +202,59 @@ mod tests {
         // Row 4, Col 0 is 10 in default. Scaled by 2.0 should be 20.
         assert_eq!(config.pst_pawn[4][0], 20);
     }
+    #[test]
+    fn test_load_config_invalid_json() {
+        let json = "{ invalid json }";
+        let result = EngineConfig::load_from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_config_partial() {
+        let json = r#"{
+            "val_pawn": 2.0
+        }"#;
+        let config = EngineConfig::load_from_json(json).unwrap();
+        // Pawn should be scaled
+        assert_eq!(config.val_pawn, (VAL_PAWN as f32 * 2.0) as i32);
+        // Others should be default
+        assert_eq!(config.val_rook, VAL_ROOK);
+    }
+
+    #[test]
+    fn test_load_config_full() {
+        let json = r#"{
+            "val_pawn": 1.1,
+            "val_advisor": 1.2,
+            "val_elephant": 1.3,
+            "val_horse": 1.4,
+            "val_cannon": 1.5,
+            "val_rook": 1.6,
+            "val_king": 1.7,
+            "score_hash_move": 0.5,
+            "score_capture_base": 0.6,
+            "score_killer_move": 0.7,
+            "score_history_max": 0.8,
+            "pruning_method": 1,
+            "pruning_multiplier": 2.5
+        }"#;
+        let config = EngineConfig::load_from_json(json).unwrap();
+
+        assert_eq!(config.val_pawn, (VAL_PAWN as f32 * 1.1) as i32);
+        assert_eq!(config.val_advisor, (VAL_ADVISOR as f32 * 1.2) as i32);
+        assert_eq!(config.pruning_method, 1);
+        assert!((config.pruning_multiplier - 2.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_load_config_edge_cases() {
+        let json = r#"{
+            "val_pawn": 0.0,
+            "val_rook": -1.0
+        }"#;
+        let config = EngineConfig::load_from_json(json).unwrap();
+
+        assert_eq!(config.val_pawn, 0);
+        assert_eq!(config.val_rook, -VAL_ROOK);
+    }
 }

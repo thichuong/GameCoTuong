@@ -52,3 +52,40 @@ Các tham số ảnh hưởng đến thuật toán tìm kiếm Alpha-Beta và c�
 2. Chạy server: `trunk serve` hoăc `trunk serve --open` để mở trình duyệt ngay.
 3. Mở `http://localhost:8080`
 4. `trunk serve --release` để build release
+
+## Phát triển (Development)
+
+### Chạy Tests
+Dự án bao gồm các unit tests cho logic game và engine. Để chạy tests:
+
+```bash
+cargo test
+```
+
+### Cấu hình Engine qua JSON
+Engine hỗ trợ tải cấu hình từ chuỗi JSON. Điều này hữu ích cho việc thử nghiệm các tham số khác nhau mà không cần biên dịch lại.
+
+**Cấu trúc JSON mẫu:**
+
+```json
+{
+  "val_pawn": 40,
+  "val_advisor": 120,
+  "val_elephant": 120,
+  "val_horse": 270,
+  "val_cannon": 285,
+  "val_rook": 600,
+  "val_king": 10000,
+  "pst_pawn": [[1.0, ...]], 
+  "score_hash_move": 2000000,
+  "score_capture_base": 1000000,
+  "score_killer_move": 900000,
+  "score_history_max": 800000,
+  "pruning_method": 0,
+  "pruning_multiplier": 1.0
+}
+```
+
+- Các giá trị `val_*` là điểm số quân cờ.
+- `pst_*` là bảng điểm vị trí (Piece Square Tables), có thể là mảng 2 chiều `[[f32; 9]; 10]` để scale giá trị mặc định.
+- `pruning_method`: 0 (Dynamic), 1 (LMR), 2 (Both).
