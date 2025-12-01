@@ -244,6 +244,64 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    let dropdown = |label: &'static str,
+                    val: i32,
+                    options: Vec<(i32, &'static str)>,
+                    setter: Box<dyn Fn(i32)>| {
+        view! {
+            <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
+                    <span>{label}</span>
+                </div>
+                <select
+                    style="width: 100%; padding: 4px; background: #444; color: #eee; border: 1px solid #555; border-radius: 4px;"
+                    on:change=move |ev| {
+                        if let Ok(v) = event_target_value(&ev).parse::<i32>() {
+                            setter(v);
+                        }
+                    }
+                    prop:value=val
+                >
+                    {options.into_iter().map(|(v, txt)| {
+                        view! {
+                            <option value=v selected={v == val}>{txt}</option>
+                        }
+                    }).collect::<Vec<_>>()}
+                </select>
+            </div>
+        }
+    };
+
+    let float_slider = |label: &'static str,
+                        val: f32,
+                        min: f32,
+                        max: f32,
+                        step: f32,
+                        setter: Box<dyn Fn(f32)>| {
+        view! {
+            <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
+                    <span>{label}</span>
+                    <span>{format!("{:.1}", val)}</span>
+                </div>
+                <input
+                    type="range"
+                    min=min
+                    max=max
+                    step=step
+                    value=val
+                    prop:value=val
+                    style="width: 100%; accent-color: #a8e6cf;"
+                    on:input=move |ev| {
+                        if let Ok(v) = event_target_value(&ev).parse::<f32>() {
+                            setter(v);
+                        }
+                    }
+                />
+            </div>
+        }
+    };
+
     // Helper to create setters for config fields
     // We need to clone the config, update field, and set it back.
     // Since we can't easily pass generic field accessors, we'll just inline the logic in the view or create specific closures.
@@ -576,7 +634,12 @@ pub fn App() -> impl IntoView {
                                     {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_capture_base = v; set_red_config.set(c); }))}
                                     {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_killer_move = v; set_red_config.set(c); }))}
                                     {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_history_max = v; set_red_config.set(c); }))}
-                                    {slider("Pruning Ratio (%)", config.pruning_discard_ratio, 0, 90, 5, Box::new(move |v| { let mut c = red_config.get(); c.pruning_discard_ratio = v; set_red_config.set(c); }))}
+                                    {dropdown("Pruning Method", config.pruning_method, vec![
+                                        (0, "Dynamic Limiting"),
+                                        (1, "Late Move Reductions (LMR)"),
+                                        (2, "Both (Aggressive)"),
+                                    ], Box::new(move |v| { let mut c = red_config.get(); c.pruning_method = v; set_red_config.set(c); }))}
+                                    {float_slider("Multiplier", config.pruning_multiplier, 0.1, 2.0, 0.1, Box::new(move |v| { let mut c = red_config.get(); c.pruning_multiplier = v; set_red_config.set(c); }))}
                                 </div>
                             }
                         }
@@ -601,7 +664,12 @@ pub fn App() -> impl IntoView {
                                     {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_capture_base = v; set_black_config.set(c); }))}
                                     {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_killer_move = v; set_black_config.set(c); }))}
                                     {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_history_max = v; set_black_config.set(c); }))}
-                                    {slider("Pruning Ratio (%)", config.pruning_discard_ratio, 0, 90, 5, Box::new(move |v| { let mut c = black_config.get(); c.pruning_discard_ratio = v; set_black_config.set(c); }))}
+                                    {dropdown("Pruning Method", config.pruning_method, vec![
+                                        (0, "Dynamic Limiting"),
+                                        (1, "Late Move Reductions (LMR)"),
+                                        (2, "Both (Aggressive)"),
+                                    ], Box::new(move |v| { let mut c = black_config.get(); c.pruning_method = v; set_black_config.set(c); }))}
+                                    {float_slider("Multiplier", config.pruning_multiplier, 0.1, 2.0, 0.1, Box::new(move |v| { let mut c = black_config.get(); c.pruning_multiplier = v; set_black_config.set(c); }))}
                                 </div>
                             }
                         }

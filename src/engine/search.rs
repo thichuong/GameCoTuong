@@ -129,28 +129,48 @@ impl AlphaBetaEngine {
             return Some(-20000 + (10 - i32::from(depth)));
         }
 
-        // Pruning: Discard ratio
-        if depth >= 3 && self.config.pruning_discard_ratio > 0 {
-            let total = moves.len();
-            let keep_ratio = 100 - self.config.pruning_discard_ratio;
-            #[allow(clippy::cast_sign_loss)]
-            let keep_count = (total * (keep_ratio.max(0) as usize)) / 100;
-            let keep_count = keep_count.max(1); // Always keep at least the best move
-            if keep_count < total {
-                moves.truncate(keep_count);
+        // Dynamic Move Limiting (Forward Pruning)
+        // Method 0: Dynamic Limiting
+        // Method 2: Both
+        if self.config.pruning_method == 0 || self.config.pruning_method == 2 {
+            // Formula: keep_count = base + (depth^2 * multiplier)
+            // Base = 8
+            let d = f32::from(depth);
+            let multiplier = self.config.pruning_multiplier;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let limit = (8.0 + d * d * multiplier) as usize;
+            let limit = limit.min(moves.len());
+            if moves.len() > limit {
+                moves.truncate(limit);
             }
         }
 
         let mut best_score = -30000;
         let mut best_move_this_node = None; // Renamed to avoid conflict with `best_move` from TT
         let alpha_orig = alpha;
-        let moves_searched = 0;
+        let mut moves_searched = 0;
 
         for mv in moves {
             let mut next_board = board.clone();
             next_board.apply_move(&mv, turn);
 
             let mut score;
+
+            // LMR Logic
+            let mut reduction = 0;
+            if depth >= 3
+                && moves_searched >= 4
+                && (self.config.pruning_method == 1 || self.config.pruning_method == 2)
+            {
+                let is_capture = board.get_piece(mv.to_row, mv.to_col).is_some();
+                // Also check if it gives check? (Expensive to check here, maybe skip for now)
+                if !is_capture {
+                    // Formula: reduction = 1 + ln(depth) * ln(moves_searched) / 2
+                    let r = 1.0 + (f64::from(depth).ln() * (moves_searched as f64).ln()) / 2.0;
+                    reduction = (r as u8).min(depth - 1);
+                }
+            }
+
             if moves_searched == 0 {
                 // First move: Full window search
                 let val = self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
@@ -162,9 +182,34 @@ impl AlphaBetaEngine {
                     Some(v) => score = -v,
                 }
             } else {
-                // Late moves: Null window search (PVS)
-                let val =
-                    self.alpha_beta(&next_board, depth - 1, -alpha - 1, -alpha, turn.opposite());
+                // Late moves: Null window search (PVS) with LMR
+                // Try with reduced depth first
+                let search_depth = depth - 1 - reduction;
+
+                // Ensure we don't drop below 0 (handled by min(depth-1) above, but safe check)
+                // if search_depth == 0 { search_depth = 1; } // This caused infinite recursion at depth 1!
+
+                let mut val = self.alpha_beta(
+                    &next_board,
+                    search_depth,
+                    -alpha - 1,
+                    -alpha,
+                    turn.opposite(),
+                );
+
+                // If we reduced and it failed high (score > alpha), re-search with full depth (null window)
+                if let Some(v) = val {
+                    if -v > alpha && reduction > 0 {
+                        val = self.alpha_beta(
+                            &next_board,
+                            depth - 1,
+                            -alpha - 1,
+                            -alpha,
+                            turn.opposite(),
+                        );
+                    }
+                }
+
                 match val {
                     None => {
                         self.history_stack.pop();
@@ -175,12 +220,6 @@ impl AlphaBetaEngine {
 
                 if score > alpha && score < beta {
                     // Fail high in null window, re-search with full window
-                    // We need to re-search because the move might be better than alpha
-                    // but we only proved it's > alpha, not exact score.
-                    // Actually, if score > alpha, we found a better move.
-                    // If score >= beta, we cutoff.
-                    // If alpha < score < beta, we need exact score.
-                    // Re-search:
                     let val =
                         self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
                     match val {
@@ -190,30 +229,8 @@ impl AlphaBetaEngine {
                         }
                         Some(v) => score = -v,
                     }
-                    // Use the re-search score if it's valid (it should be)
-                    // But wait, if re_score returns None (timeout), we should propagate it.
-                    // The ? operator handles None.
-                    // So we just update score.
-                    // However, we can't assign to `score` easily if it's let binding.
-                    // Let's restructure.
-                    // But wait, `score` is shadowed? No.
-                    // We need to update `score`.
-                    // Rust doesn't allow re-assignment if not mut.
-                    // Let's make score mutable or handle it.
-                    // Actually, simpler:
-                    /*
-                    score = ...
-                    if score > alpha && score < beta {
-                        score = ...
-                    }
-                    */
-                    // But `score` is defined inside loop? No, I defined `let score;` above.
-                    // Wait, I can't reassign `score` if it's not mut.
-                    // Let's make it `let mut score`.
                 }
             }
-            // Wait, I need to implement the re-search logic correctly.
-            // Let's rewrite the loop body.
 
             if score > best_score {
                 best_score = score;
@@ -222,6 +239,9 @@ impl AlphaBetaEngine {
             if score > alpha {
                 alpha = score;
             }
+
+            moves_searched += 1;
+
             if alpha >= beta {
                 // Killer Heuristic: Store quiet move that caused cutoff
                 // A move is considered quiet if it's not a capture (score < 1_000_000)

@@ -41,11 +41,11 @@ Các tham số ảnh hưởng đến thuật toán tìm kiếm Alpha-Beta và c�
   - Giới hạn điểm thưởng tối đa cho History Heuristic (thống kê các nước đi tốt theo lịch sử).
   - Giúp AI ưu tiên các nước đi thường xuyên thành công trong quá khứ.
 
-- **Pruning Ratio (Tỉ lệ cắt tỉa):**
-  - **Đơn vị:** Phần trăm (%).
-  - **Tác dụng:** Tại độ sâu tìm kiếm >= 3, AI sẽ sắp xếp các nước đi và chỉ giữ lại một phần các nước đi tốt nhất, loại bỏ (cắt tỉa) các nước đi yếu hơn theo tỉ lệ này.
-  - **Ví dụ:** Nếu Pruning Ratio là 50%, AI sẽ loại bỏ 50% số nước đi được đánh giá thấp nhất và chỉ tính toán 50% nước đi tốt nhất.
-  - **Ảnh hưởng:** Tăng tỉ lệ này giúp AI tính toán nhanh hơn (đi sâu hơn) nhưng có rủi ro bỏ sót các nước đi chiến thuật bất ngờ (horizon effect).
+- **Pruning Method (Phương pháp cắt tỉa):**
+  - **Dynamic Limiting (Giới hạn động):** Giữ lại số lượng nước đi dựa trên công thức `8 + depth^2 * multiplier`.
+    - **Multiplier (Hệ số nhân):** Điều chỉnh độ rộng của tìm kiếm (0.1 - 2.0). Giá trị càng cao càng giữ lại nhiều nước đi (an toàn hơn nhưng chậm hơn).
+  - **Late Move Reductions (LMR):** Giảm độ sâu tìm kiếm cho các nước đi ở cuối danh sách.
+  - **Both (Cả hai):** Kết hợp cả hai phương pháp để tối ưu tốc độ.
 
 ## Cách chạy
 1. Cài đặt Trunk: `cargo install trunk`

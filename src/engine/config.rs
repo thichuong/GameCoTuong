@@ -25,7 +25,8 @@ pub struct EngineConfig {
     pub score_capture_base: i32,
     pub score_killer_move: i32,
     pub score_history_max: i32,
-    pub pruning_discard_ratio: i32,
+    pub pruning_method: i32, // 0: Dynamic Limiting, 1: LMR, 2: Both
+    pub pruning_multiplier: f32,
 }
 
 impl Default for EngineConfig {
@@ -48,7 +49,8 @@ impl Default for EngineConfig {
             score_capture_base: 1_000_000,
             score_killer_move: 900_000,
             score_history_max: 800_000,
-            pruning_discard_ratio: 50,
+            pruning_method: 0, // Default to Dynamic Limiting
+            pruning_multiplier: 1.0,
         }
     }
 }
@@ -73,7 +75,8 @@ struct EngineConfigJson {
     score_capture_base: Option<f32>,
     score_killer_move: Option<f32>,
     score_history_max: Option<f32>,
-    pruning_discard_ratio: Option<f32>,
+    pruning_method: Option<i32>,
+    pruning_multiplier: Option<f32>,
 }
 
 impl EngineConfig {
@@ -109,10 +112,10 @@ impl EngineConfig {
                 default.score_history_max,
                 json_config.score_history_max,
             ),
-            pruning_discard_ratio: apply_scale(
-                default.pruning_discard_ratio,
-                json_config.pruning_discard_ratio,
-            ),
+            pruning_method: json_config.pruning_method.unwrap_or(default.pruning_method),
+            pruning_multiplier: json_config
+                .pruning_multiplier
+                .unwrap_or(default.pruning_multiplier),
         })
     }
 }
