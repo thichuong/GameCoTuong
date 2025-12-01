@@ -498,8 +498,20 @@ impl AlphaBetaEngine {
         // Actually, is_in_check doesn't need hash.
         // But we need to move the piece.
         // Let's just use a simplified move application on the grid.
-        next_board.grid[tr][tc] = next_board.grid[r][c];
-        next_board.grid[r][c] = None;
+        // Safe indexing
+        // Safe indexing
+        if let Some(piece) = next_board.grid.get(r).and_then(|row| row.get(c)).copied() {
+            if let Some(row) = next_board.grid.get_mut(tr) {
+                if let Some(cell) = row.get_mut(tc) {
+                    *cell = piece;
+                }
+            }
+        }
+        if let Some(row) = next_board.grid.get_mut(r) {
+            if let Some(cell) = row.get_mut(c) {
+                *cell = None;
+            }
+        }
 
         if is_in_check(&next_board, turn) || is_flying_general(&next_board) {
             return;
@@ -518,7 +530,11 @@ impl AlphaBetaEngine {
         } else if let Some(t) = target {
             // MVV-LVA
             let victim_val = self.get_piece_value(t.piece_type);
-            let attacker_val = self.get_piece_value(board.get_piece(r, c).unwrap().piece_type);
+            let attacker_val = if let Some(p) = board.get_piece(r, c) {
+                self.get_piece_value(p.piece_type)
+            } else {
+                0
+            };
             score = self.config.score_capture_base + victim_val - (attacker_val / 10);
         } else {
             let is_killer_move = killers.iter().any(|k| {
@@ -554,6 +570,12 @@ impl AlphaBetaEngine {
         });
     }
 
+    fn offset(base: usize, delta: i32) -> Option<usize> {
+        let base_i = i32::try_from(base).ok()?;
+        let res = base_i.checked_add(delta)?;
+        usize::try_from(res).ok()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn gen_rook_moves(
         &self,
@@ -569,8 +591,12 @@ impl AlphaBetaEngine {
         let dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
         for (dr, dc) in dirs {
             for i in 1..10 {
-                let tr = (r as i32 + dr * i) as usize;
-                let tc = (c as i32 + dc * i) as usize;
+                let Some(tr) = Self::offset(r, dr * i) else {
+                    break;
+                };
+                let Some(tc) = Self::offset(c, dc * i) else {
+                    break;
+                };
                 if tr >= 10 || tc >= 9 {
                     break;
                 }
@@ -599,21 +625,24 @@ impl AlphaBetaEngine {
         for (dr, dc) in dirs {
             let mut jumped = false;
             for i in 1..10 {
-                let tr = (r as i32 + dr * i) as usize;
-                let tc = (c as i32 + dc * i) as usize;
+                let Some(tr) = Self::offset(r, dr * i) else {
+                    break;
+                };
+                let Some(tc) = Self::offset(c, dc * i) else {
+                    break;
+                };
                 if tr >= 10 || tc >= 9 {
                     break;
                 }
 
-                if let Some(_) = board.get_piece(tr, tc) {
-                    if !jumped {
-                        jumped = true;
-                        continue;
-                    } else {
+                if board.get_piece(tr, tc).is_some() {
+                    if jumped {
                         // Second piece (capture target)
                         self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
                         break; // Cannot jump over two
                     }
+                    jumped = true;
+                    continue;
                 }
 
                 if !jumped {
@@ -652,27 +681,26 @@ impl AlphaBetaEngine {
         // If move is (-1, 2) or (1, 2), leg is (0, 1)
 
         for (dr, dc) in moves_offsets {
-            let tr = r as i32 + dr;
-            let tc = c as i32 + dc;
-            if tr < 0 || tr >= 10 || tc < 0 || tc >= 9 {
+            let Some(tr) = Self::offset(r, dr) else {
+                continue;
+            };
+            let Some(tc) = Self::offset(c, dc) else {
+                continue;
+            };
+            if tr >= 10 || tc >= 9 {
                 continue;
             }
 
             // Check leg
-            let leg_r = r as i32 + if dr.abs() == 2 { dr / 2 } else { 0 };
-            let leg_c = c as i32 + if dc.abs() == 2 { dc / 2 } else { 0 };
+            let Some(leg_r) = Self::offset(r, if dr.abs() == 2 { dr / 2 } else { 0 }) else {
+                continue;
+            };
+            let Some(leg_c) = Self::offset(c, if dc.abs() == 2 { dc / 2 } else { 0 }) else {
+                continue;
+            };
 
-            if board.get_piece(leg_r as usize, leg_c as usize).is_none() {
-                self.add_move(
-                    board,
-                    turn,
-                    (r, c),
-                    (tr as usize, tc as usize),
-                    moves,
-                    bm,
-                    k,
-                    oc,
-                );
+            if board.get_piece(leg_r, leg_c).is_none() {
+                self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
             }
         }
     }
@@ -691,9 +719,13 @@ impl AlphaBetaEngine {
     ) {
         let offsets = [(-2, -2), (-2, 2), (2, -2), (2, 2)];
         for (dr, dc) in offsets {
-            let tr = r as i32 + dr;
-            let tc = c as i32 + dc;
-            if tr < 0 || tr >= 10 || tc < 0 || tc >= 9 {
+            let Some(tr) = Self::offset(r, dr) else {
+                continue;
+            };
+            let Some(tc) = Self::offset(c, dc) else {
+                continue;
+            };
+            if tr >= 10 || tc >= 9 {
                 continue;
             }
 
@@ -706,19 +738,14 @@ impl AlphaBetaEngine {
             }
 
             // Eye check
-            let eye_r = r as i32 + dr / 2;
-            let eye_c = c as i32 + dc / 2;
-            if board.get_piece(eye_r as usize, eye_c as usize).is_none() {
-                self.add_move(
-                    board,
-                    turn,
-                    (r, c),
-                    (tr as usize, tc as usize),
-                    moves,
-                    bm,
-                    k,
-                    oc,
-                );
+            let Some(eye_r) = Self::offset(r, dr / 2) else {
+                continue;
+            };
+            let Some(eye_c) = Self::offset(c, dc / 2) else {
+                continue;
+            };
+            if board.get_piece(eye_r, eye_c).is_none() {
+                self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
             }
         }
     }
@@ -737,14 +764,18 @@ impl AlphaBetaEngine {
     ) {
         let offsets = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
         for (dr, dc) in offsets {
-            let tr = r as i32 + dr;
-            let tc = c as i32 + dc;
-            if tr < 0 || tr >= 10 || tc < 0 || tc >= 9 {
+            let Some(tr) = Self::offset(r, dr) else {
+                continue;
+            };
+            let Some(tc) = Self::offset(c, dc) else {
+                continue;
+            };
+            if tr >= 10 || tc >= 9 {
                 continue;
             }
 
             // Palace check
-            if tc < 3 || tc > 5 {
+            if !(3..=5).contains(&tc) {
                 continue;
             }
             if turn == Color::Red && tr > 2 {
@@ -754,16 +785,7 @@ impl AlphaBetaEngine {
                 continue;
             }
 
-            self.add_move(
-                board,
-                turn,
-                (r, c),
-                (tr as usize, tc as usize),
-                moves,
-                bm,
-                k,
-                oc,
-            );
+            self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
         }
     }
 
@@ -781,14 +803,18 @@ impl AlphaBetaEngine {
     ) {
         let offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)];
         for (dr, dc) in offsets {
-            let tr = r as i32 + dr;
-            let tc = c as i32 + dc;
-            if tr < 0 || tr >= 10 || tc < 0 || tc >= 9 {
+            let Some(tr) = Self::offset(r, dr) else {
+                continue;
+            };
+            let Some(tc) = Self::offset(c, dc) else {
+                continue;
+            };
+            if tr >= 10 || tc >= 9 {
                 continue;
             }
 
             // Palace check
-            if tc < 3 || tc > 5 {
+            if !(3..=5).contains(&tc) {
                 continue;
             }
             if turn == Color::Red && tr > 2 {
@@ -798,16 +824,7 @@ impl AlphaBetaEngine {
                 continue;
             }
 
-            self.add_move(
-                board,
-                turn,
-                (r, c),
-                (tr as usize, tc as usize),
-                moves,
-                bm,
-                k,
-                oc,
-            );
+            self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
         }
     }
 
@@ -826,18 +843,18 @@ impl AlphaBetaEngine {
         let forward = if turn == Color::Red { 1 } else { -1 };
 
         // Forward
-        let tr = r as i32 + forward;
-        if tr >= 0 && tr < 10 {
-            self.add_move(board, turn, (r, c), (tr as usize, c), moves, bm, k, oc);
+        let tr = Self::offset(r, forward).unwrap_or(10);
+        if tr < 10 {
+            self.add_move(board, turn, (r, c), (tr, c), moves, bm, k, oc);
         }
 
         // Horizontal (if crossed river)
         let crossed_river = if turn == Color::Red { r > 4 } else { r < 5 };
         if crossed_river {
             for dc in [-1, 1] {
-                let tc = c as i32 + dc;
-                if tc >= 0 && tc < 9 {
-                    self.add_move(board, turn, (r, c), (r, tc as usize), moves, bm, k, oc);
+                let tc = Self::offset(c, dc).unwrap_or(9);
+                if tc < 9 {
+                    self.add_move(board, turn, (r, c), (r, tc), moves, bm, k, oc);
                 }
             }
         }
