@@ -5,7 +5,7 @@ use crate::engine::zobrist::{TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, Color, PieceType};
 use crate::logic::game::GameState;
-use crate::logic::rules::is_valid_move;
+use crate::logic::rules::{is_flying_general, is_in_check};
 use std::sync::Arc;
 pub struct AlphaBetaEngine {
     config: Arc<EngineConfig>,
@@ -357,6 +357,21 @@ impl AlphaBetaEngine {
         best_move: Option<Move>,
         depth: u8,
     ) -> MoveList {
+        self.generate_moves_internal(board, turn, best_move, depth, false)
+    }
+
+    fn generate_captures(&self, board: &Board, turn: Color) -> MoveList {
+        self.generate_moves_internal(board, turn, None, 0, true)
+    }
+
+    fn generate_moves_internal(
+        &self,
+        board: &Board,
+        turn: Color,
+        best_move: Option<Move>,
+        depth: u8,
+        only_captures: bool,
+    ) -> MoveList {
         let mut moves = MoveList::new();
         let killers = if (depth as usize) < self.killer_moves.len() {
             self.killer_moves.get(depth as usize).unwrap_or(&[None; 2])
@@ -368,64 +383,77 @@ impl AlphaBetaEngine {
             for c in 0..9 {
                 if let Some(p) = board.get_piece(r, c) {
                     if p.color == turn {
-                        for tr in 0..10 {
-                            for tc in 0..9 {
-                                if is_valid_move(board, r, c, tr, tc, turn).is_ok() {
-                                    let mut score;
-
-                                    // Check if this is the hash move
-                                    let is_hash_move = if let Some(bm) = best_move {
-                                        bm.from_row == r
-                                            && bm.from_col == c
-                                            && bm.to_row == tr
-                                            && bm.to_col == tc
-                                    } else {
-                                        false
-                                    };
-
-                                    let is_killer_move = killers.iter().any(|k| {
-                                        if let Some(km) = k {
-                                            km.from_row == r
-                                                && km.from_col == c
-                                                && km.to_row == tr
-                                                && km.to_col == tc
-                                        } else {
-                                            false
-                                        }
-                                    });
-
-                                    if is_hash_move {
-                                        score = self.config.score_hash_move;
-                                    } else if let Some(target) = board.get_piece(tr, tc) {
-                                        // MVV-LVA
-                                        let victim_val = self.get_piece_value(target.piece_type);
-                                        let attacker_val = self.get_piece_value(p.piece_type);
-                                        score = self.config.score_capture_base + victim_val
-                                            - (attacker_val / 10);
-                                    } else if is_killer_move {
-                                        score = self.config.score_killer_move;
-                                    } else {
-                                        // History Heuristic
-                                        let from = r * 9 + c;
-                                        let to = tr * 9 + tc;
-                                        #[allow(clippy::indexing_slicing)]
-                                        {
-                                            score = self.history_table[from][to];
-                                        }
-                                        if score > self.config.score_history_max {
-                                            score = self.config.score_history_max;
-                                        }
-                                    }
-
-                                    moves.push(Move {
-                                        from_row: r,
-                                        from_col: c,
-                                        to_row: tr,
-                                        to_col: tc,
-                                        score,
-                                    });
-                                }
-                            }
+                        match p.piece_type {
+                            PieceType::Chariot => self.gen_rook_moves(
+                                board,
+                                turn,
+                                r,
+                                c,
+                                &mut moves,
+                                best_move,
+                                killers,
+                                only_captures,
+                            ),
+                            PieceType::Cannon => self.gen_cannon_moves(
+                                board,
+                                turn,
+                                r,
+                                c,
+                                &mut moves,
+                                best_move,
+                                killers,
+                                only_captures,
+                            ),
+                            PieceType::Horse => self.gen_horse_moves(
+                                board,
+                                turn,
+                                r,
+                                c,
+                                &mut moves,
+                                best_move,
+                                killers,
+                                only_captures,
+                            ),
+                            PieceType::Elephant => self.gen_elephant_moves(
+                                board,
+                                turn,
+                                r,
+                                c,
+                                &mut moves,
+                                best_move,
+                                killers,
+                                only_captures,
+                            ),
+                            PieceType::Advisor => self.gen_advisor_moves(
+                                board,
+                                turn,
+                                r,
+                                c,
+                                &mut moves,
+                                best_move,
+                                killers,
+                                only_captures,
+                            ),
+                            PieceType::General => self.gen_king_moves(
+                                board,
+                                turn,
+                                r,
+                                c,
+                                &mut moves,
+                                best_move,
+                                killers,
+                                only_captures,
+                            ),
+                            PieceType::Soldier => self.gen_pawn_moves(
+                                board,
+                                turn,
+                                r,
+                                c,
+                                &mut moves,
+                                best_move,
+                                killers,
+                                only_captures,
+                            ),
                         }
                     }
                 }
@@ -435,40 +463,384 @@ impl AlphaBetaEngine {
         moves
     }
 
-    fn generate_captures(&self, board: &Board, turn: Color) -> MoveList {
-        let mut moves = MoveList::new();
-        for r in 0..10 {
-            for c in 0..9 {
-                if let Some(p) = board.get_piece(r, c) {
-                    if p.color == turn {
-                        for tr in 0..10 {
-                            for tc in 0..9 {
-                                if let Some(target) = board.get_piece(tr, tc) {
-                                    if target.color != turn
-                                        && is_valid_move(board, r, c, tr, tc, turn).is_ok()
-                                    {
-                                        let victim_val = self.get_piece_value(target.piece_type);
-                                        let attacker_val = self.get_piece_value(p.piece_type);
-                                        let score = self.config.score_capture_base + victim_val
-                                            - (attacker_val / 10);
+    #[allow(clippy::too_many_arguments)]
+    fn add_move(
+        &self,
+        board: &Board,
+        turn: Color,
+        from: (usize, usize),
+        to: (usize, usize),
+        moves: &mut MoveList,
+        best_move: Option<Move>,
+        killers: &[Option<Move>; 2],
+        only_captures: bool,
+    ) {
+        let (r, c) = from;
+        let (tr, tc) = to;
 
-                                        moves.push(Move {
-                                            from_row: r,
-                                            from_col: c,
-                                            to_row: tr,
-                                            to_col: tc,
-                                            score,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
+        let target = board.get_piece(tr, tc);
+        if let Some(t) = target {
+            if t.color == turn {
+                return; // Blocked by friendly
+            }
+        }
+
+        if only_captures && target.is_none() {
+            return;
+        }
+
+        // Legality Check (Self-check & Flying General)
+        // We must clone to check. This is the cost we pay, but we do it far less often now.
+        // Optimization: We could implement a lighter check that doesn't full clone,
+        // but for now, let's rely on the reduction in candidate moves.
+        let mut next_board = board.clone();
+        // Manually apply move to avoid overhead of Board::apply_move (hashing etc not needed for check)
+        // Actually, is_in_check doesn't need hash.
+        // But we need to move the piece.
+        // Let's just use a simplified move application on the grid.
+        next_board.grid[tr][tc] = next_board.grid[r][c];
+        next_board.grid[r][c] = None;
+
+        if is_in_check(&next_board, turn) || is_flying_general(&next_board) {
+            return;
+        }
+
+        // Scoring
+        let mut score;
+        let is_hash_move = if let Some(bm) = best_move {
+            bm.from_row == r && bm.from_col == c && bm.to_row == tr && bm.to_col == tc
+        } else {
+            false
+        };
+
+        if is_hash_move {
+            score = self.config.score_hash_move;
+        } else if let Some(t) = target {
+            // MVV-LVA
+            let victim_val = self.get_piece_value(t.piece_type);
+            let attacker_val = self.get_piece_value(board.get_piece(r, c).unwrap().piece_type);
+            score = self.config.score_capture_base + victim_val - (attacker_val / 10);
+        } else {
+            let is_killer_move = killers.iter().any(|k| {
+                if let Some(km) = k {
+                    km.from_row == r && km.from_col == c && km.to_row == tr && km.to_col == tc
+                } else {
+                    false
+                }
+            });
+
+            if is_killer_move {
+                score = self.config.score_killer_move;
+            } else {
+                // History
+                let from_idx = r * 9 + c;
+                let to_idx = tr * 9 + tc;
+                #[allow(clippy::indexing_slicing)]
+                {
+                    score = self.history_table[from_idx][to_idx];
+                }
+                if score > self.config.score_history_max {
+                    score = self.config.score_history_max;
                 }
             }
         }
-        moves.sort_by(|a, b| b.score.cmp(&a.score));
-        moves
+
+        moves.push(Move {
+            from_row: r,
+            from_col: c,
+            to_row: tr,
+            to_col: tc,
+            score,
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gen_rook_moves(
+        &self,
+        board: &Board,
+        turn: Color,
+        r: usize,
+        c: usize,
+        moves: &mut MoveList,
+        bm: Option<Move>,
+        k: &[Option<Move>; 2],
+        oc: bool,
+    ) {
+        let dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+        for (dr, dc) in dirs {
+            for i in 1..10 {
+                let tr = (r as i32 + dr * i) as usize;
+                let tc = (c as i32 + dc * i) as usize;
+                if tr >= 10 || tc >= 9 {
+                    break;
+                }
+
+                self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
+                if board.get_piece(tr, tc).is_some() {
+                    break;
+                } // Blocked
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gen_cannon_moves(
+        &self,
+        board: &Board,
+        turn: Color,
+        r: usize,
+        c: usize,
+        moves: &mut MoveList,
+        bm: Option<Move>,
+        k: &[Option<Move>; 2],
+        oc: bool,
+    ) {
+        let dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+        for (dr, dc) in dirs {
+            let mut jumped = false;
+            for i in 1..10 {
+                let tr = (r as i32 + dr * i) as usize;
+                let tc = (c as i32 + dc * i) as usize;
+                if tr >= 10 || tc >= 9 {
+                    break;
+                }
+
+                if let Some(_) = board.get_piece(tr, tc) {
+                    if !jumped {
+                        jumped = true;
+                        continue;
+                    } else {
+                        // Second piece (capture target)
+                        self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
+                        break; // Cannot jump over two
+                    }
+                }
+
+                if !jumped {
+                    self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gen_horse_moves(
+        &self,
+        board: &Board,
+        turn: Color,
+        r: usize,
+        c: usize,
+        moves: &mut MoveList,
+        bm: Option<Move>,
+        k: &[Option<Move>; 2],
+        oc: bool,
+    ) {
+        let moves_offsets = [
+            (-2, -1),
+            (-2, 1),
+            (2, -1),
+            (2, 1),
+            (-1, -2),
+            (-1, 2),
+            (1, -2),
+            (1, 2),
+        ];
+        // Corresponding blocking legs
+        // If move is (-2, -1) or (-2, 1), leg is (-1, 0)
+        // If move is (2, -1) or (2, 1), leg is (1, 0)
+        // If move is (-1, -2) or (1, -2), leg is (0, -1)
+        // If move is (-1, 2) or (1, 2), leg is (0, 1)
+
+        for (dr, dc) in moves_offsets {
+            let tr = r as i32 + dr;
+            let tc = c as i32 + dc;
+            if tr < 0 || tr >= 10 || tc < 0 || tc >= 9 {
+                continue;
+            }
+
+            // Check leg
+            let leg_r = r as i32 + if dr.abs() == 2 { dr / 2 } else { 0 };
+            let leg_c = c as i32 + if dc.abs() == 2 { dc / 2 } else { 0 };
+
+            if board.get_piece(leg_r as usize, leg_c as usize).is_none() {
+                self.add_move(
+                    board,
+                    turn,
+                    (r, c),
+                    (tr as usize, tc as usize),
+                    moves,
+                    bm,
+                    k,
+                    oc,
+                );
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gen_elephant_moves(
+        &self,
+        board: &Board,
+        turn: Color,
+        r: usize,
+        c: usize,
+        moves: &mut MoveList,
+        bm: Option<Move>,
+        k: &[Option<Move>; 2],
+        oc: bool,
+    ) {
+        let offsets = [(-2, -2), (-2, 2), (2, -2), (2, 2)];
+        for (dr, dc) in offsets {
+            let tr = r as i32 + dr;
+            let tc = c as i32 + dc;
+            if tr < 0 || tr >= 10 || tc < 0 || tc >= 9 {
+                continue;
+            }
+
+            // River check
+            if turn == Color::Red && tr > 4 {
+                continue;
+            }
+            if turn == Color::Black && tr < 5 {
+                continue;
+            }
+
+            // Eye check
+            let eye_r = r as i32 + dr / 2;
+            let eye_c = c as i32 + dc / 2;
+            if board.get_piece(eye_r as usize, eye_c as usize).is_none() {
+                self.add_move(
+                    board,
+                    turn,
+                    (r, c),
+                    (tr as usize, tc as usize),
+                    moves,
+                    bm,
+                    k,
+                    oc,
+                );
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gen_advisor_moves(
+        &self,
+        board: &Board,
+        turn: Color,
+        r: usize,
+        c: usize,
+        moves: &mut MoveList,
+        bm: Option<Move>,
+        k: &[Option<Move>; 2],
+        oc: bool,
+    ) {
+        let offsets = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
+        for (dr, dc) in offsets {
+            let tr = r as i32 + dr;
+            let tc = c as i32 + dc;
+            if tr < 0 || tr >= 10 || tc < 0 || tc >= 9 {
+                continue;
+            }
+
+            // Palace check
+            if tc < 3 || tc > 5 {
+                continue;
+            }
+            if turn == Color::Red && tr > 2 {
+                continue;
+            }
+            if turn == Color::Black && tr < 7 {
+                continue;
+            }
+
+            self.add_move(
+                board,
+                turn,
+                (r, c),
+                (tr as usize, tc as usize),
+                moves,
+                bm,
+                k,
+                oc,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gen_king_moves(
+        &self,
+        board: &Board,
+        turn: Color,
+        r: usize,
+        c: usize,
+        moves: &mut MoveList,
+        bm: Option<Move>,
+        k: &[Option<Move>; 2],
+        oc: bool,
+    ) {
+        let offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+        for (dr, dc) in offsets {
+            let tr = r as i32 + dr;
+            let tc = c as i32 + dc;
+            if tr < 0 || tr >= 10 || tc < 0 || tc >= 9 {
+                continue;
+            }
+
+            // Palace check
+            if tc < 3 || tc > 5 {
+                continue;
+            }
+            if turn == Color::Red && tr > 2 {
+                continue;
+            }
+            if turn == Color::Black && tr < 7 {
+                continue;
+            }
+
+            self.add_move(
+                board,
+                turn,
+                (r, c),
+                (tr as usize, tc as usize),
+                moves,
+                bm,
+                k,
+                oc,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gen_pawn_moves(
+        &self,
+        board: &Board,
+        turn: Color,
+        r: usize,
+        c: usize,
+        moves: &mut MoveList,
+        bm: Option<Move>,
+        k: &[Option<Move>; 2],
+        oc: bool,
+    ) {
+        let forward = if turn == Color::Red { 1 } else { -1 };
+
+        // Forward
+        let tr = r as i32 + forward;
+        if tr >= 0 && tr < 10 {
+            self.add_move(board, turn, (r, c), (tr as usize, c), moves, bm, k, oc);
+        }
+
+        // Horizontal (if crossed river)
+        let crossed_river = if turn == Color::Red { r > 4 } else { r < 5 };
+        if crossed_river {
+            for dc in [-1, 1] {
+                let tc = c as i32 + dc;
+                if tc >= 0 && tc < 9 {
+                    self.add_move(board, turn, (r, c), (r, tc as usize), moves, bm, k, oc);
+                }
+            }
+        }
     }
 
     fn store_killer(&mut self, depth: u8, mv: Move) {

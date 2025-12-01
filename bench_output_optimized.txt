@@ -1,0 +1,18 @@
+   Compiling CoTuong v0.1.0 (/home/tchuong/Màn hình nền/GameCoTuong)
+    Finished `release` profile [optimized] target(s) in 1.00s
+     Running unittests src/main.rs (target/release/deps/CoTuong-8f3f034cc873dd83)
+
+running 2 tests
+--- Benchmarking Endgame ---
+--- Benchmarking Opening ---
+Endgame Depth 7 stats: SearchStats { depth: 7, nodes: 7353, time_ms: 5 }
+Time taken: 5.761629ms
+NPS: 1276201
+test engine::bench_test::tests::bench_endgame ... ok
+Opening Depth 5 stats: SearchStats { depth: 5, nodes: 39037, time_ms: 39 }
+Time taken: 39.443207ms
+NPS: 989701
+test engine::bench_test::tests::bench_opening ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.04s
+

@@ -98,7 +98,7 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
     false
 }
 
-fn is_flying_general(board: &Board) -> bool {
+pub fn is_flying_general(board: &Board) -> bool {
     let mut red_gen = None;
     let mut black_gen = None;
 
