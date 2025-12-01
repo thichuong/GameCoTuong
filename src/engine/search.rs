@@ -151,9 +151,8 @@ impl AlphaBetaEngine {
         let mut best_score = -30000;
         let mut best_move_this_node = None; // Renamed to avoid conflict with `best_move` from TT
         let alpha_orig = alpha;
-        let mut moves_searched = 0;
 
-        for mv in moves {
+        for (moves_searched, mv) in moves.into_iter().enumerate() {
             let mut next_board = board.clone();
             next_board.apply_move(&mv, turn);
 
@@ -169,8 +168,12 @@ impl AlphaBetaEngine {
                 // Also check if it gives check? (Expensive to check here, maybe skip for now)
                 if !is_capture {
                     // Formula: reduction = 1 + ln(depth) * ln(moves_searched) / 2
-                    let r = 1.0 + (f64::from(depth).ln() * (moves_searched as f64).ln()) / 2.0;
-                    reduction = (r as u8).min(depth - 1);
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    {
+                        let r = 1.0
+                            + (f64::from(depth).ln() * f64::from(moves_searched as u32).ln()) / 2.0;
+                        reduction = (r as u8).min(depth - 1);
+                    }
                 }
             }
 
@@ -243,7 +246,7 @@ impl AlphaBetaEngine {
                 alpha = score;
             }
 
-            moves_searched += 1;
+            // moves_searched is now updated by enumerate
 
             if alpha >= beta {
                 // Killer Heuristic: Store quiet move that caused cutoff

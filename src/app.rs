@@ -282,7 +282,7 @@ pub fn App() -> impl IntoView {
             <div style="margin-bottom: 8px;">
                 <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
                     <span>{label}</span>
-                    <span>{format!("{:.1}", val)}</span>
+                    <span>{format!("{val:.1}")}</span>
                 </div>
                 <input
                     type="range"
