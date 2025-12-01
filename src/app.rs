@@ -309,14 +309,18 @@ pub fn App() -> impl IntoView {
 
     let handle_file_upload = |setter: WriteSignal<EngineConfig>| {
         move |ev: web_sys::Event| {
-            let target = ev
-                .target()
-                .unwrap()
-                .dyn_into::<web_sys::HtmlInputElement>()
-                .unwrap();
+            let Some(target) = ev.target() else {
+                return;
+            };
+            let Ok(target) = target.dyn_into::<web_sys::HtmlInputElement>() else {
+                return;
+            };
+
             if let Some(files) = target.files() {
                 if let Some(file) = files.get(0) {
-                    let reader = web_sys::FileReader::new().unwrap();
+                    let Ok(reader) = web_sys::FileReader::new() else {
+                        return;
+                    };
                     let reader_c = reader.clone();
 
                     let on_load = Closure::wrap(Box::new(move |_e: web_sys::Event| {
@@ -331,11 +335,13 @@ pub fn App() -> impl IntoView {
                                     }
                                     Err(e) => {
                                         web_sys::console::log_1(
-                                            &format!("Error parsing config: {:?}", e).into(),
+                                            &format!("Error parsing config: {e:?}").into(),
                                         );
-                                        let _ = web_sys::window().unwrap().alert_with_message(
-                                            &format!("Error parsing JSON: {}", e),
-                                        );
+                                        if let Some(window) = web_sys::window() {
+                                            let _ = window.alert_with_message(&format!(
+                                                "Error parsing JSON: {e}"
+                                            ));
+                                        }
                                     }
                                 }
                             }
@@ -345,7 +351,9 @@ pub fn App() -> impl IntoView {
                     reader.set_onload(Some(on_load.as_ref().unchecked_ref()));
                     on_load.forget();
 
-                    reader.read_as_text(&file).unwrap();
+                    if let Err(e) = reader.read_as_text(&file) {
+                        web_sys::console::log_1(&format!("Error reading file: {e:?}").into());
+                    }
                 }
             }
         }
