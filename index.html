@@ -4,12 +4,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#222222" />
+  <meta name="description" content="Chơi Cờ Tướng online miễn phí. Game Cờ Tướng PWA mượt mà, hỗ trợ offline." />
   <title>Cờ Tướng</title>
   <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.png" />
   
 <script type="module">
-import init, * as bindings from '/GameCoTuong/CoTuong-6e38088b8c05fb23.js';
-const wasm = await init({ module_or_path: '/GameCoTuong/CoTuong-6e38088b8c05fb23_bg.wasm' });
+import init, * as bindings from '/GameCoTuong/CoTuong-686a08fa5024f5cc.js';
+const wasm = await init({ module_or_path: '/GameCoTuong/CoTuong-686a08fa5024f5cc_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -19,6 +22,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
   <link rel="icon" href="/GameCoTuong/icon-449220c3fb84c25f.png" integrity="sha384-RPfGqPXk7bylBvnJZQdSztxc3OP09j9TLscogq31VamDpd5GPPSWgCd56iZJEyVt"/>
+  
+  
   
   <style>
     body {
@@ -32,7 +37,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/GameCoTuong/CoTuong-6e38088b8c05fb23.js" crossorigin="anonymous" integrity="sha384-GqOK9rzpX0FZ41DC4AdAdA1hSoeVvTCae3MsOie0oDkLOax2oJ4EIXwsyC/21kKX"><link rel="preload" href="/GameCoTuong/CoTuong-6e38088b8c05fb23_bg.wasm" crossorigin="anonymous" integrity="sha384-5em9h4tH2Wl/N5JLZLG2pQVEkQ85svmJcjdnwQ0Nr/dMezRLmEt4JjvoTSAdj3b7" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/GameCoTuong/CoTuong-686a08fa5024f5cc.js" crossorigin="anonymous" integrity="sha384-swFco3qnEUfJlL4mxNchKNHdvnB4ouv5Q4UIXPwfBvIVoCwkr+sNt09GhnLuhW4J"><link rel="preload" href="/GameCoTuong/CoTuong-686a08fa5024f5cc_bg.wasm" crossorigin="anonymous" integrity="sha384-u9loKbnlpMHIbF71doaEeUk9/oJk+R4twt7lHGSQZMApO0xjo1SJCQKUvcBNezB3" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>

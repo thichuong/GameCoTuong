@@ -1,13 +1,12 @@
-const CACHE_NAME = 'xiangqi-pwa-v1';
+const CACHE_NAME = 'xiangqi-pwa-v2';
 const REPO_NAME = '/GameCoTuong';
 const ASSETS = [
-    '/',
-    '/index.html',
-    '/manifest.json',
-    '/icon.png',
-    // Trunk will inject the WASM and JS filenames, but since they change hash, 
-    // we might need a more robust strategy or just cache everything.
-    // For a simple PWA, caching 'fetch' requests is often enough.
+    './',
+    './index.html',
+    './manifest.json',
+    './icon.png',
+    // Trunk generated files will need to be cached dynamically or via a build step that injects them.
+    // For now, we rely on the browser cache for those or the runtime caching below.
 ];
 
 self.addEventListener('install', (e) => {

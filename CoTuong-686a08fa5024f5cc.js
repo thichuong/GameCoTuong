@@ -218,20 +218,20 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
+function wasm_bindgen__convert__closures_____invoke__hbe91e8910c90d2f3(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__hbe91e8910c90d2f3(arg0, arg1, arg2);
+}
+
 function wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2) {
     wasm.wasm_bindgen__convert__closures_____invoke__hdde47dc96ee68d22(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__hf167a879c48fa50b(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__hf167a879c48fa50b(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h931ea6275f4cc22a(arg0, arg1) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h931ea6275f4cc22a(arg0, arg1);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h04531ccae55f08e0(arg0, arg1, arg2) {
     wasm.wasm_bindgen__convert__closures_____invoke__h04531ccae55f08e0(arg0, arg1, arg2);
-}
-
-function wasm_bindgen__convert__closures_____invoke__h931ea6275f4cc22a(arg0, arg1) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h931ea6275f4cc22a(arg0, arg1);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h8781550333f72e9a(arg0, arg1, arg2, arg3) {
@@ -893,7 +893,7 @@ function __wbg_get_imports() {
     };
     imports.wbg.__wbindgen_cast_d99bda8c356365a0 = function(arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 156, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 157, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__hf8f74f5b16ce520a, wasm_bindgen__convert__closures_____invoke__hf167a879c48fa50b);
+        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h609ce0a4fdc60533, wasm_bindgen__convert__closures_____invoke__hbe91e8910c90d2f3);
         return ret;
     };
     imports.wbg.__wbindgen_init_externref_table = function() {
