@@ -8,6 +8,13 @@ Một ứng dụng Cờ Tướng chạy trên trình duyệt sử dụng Rust v�
 - **Giao diện:** Đẹp mắt, hỗ trợ Dark Mode, Responsive (Mobile/Desktop).
 - **PWA:** Hỗ trợ cài đặt và chạy offline.
 
+## Kiến trúc dự án (Project Architecture)
+
+Dự án được chia thành 2 phần chính trong một Cargo Workspace:
+
+1.  **`cotuong_core`**: Thư viện chứa toàn bộ logic game, luật chơi, và engine AI. Thư viện này độc lập với giao diện và có thể được tái sử dụng cho các giao diện khác (CLI, GUI khác).
+2.  **`CoTuong` (Root)**: Ứng dụng web sử dụng framework Leptos, đóng vai trò là giao diện người dùng (UI), kết nối với `cotuong_core`.
+
 ## Cấu Hình AI (Engine Parameters)
 
 Bạn có thể tinh chỉnh sức mạnh và phong cách chơi của máy thông qua bảng cấu hình (Config Panel).
@@ -59,7 +66,13 @@ Các tham số ảnh hưởng đến thuật toán tìm kiếm Alpha-Beta và c�
 Dự án bao gồm các unit tests cho logic game và engine. Để chạy tests:
 
 ```bash
-cargo test
+cargo test --workspace
+```
+
+Hoặc chỉ chạy test cho phần core:
+
+```bash
+cargo test -p cotuong_core
 ```
 
 ### Cấu hình Engine qua JSON
@@ -95,7 +108,7 @@ Engine hỗ trợ tải cấu hình từ chuỗi JSON. Điều này hữu ích c
 Để kiểm tra hiệu năng của Engine (NPS - Nodes Per Second), bạn có thể chạy lệnh sau:
 
 ```bash
-cargo test --release -- engine::bench_test --nocapture
+cargo test --release -p cotuong_core -- engine::bench_test --nocapture
 ```
 
 Lệnh này sẽ chạy các kịch bản test hiệu năng cho:
