@@ -102,6 +102,12 @@ impl Board {
     }
 }
 
+impl Default for Board {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Board {
     #[must_use]
     pub fn new() -> Self {

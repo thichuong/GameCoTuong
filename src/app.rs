@@ -1,9 +1,9 @@
 use crate::components::board::BoardView;
-use crate::engine::config::EngineConfig;
-use crate::engine::search::AlphaBetaEngine;
-use crate::engine::{SearchLimit, Searcher};
-use crate::logic::board::{Color, PieceType};
-use crate::logic::game::{GameState, GameStatus};
+use cotuong_core::engine::config::EngineConfig;
+use cotuong_core::engine::search::AlphaBetaEngine;
+use cotuong_core::engine::{SearchLimit, Searcher};
+use cotuong_core::logic::board::{Color, PieceType};
+use cotuong_core::logic::game::{GameState, GameStatus};
 use leptos::{
     component, create_effect, create_signal, document, event_target_value, set_timeout, view,
     wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet, WriteSignal,
@@ -151,7 +151,7 @@ pub fn App() -> impl IntoView {
 
                         // 1. Check Opening Book
                         {
-                            use crate::logic::opening;
+                            use cotuong_core::logic::opening;
                             let _fen = current_state.board.to_fen_string(current_state.turn);
                             // web_sys::console::log_1(&format!("Current FEN: {fen}").into());
                             let book_move =
@@ -207,7 +207,7 @@ pub fn App() -> impl IntoView {
                                         break; // Success, exit loop
                                     }
                                     Err(e) => {
-                                        if e == crate::logic::rules::MoveError::ThreeFoldRepetition
+                                        if e == cotuong_core::logic::rules::MoveError::ThreeFoldRepetition
                                         {
                                             web_sys::console::log_1(
                                                 &format!(

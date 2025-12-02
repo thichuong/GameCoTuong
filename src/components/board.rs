@@ -1,5 +1,5 @@
-use crate::logic::board::{Color, Piece, PieceType};
-use crate::logic::game::GameState;
+use cotuong_core::logic::board::{Color, Piece, PieceType};
+use cotuong_core::logic::game::GameState;
 use leptos::{
     component, create_effect, create_signal, set_timeout, view, IntoView, ReadSignal, SignalGet,
     SignalSet, WriteSignal,
@@ -368,9 +368,9 @@ pub fn BoardView(
                 {move || {
                     let state = game_state.get();
                     match state.status {
-                        crate::logic::game::GameStatus::Playing => format!("Turn: {:?}", state.turn),
-                        crate::logic::game::GameStatus::Checkmate(winner) => format!("Checkmate! {winner:?} Wins!"),
-                        crate::logic::game::GameStatus::Stalemate => "Stalemate!".to_string(),
+                        cotuong_core::logic::game::GameStatus::Playing => format!("Turn: {:?}", state.turn),
+                        cotuong_core::logic::game::GameStatus::Checkmate(winner) => format!("Checkmate! {winner:?} Wins!"),
+                        cotuong_core::logic::game::GameStatus::Stalemate => "Stalemate!".to_string(),
                     }
                 }}
             </div>
