@@ -124,11 +124,7 @@ impl EngineConfig {
 #[allow(dead_code)]
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn apply_scale(default_val: i32, scale: Option<f32>) -> i32 {
-    if let Some(s) = scale {
-        (default_val as f32 * s) as i32
-    } else {
-        default_val
-    }
+    scale.map_or(default_val, |s| (default_val as f32 * s) as i32)
 }
 
 #[allow(dead_code)]
@@ -137,7 +133,7 @@ fn apply_scale_pst(
     default_pst: &[[i32; 9]; 10],
     scale_pst: Option<&[[f32; 9]; 10]>,
 ) -> [[i32; 9]; 10] {
-    if let Some(s_pst) = scale_pst {
+    scale_pst.map_or(*default_pst, |s_pst| {
         let mut new_pst = [[0; 9]; 10];
         for (r, row) in new_pst.iter_mut().enumerate() {
             for (c, cell) in row.iter_mut().enumerate() {
@@ -153,9 +149,7 @@ fn apply_scale_pst(
             }
         }
         new_pst
-    } else {
-        *default_pst
-    }
+    })
 }
 
 #[cfg(test)]

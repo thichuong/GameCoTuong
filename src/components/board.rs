@@ -70,7 +70,7 @@ pub fn BoardView(
                 if p.color == current_turn {
                     set_selected.set(Some((row, col)));
                 } else {
-                    let mut new_state = state.clone();
+                    let mut new_state = state;
                     match new_state.make_move(from_row, from_col, row, col) {
                         Ok(()) => {
                             set_game_state.set(new_state);
@@ -82,7 +82,7 @@ pub fn BoardView(
                     }
                 }
             } else {
-                let mut new_state = state.clone();
+                let mut new_state = state;
                 match new_state.make_move(from_row, from_col, row, col) {
                     Ok(()) => {
                         set_game_state.set(new_state);
@@ -380,8 +380,18 @@ pub fn BoardView(
 
 #[allow(clippy::too_many_lines)]
 fn render_piece(piece: Option<Piece>, is_selected: bool, is_last_move_dest: bool) -> impl IntoView {
-    match piece {
-        Some(p) => {
+    piece.map_or_else(
+        || view! {
+            <div style=format!("
+                width: 90%; 
+                height: 90%; 
+                border-radius: 50%; 
+                opacity: 0.3;
+                background-color: {};
+            ", if is_selected { "#a8e6cf" } else { "transparent" })></div> 
+        }
+        .into_view(),
+        |p| {
             let (color, bg_color, border_color) = match p.color {
                 Color::Red => ("#c00", "#f0d9b5", "#c00"),
                 Color::Black => ("#000", "#f0d9b5", "#000"),
@@ -497,15 +507,5 @@ fn render_piece(piece: Option<Piece>, is_selected: bool, is_last_move_dest: bool
             }
             .into_view()
         }
-        None => view! {
-            <div style=format!("
-                width: 90%; 
-                height: 90%; 
-                border-radius: 50%; 
-                opacity: 0.3;
-                background-color: {};
-            ", if is_selected { "#a8e6cf" } else { "transparent" })></div> 
-        }
-        .into_view(),
-    }
+    )
 }

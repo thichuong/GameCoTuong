@@ -373,14 +373,14 @@ fn is_in_palace(color: Color, row: usize, col: usize) -> bool {
     }
 }
 
-fn is_crossing_river(color: Color, row: usize) -> bool {
+const fn is_crossing_river(color: Color, row: usize) -> bool {
     match color {
         Color::Red => row > 4,
         Color::Black => row < 5,
     }
 }
 
-fn is_crossed_river(color: Color, row: usize) -> bool {
+const fn is_crossed_river(color: Color, row: usize) -> bool {
     is_crossing_river(color, row)
 }
 

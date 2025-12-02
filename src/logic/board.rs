@@ -10,7 +10,7 @@ pub enum Color {
 
 impl Color {
     #[must_use]
-    pub fn opposite(self) -> Self {
+    pub const fn opposite(self) -> Self {
         match self {
             Self::Red => Self::Black,
             Self::Black => Self::Red,

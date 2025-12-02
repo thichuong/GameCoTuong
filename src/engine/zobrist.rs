@@ -20,11 +20,11 @@ struct XorShift64 {
 }
 
 impl XorShift64 {
-    fn new(seed: u64) -> Self {
+    const fn new(seed: u64) -> Self {
         Self { state: seed }
     }
 
-    fn next(&mut self) -> u64 {
+    const fn next(&mut self) -> u64 {
         let mut x = self.state;
         x ^= x << 13;
         x ^= x >> 7;
@@ -58,7 +58,7 @@ impl ZobristKeys {
         }
     }
 
-    pub fn get_piece_key(
+    pub const fn get_piece_key(
         &self,
         piece_type: PieceType,
         color: Color,
@@ -184,19 +184,17 @@ impl TranspositionTable {
         // For simplicity, we'll just always replace for now, or maybe prefer deeper searches.
         // Common strategy: Replace if entry.depth <= depth
 
-        let replace = match self.entries.get(idx).and_then(|e| e.as_ref()) {
-            None => true,
-            Some(entry) => {
-                // If keys are different (collision), we might want to keep the deeper one?
-                // Or just overwrite. Overwriting is standard for simple replacement.
-                // If keys are same, overwrite if new depth is better.
+        let replace = self
+            .entries
+            .get(idx)
+            .and_then(|e| e.as_ref())
+            .is_none_or(|entry| {
                 if entry.key == key {
                     depth >= entry.depth
                 } else {
                     true // Collision, overwrite (or use buckets later)
                 }
-            }
-        };
+            });
 
         if replace {
             if let Some(slot) = self.entries.get_mut(idx) {

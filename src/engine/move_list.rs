@@ -35,17 +35,17 @@ impl MoveList {
         // if we prioritize speed, but ideally we should ensure 128 is enough.
     }
 
-    pub fn truncate(&mut self, len: usize) {
+    pub const fn truncate(&mut self, len: usize) {
         if len < self.count {
             self.count = len;
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.count
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.count == 0
     }
 

@@ -9,7 +9,7 @@ pub struct SimpleEvaluator {
 }
 
 impl SimpleEvaluator {
-    pub fn new(config: Arc<EngineConfig>) -> Self {
+    pub const fn new(config: Arc<EngineConfig>) -> Self {
         Self { config }
     }
 }

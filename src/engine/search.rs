@@ -49,8 +49,10 @@ impl AlphaBetaEngine {
             let start = SystemTime::now();
             let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap_or_default();
             #[allow(clippy::cast_precision_loss)]
-            let time_ms = (since_the_epoch.as_secs() as f64) * 1000.0
-                + (f64::from(since_the_epoch.subsec_nanos()) / 1_000_000.0);
+            let time_ms = (since_the_epoch.as_secs() as f64).mul_add(
+                1000.0,
+                f64::from(since_the_epoch.subsec_nanos()) / 1_000_000.0,
+            );
             time_ms
         }
     }
@@ -148,10 +150,7 @@ impl AlphaBetaEngine {
             }
         }
 
-        let mut best_move = None;
-        if let Some(mv) = self.tt.get_move(hash) {
-            best_move = Some(mv);
-        }
+        let best_move = self.tt.get_move(hash);
 
         let mut moves = self.generate_moves(board, turn, best_move, depth);
         if moves.is_empty() {
@@ -172,7 +171,7 @@ impl AlphaBetaEngine {
             // 8 + 255^2 * 2.0 ≈ 130,000, which fits easily in usize.
             // All inputs are positive, so no sign loss.
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let limit = (8.0 + d * d * multiplier) as usize;
+            let limit = (d * d).mul_add(multiplier, 8.0) as usize;
             let limit = limit.min(moves.len());
             if moves.len() > limit {
                 moves.truncate(limit);
@@ -519,30 +518,24 @@ impl AlphaBetaEngine {
 
         // Scoring
         let mut score;
-        let is_hash_move = if let Some(bm) = best_move {
+        let is_hash_move = best_move.is_some_and(|bm| {
             bm.from_row == r && bm.from_col == c && bm.to_row == tr && bm.to_col == tc
-        } else {
-            false
-        };
+        });
 
         if is_hash_move {
             score = self.config.score_hash_move;
         } else if let Some(t) = target {
             // MVV-LVA
             let victim_val = self.get_piece_value(t.piece_type);
-            let attacker_val = if let Some(p) = board.get_piece(r, c) {
-                self.get_piece_value(p.piece_type)
-            } else {
-                0
-            };
+            let attacker_val = board
+                .get_piece(r, c)
+                .map_or(0, |p| self.get_piece_value(p.piece_type));
             score = self.config.score_capture_base + victim_val - (attacker_val / 10);
         } else {
             let is_killer_move = killers.iter().any(|k| {
-                if let Some(km) = k {
+                k.is_some_and(|km| {
                     km.from_row == r && km.from_col == c && km.to_row == tr && km.to_col == tc
-                } else {
-                    false
-                }
+                })
             });
 
             if is_killer_move {

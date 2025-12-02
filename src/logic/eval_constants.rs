@@ -73,7 +73,7 @@ pub const PST_CANNON: [[i32; 9]; 10] = [
 
 use crate::logic::board::{Color, PieceType};
 
-pub fn get_piece_value(pt: PieceType) -> i32 {
+pub const fn get_piece_value(pt: PieceType) -> i32 {
     match pt {
         PieceType::General => VAL_KING,
         PieceType::Advisor => VAL_ADVISOR,

@@ -769,15 +769,14 @@ pub fn App() -> impl IntoView {
                                             <span>{format!("{}. {} {}", i + 1, turn_icon, turn_text)}</span>
                                             <div style="display: flex; align-items: center; gap: 5px;">
                                                 <span>{format!("{from_str} ➝ {to_str}")}</span>
-                                                {if let Some(cap) = record.captured {
-                                                    view! {
+                                                {record.captured.map_or_else(
+                                                    || view! {}.into_view(),
+                                                    |cap| view! {
                                                         <span style="color: #ff9800; font-size: 0.9em; margin-left: 5px;">
                                                             {format!("(Eat {})", get_piece_symbol(cap.piece_type, cap.color))}
                                                         </span>
                                                     }.into_view()
-                                                } else {
-                                                    view! {}.into_view()
-                                                }}
+                                                )}
                                             </div>
                                         </div>
                                         {if note.is_empty() {
