@@ -4,8 +4,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#222222" />
+  <meta name="description" content="Chơi Cờ Tướng online miễn phí. Game Cờ Tướng PWA mượt mà, hỗ trợ offline." />
   <title>Cờ Tướng</title>
   <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.png" />
   
 <script type="module">
 import init, * as bindings from '/CoTuong-cf7e1a7b3778cee5.js';
@@ -20,6 +23,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
   <link rel="icon" href="/icon-449220c3fb84c25f.png" integrity="sha384-RPfGqPXk7bylBvnJZQdSztxc3OP09j9TLscogq31VamDpd5GPPSWgCd56iZJEyVt"/>
   
+  
+  
   <style>
     body {
       margin: 0;
@@ -32,7 +37,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       min-height: 100vh;
     }
   </style>
-<link rel="modulepreload" href="/CoTuong-cf7e1a7b3778cee5.js" crossorigin="anonymous" integrity="sha384-/OBzyTbE+fFqqnC0T4VUCUWbspKqsEbyZnUSM3tq//REr0Ij0EI1W43L1aV7uozo"><link rel="preload" href="/CoTuong-cf7e1a7b3778cee5_bg.wasm" crossorigin="anonymous" integrity="sha384-oY0xFgzZk95fU7ZwJ8HM6Lc0Q/C9wW+BO34GoWgJPYoyxvvF1+45wMhnYFDcXlcU" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/CoTuong-cf7e1a7b3778cee5.js" crossorigin="anonymous" integrity="sha384-eZ4UQnHYnQYelymoV1vw21qpXssTVz8ZchcGzM9K1BvpVrYaNtef7nevAEMTMRx4"><link rel="preload" href="/CoTuong-cf7e1a7b3778cee5_bg.wasm" crossorigin="anonymous" integrity="sha384-p2HRPwr96nqE0P/CdvL211WBb12RZzpjMagPoT8ImAxPJqENtmrR3xBP8g8z18Qi" as="fetch" type="application/wasm"></head>
 
 <body>
   <script>

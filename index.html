@@ -4,11 +4,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#222222" />
+  <meta name="description" content="Chơi Cờ Tướng online miễn phí. Game Cờ Tướng PWA mượt mà, hỗ trợ offline." />
   <title>Cờ Tướng</title>
   <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.png" />
   <link data-trunk rel="rust" data-wasm-opt="z" />
   <link data-trunk rel="icon" href="public/icon.png" />
-  <link data-trunk rel="copy-dir" href="public" />
+  <link data-trunk rel="copy-file" href="public/manifest.json" />
+  <link data-trunk rel="copy-file" href="public/sw.js" />
+  <link data-trunk rel="copy-file" href="public/icon.png" />
   <style>
     body {
       margin: 0;
