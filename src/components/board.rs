@@ -238,15 +238,15 @@ pub fn BoardView(
         let x = f64::from(col as u32) * CELL_SIZE + PADDING;
         let y = f64::from((9 - row) as u32) * CELL_SIZE + PADDING;
 
-        let radius = 20.0;
+        let radius = 23.0; // Increased from 20.0
 
         // Shadow/Selection
         if is_selected {
             ctx.set_shadow_blur(15.0);
             ctx.set_shadow_color("#ffeb3b");
         } else {
-            ctx.set_shadow_blur(4.0);
-            ctx.set_shadow_color("rgba(0,0,0,0.4)");
+            ctx.set_shadow_blur(5.0); // Slightly increased shadow
+            ctx.set_shadow_color("rgba(0,0,0,0.5)");
         }
 
         // Body
@@ -268,14 +268,22 @@ pub fn BoardView(
         ctx.set_line_width(2.0);
         ctx.stroke();
 
+        // Inner Ring Detail
+        ctx.begin_path();
+        let _ = ctx.arc(x, y, radius - 4.0, 0.0, std::f64::consts::PI * 2.0);
+        ctx.set_line_width(1.0);
+        ctx.stroke();
+
         // Text
         ctx.set_fill_style(&color_str.into());
-        ctx.set_font("bold 24px KaiTi, serif");
+        ctx.set_font("bold 32px KaiTi, serif"); // Increased from 24px
         ctx.set_text_align("center");
         ctx.set_text_baseline("middle");
+        // Adjust baseline slightly for visual centering if needed, but middle is usually good
 
         let symbol = get_symbol(piece.piece_type, piece.color);
-        let _ = ctx.fill_text(symbol, x, y);
+        // Small vertical adjustment for font rendering
+        let _ = ctx.fill_text(symbol, x, y + 2.0);
     }
 
     // Effect to redraw when game state changes
