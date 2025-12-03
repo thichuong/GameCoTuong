@@ -8,6 +8,129 @@ use std::ops::Deref;
 use wasm_bindgen::JsCast;
 use web_sys::CanvasRenderingContext2d;
 
+// Board constants
+const CELL_SIZE: f64 = 50.0;
+const PADDING: f64 = 25.0;
+const BOARD_WIDTH: f64 = 450.0;
+const BOARD_HEIGHT: f64 = 500.0;
+
+// Helper to get symbol
+fn get_piece_symbol(p: PieceType, c: Color) -> &'static str {
+    match p {
+        PieceType::General => {
+            if c == Color::Red {
+                "帥"
+            } else {
+                "將"
+            }
+        }
+        PieceType::Advisor => {
+            if c == Color::Red {
+                "仕"
+            } else {
+                "士"
+            }
+        }
+        PieceType::Elephant => {
+            if c == Color::Red {
+                "相"
+            } else {
+                "象"
+            }
+        }
+        PieceType::Horse => {
+            if c == Color::Red {
+                "傌"
+            } else {
+                "馬"
+            }
+        }
+        PieceType::Chariot => {
+            if c == Color::Red {
+                "俥"
+            } else {
+                "車"
+            }
+        }
+        PieceType::Cannon => {
+            if c == Color::Red {
+                "炮"
+            } else {
+                "砲"
+            }
+        }
+        PieceType::Soldier => {
+            if c == Color::Red {
+                "兵"
+            } else {
+                "卒"
+            }
+        }
+    }
+}
+
+#[allow(deprecated)]
+fn draw_piece(
+    ctx: &CanvasRenderingContext2d,
+    row: usize,
+    col: usize,
+    piece: Piece,
+    is_selected: bool,
+) {
+    // Map logic row to visual y (row 0 is bottom)
+    #[allow(clippy::cast_possible_truncation)]
+    let x = f64::from(col as u32).mul_add(CELL_SIZE, PADDING);
+    #[allow(clippy::cast_possible_truncation)]
+    let y = f64::from((9 - row) as u32).mul_add(CELL_SIZE, PADDING);
+
+    let radius = 23.0; // Increased from 20.0
+
+    // Shadow/Selection
+    if is_selected {
+        ctx.set_shadow_blur(15.0);
+        ctx.set_shadow_color("#ffeb3b");
+    } else {
+        ctx.set_shadow_blur(5.0); // Slightly increased shadow
+        ctx.set_shadow_color("rgba(0,0,0,0.5)");
+    }
+
+    // Body
+    ctx.begin_path();
+    let _ = ctx.arc(x, y, radius, 0.0, std::f64::consts::PI * 2.0);
+    ctx.set_fill_style(&"#f0d9b5".into());
+    ctx.fill();
+
+    // Reset shadow
+    ctx.set_shadow_blur(0.0);
+
+    // Border
+    let color_str = if piece.color == Color::Red {
+        "#c00"
+    } else {
+        "#000"
+    };
+    ctx.set_stroke_style(&color_str.into());
+    ctx.set_line_width(2.0);
+    ctx.stroke();
+
+    // Inner Ring Detail
+    ctx.begin_path();
+    let _ = ctx.arc(x, y, radius - 4.0, 0.0, std::f64::consts::PI * 2.0);
+    ctx.set_line_width(1.0);
+    ctx.stroke();
+
+    // Text
+    ctx.set_fill_style(&color_str.into());
+    ctx.set_font("bold 32px KaiTi, serif"); // Increased from 24px
+    ctx.set_text_align("center");
+    ctx.set_text_baseline("middle");
+    // Adjust baseline slightly for visual centering if needed, but middle is usually good
+
+    let symbol = get_piece_symbol(piece.piece_type, piece.color);
+    // Small vertical adjustment for font rendering
+    let _ = ctx.fill_text(symbol, x, y + 2.0);
+}
+
 #[component]
 #[allow(clippy::too_many_lines)]
 #[allow(deprecated)]
@@ -18,85 +141,28 @@ pub fn BoardView(
     let (selected, set_selected) = create_signal(Option::<(usize, usize)>::None);
     let canvas_ref: NodeRef<Canvas> = create_node_ref();
 
-    // Board constants
-    const CELL_SIZE: f64 = 50.0;
-    const PADDING: f64 = 25.0;
-    const BOARD_WIDTH: f64 = 450.0;
-    const BOARD_HEIGHT: f64 = 500.0;
-
-    // Helper to get symbol
-    let get_piece_symbol = |p: PieceType, c: Color| -> &'static str {
-        match p {
-            PieceType::General => {
-                if c == Color::Red {
-                    "帥"
-                } else {
-                    "將"
-                }
-            }
-            PieceType::Advisor => {
-                if c == Color::Red {
-                    "仕"
-                } else {
-                    "士"
-                }
-            }
-            PieceType::Elephant => {
-                if c == Color::Red {
-                    "相"
-                } else {
-                    "象"
-                }
-            }
-            PieceType::Horse => {
-                if c == Color::Red {
-                    "傌"
-                } else {
-                    "馬"
-                }
-            }
-            PieceType::Chariot => {
-                if c == Color::Red {
-                    "俥"
-                } else {
-                    "車"
-                }
-            }
-            PieceType::Cannon => {
-                if c == Color::Red {
-                    "炮"
-                } else {
-                    "砲"
-                }
-            }
-            PieceType::Soldier => {
-                if c == Color::Red {
-                    "兵"
-                } else {
-                    "卒"
-                }
-            }
-        }
-    };
-
     // Draw function
     let draw = move || {
         let Some(canvas) = canvas_ref.get() else {
             return;
         };
-        let window = web_sys::window().unwrap();
+        let Some(window) = web_sys::window() else {
+            return;
+        };
         let ratio = window.device_pixel_ratio();
 
         let width = BOARD_WIDTH;
         let height = BOARD_HEIGHT;
 
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         canvas.set_width((width * ratio) as u32);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         canvas.set_height((height * ratio) as u32);
 
-        let Ok(Some(ctx)) = canvas.get_context("2d").map(|res| {
-            res.map(|o| o.dyn_into::<CanvasRenderingContext2d>().ok())
-                .flatten()
-        }) else {
+        let Ok(Some(ctx)) = canvas
+            .get_context("2d")
+            .map(|res| res.and_then(|o| o.dyn_into::<CanvasRenderingContext2d>().ok()))
+        else {
             return;
         };
         let ctx: CanvasRenderingContext2d = ctx;
@@ -113,7 +179,7 @@ pub fn BoardView(
 
         // Horizontal lines
         for r in 0..10 {
-            let y = f64::from(r) * CELL_SIZE + PADDING;
+            let y = f64::from(r).mul_add(CELL_SIZE, PADDING);
             ctx.begin_path();
             ctx.move_to(PADDING, y);
             ctx.line_to(BOARD_WIDTH - PADDING, y);
@@ -122,53 +188,71 @@ pub fn BoardView(
 
         // Vertical lines
         for c in 0..9 {
-            let x = f64::from(c) * CELL_SIZE + PADDING;
+            let x = f64::from(c).mul_add(CELL_SIZE, PADDING);
 
             // Top half
             ctx.begin_path();
             ctx.move_to(x, PADDING);
-            ctx.line_to(x, PADDING + 4.0 * CELL_SIZE);
+            ctx.line_to(x, 4.0f64.mul_add(CELL_SIZE, PADDING));
             ctx.stroke();
 
             // Bottom half
             ctx.begin_path();
-            ctx.move_to(x, PADDING + 5.0 * CELL_SIZE);
+            ctx.move_to(x, 5.0f64.mul_add(CELL_SIZE, PADDING));
             ctx.line_to(x, BOARD_HEIGHT - PADDING);
             ctx.stroke();
         }
 
         // Vertical lines sides (connect top and bottom)
         ctx.begin_path();
-        ctx.move_to(PADDING, PADDING + 4.0 * CELL_SIZE);
-        ctx.line_to(PADDING, PADDING + 5.0 * CELL_SIZE);
+        ctx.move_to(PADDING, 4.0f64.mul_add(CELL_SIZE, PADDING));
+        ctx.line_to(PADDING, 5.0f64.mul_add(CELL_SIZE, PADDING));
         ctx.stroke();
 
         ctx.begin_path();
-        ctx.move_to(BOARD_WIDTH - PADDING, PADDING + 4.0 * CELL_SIZE);
-        ctx.line_to(BOARD_WIDTH - PADDING, PADDING + 5.0 * CELL_SIZE);
+        ctx.move_to(BOARD_WIDTH - PADDING, 4.0f64.mul_add(CELL_SIZE, PADDING));
+        ctx.line_to(BOARD_WIDTH - PADDING, 5.0f64.mul_add(CELL_SIZE, PADDING));
         ctx.stroke();
 
         // Palaces
         // Top
         ctx.begin_path();
-        ctx.move_to(3.0 * CELL_SIZE + PADDING, PADDING);
-        ctx.line_to(5.0 * CELL_SIZE + PADDING, 2.0 * CELL_SIZE + PADDING);
+        ctx.move_to(3.0f64.mul_add(CELL_SIZE, PADDING), PADDING);
+        ctx.line_to(
+            5.0f64.mul_add(CELL_SIZE, PADDING),
+            2.0f64.mul_add(CELL_SIZE, PADDING),
+        );
         ctx.stroke();
 
         ctx.begin_path();
-        ctx.move_to(5.0 * CELL_SIZE + PADDING, PADDING);
-        ctx.line_to(3.0 * CELL_SIZE + PADDING, 2.0 * CELL_SIZE + PADDING);
+        ctx.move_to(5.0f64.mul_add(CELL_SIZE, PADDING), PADDING);
+        ctx.line_to(
+            3.0f64.mul_add(CELL_SIZE, PADDING),
+            2.0f64.mul_add(CELL_SIZE, PADDING),
+        );
         ctx.stroke();
 
         // Bottom
         ctx.begin_path();
-        ctx.move_to(3.0 * CELL_SIZE + PADDING, 7.0 * CELL_SIZE + PADDING);
-        ctx.line_to(5.0 * CELL_SIZE + PADDING, 9.0 * CELL_SIZE + PADDING);
+        ctx.move_to(
+            3.0f64.mul_add(CELL_SIZE, PADDING),
+            7.0f64.mul_add(CELL_SIZE, PADDING),
+        );
+        ctx.line_to(
+            5.0f64.mul_add(CELL_SIZE, PADDING),
+            9.0f64.mul_add(CELL_SIZE, PADDING),
+        );
         ctx.stroke();
 
         ctx.begin_path();
-        ctx.move_to(5.0 * CELL_SIZE + PADDING, 7.0 * CELL_SIZE + PADDING);
-        ctx.line_to(3.0 * CELL_SIZE + PADDING, 9.0 * CELL_SIZE + PADDING);
+        ctx.move_to(
+            5.0f64.mul_add(CELL_SIZE, PADDING),
+            7.0f64.mul_add(CELL_SIZE, PADDING),
+        );
+        ctx.line_to(
+            3.0f64.mul_add(CELL_SIZE, PADDING),
+            9.0f64.mul_add(CELL_SIZE, PADDING),
+        );
         ctx.stroke();
 
         // River Text
@@ -183,24 +267,21 @@ pub fn BoardView(
         for r in 0..10 {
             for c in 0..9 {
                 if let Some(piece) = state.board.get_piece(r, c) {
-                    draw_piece(
-                        &ctx,
-                        r,
-                        c,
-                        piece,
-                        selected.get() == Some((r, c)),
-                        get_piece_symbol,
-                    );
+                    draw_piece(&ctx, r, c, piece, selected.get() == Some((r, c)));
                 }
             }
         }
 
         // Draw Last Move
         if let Some(((fr, fc), (tr, tc))) = state.last_move {
-            let x1 = f64::from(fc as u32) * CELL_SIZE + PADDING;
-            let y1 = f64::from((9 - fr) as u32) * CELL_SIZE + PADDING;
-            let x2 = f64::from(tc as u32) * CELL_SIZE + PADDING;
-            let y2 = f64::from((9 - tr) as u32) * CELL_SIZE + PADDING;
+            #[allow(clippy::cast_possible_truncation)]
+            let x1 = f64::from(fc as u32).mul_add(CELL_SIZE, PADDING);
+            #[allow(clippy::cast_possible_truncation)]
+            let y1 = f64::from((9 - fr) as u32).mul_add(CELL_SIZE, PADDING);
+            #[allow(clippy::cast_possible_truncation)]
+            let x2 = f64::from(tc as u32).mul_add(CELL_SIZE, PADDING);
+            #[allow(clippy::cast_possible_truncation)]
+            let y2 = f64::from((9 - tr) as u32).mul_add(CELL_SIZE, PADDING);
 
             ctx.set_stroke_style(&"rgba(255, 165, 0, 0.6)".into());
             ctx.set_line_width(6.0);
@@ -220,71 +301,6 @@ pub fn BoardView(
             ctx.fill();
         }
     };
-
-    fn draw_piece<F>(
-        ctx: &CanvasRenderingContext2d,
-        row: usize,
-        col: usize,
-        piece: Piece,
-        is_selected: bool,
-        get_symbol: F,
-    ) where
-        F: Fn(PieceType, Color) -> &'static str,
-    {
-        const CELL_SIZE: f64 = 50.0;
-        const PADDING: f64 = 25.0;
-
-        // Map logic row to visual y (row 0 is bottom)
-        let x = f64::from(col as u32) * CELL_SIZE + PADDING;
-        let y = f64::from((9 - row) as u32) * CELL_SIZE + PADDING;
-
-        let radius = 23.0; // Increased from 20.0
-
-        // Shadow/Selection
-        if is_selected {
-            ctx.set_shadow_blur(15.0);
-            ctx.set_shadow_color("#ffeb3b");
-        } else {
-            ctx.set_shadow_blur(5.0); // Slightly increased shadow
-            ctx.set_shadow_color("rgba(0,0,0,0.5)");
-        }
-
-        // Body
-        ctx.begin_path();
-        let _ = ctx.arc(x, y, radius, 0.0, std::f64::consts::PI * 2.0);
-        ctx.set_fill_style(&"#f0d9b5".into());
-        ctx.fill();
-
-        // Reset shadow
-        ctx.set_shadow_blur(0.0);
-
-        // Border
-        let color_str = if piece.color == Color::Red {
-            "#c00"
-        } else {
-            "#000"
-        };
-        ctx.set_stroke_style(&color_str.into());
-        ctx.set_line_width(2.0);
-        ctx.stroke();
-
-        // Inner Ring Detail
-        ctx.begin_path();
-        let _ = ctx.arc(x, y, radius - 4.0, 0.0, std::f64::consts::PI * 2.0);
-        ctx.set_line_width(1.0);
-        ctx.stroke();
-
-        // Text
-        ctx.set_fill_style(&color_str.into());
-        ctx.set_font("bold 32px KaiTi, serif"); // Increased from 24px
-        ctx.set_text_align("center");
-        ctx.set_text_baseline("middle");
-        // Adjust baseline slightly for visual centering if needed, but middle is usually good
-
-        let symbol = get_symbol(piece.piece_type, piece.color);
-        // Small vertical adjustment for font rendering
-        let _ = ctx.fill_text(symbol, x, y + 2.0);
-    }
 
     // Effect to redraw when game state changes
     create_effect(move |_| {
@@ -308,12 +324,16 @@ pub fn BoardView(
         // x = col * CELL + PADDING => col = (x - PADDING) / CELL
         // y = (9 - row) * CELL + PADDING => row = 9 - (y - PADDING) / CELL
 
+        #[allow(clippy::cast_possible_truncation)]
         let col = ((click_x - PADDING + CELL_SIZE / 2.0) / CELL_SIZE).floor() as isize;
+        #[allow(clippy::cast_possible_truncation)]
         let row_visual = ((click_y - PADDING + CELL_SIZE / 2.0) / CELL_SIZE).floor() as isize;
         let row = 9 - row_visual;
 
-        if col >= 0 && col < 9 && row >= 0 && row < 10 {
+        if (0..9).contains(&col) && (0..10).contains(&row) {
+            #[allow(clippy::cast_sign_loss)]
             let r = row as usize;
+            #[allow(clippy::cast_sign_loss)]
             let c = col as usize;
 
             // Handle move logic (same as before)
