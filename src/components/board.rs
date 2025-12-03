@@ -477,7 +477,7 @@ pub fn BoardView(
     };
 
     view! {
-        <div style="display: flex; flex-direction: column; align-items: center; width: 100%; padding: 5px; box-sizing: border-box;">
+        <div style="display: flex; flex-direction: column; align-items: center; padding: 5px; box-sizing: border-box;">
             // Black's Lost Pieces (Top)
             <div style=captured_row_style>
                 {move || {
