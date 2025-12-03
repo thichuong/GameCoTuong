@@ -452,6 +452,7 @@ pub fn App() -> impl IntoView {
                         flex-direction: row; /* Desktop: Log left (1), Board right (2) */
                         align-items: stretch;
                         justify-content: center;
+                        gap: 0; /* Remove gap on desktop to bring log closer */
                     }
                 }
 
@@ -651,6 +652,41 @@ pub fn App() -> impl IntoView {
                     line-height: 1;
                     border: 1px solid #5c3a1e;
                 }
+
+                .layout-spacer {
+                    display: none;
+                }
+
+                .side-column {
+                    display: contents; /* Mobile: just show content */
+                }
+
+                @media (min-width: 1100px) {
+                    .side-column {
+                        display: flex;
+                        flex: 1;
+                        min-width: 0; /* Allow shrinking */
+                    }
+                    
+                    /* Left column aligns right (next to board) */
+                    .side-column.left {
+                        justify-content: flex-end;
+                        padding-right: 5px; /* Minimal padding */
+                    }
+                    
+                    /* Right column aligns left (next to board) */
+                    .side-column.right {
+                        justify-content: flex-start;
+                        padding-left: 5px; /* Minimal padding */
+                    }
+
+                    .log-panel {
+                        width: 480px;
+                        min-width: 350px; /* Prevent it from becoming too narrow */
+                        height: auto; /* Stretch to match board */
+                        margin-top: 45px; /* Align with board canvas (skip captured pieces) */
+                    }
+                }
                 "
             </style>
 
@@ -744,57 +780,64 @@ pub fn App() -> impl IntoView {
 
             <div class="game-layout">
                 // Log Panel (Order 1 in HTML, but reversed on mobile to be bottom)
-                <div class="log-panel">
-                    <div class="log-header">
-                        <span>"Lịch sử nước đi"</span>
-                        <span style="font-size: 0.8em; opacity: 0.7;">{move || format!("{} moves", game_state.get().history.len())}</span>
-                    </div>
+                <div class="side-column left">
+                    <div class="log-panel">
+                        <div class="log-header">
+                            <span>"Lịch sử nước đi"</span>
+                            <span style="font-size: 0.8em; opacity: 0.7;">{move || format!("{} moves", game_state.get().history.len())}</span>
+                        </div>
 
 
-                    <ul class="log-list">
-                        {move || {
-                            game_state.get().history.iter().enumerate().rev().map(|(i, record)| {
-                                let turn_icon = if i % 2 == 0 { "🔴" } else { "⚫" };
-                                let turn_text = if i % 2 == 0 { "Red" } else { "Black" };
-                                let note = record.note.clone().unwrap_or_default();
+                        <ul class="log-list">
+                            {move || {
+                                game_state.get().history.iter().enumerate().rev().map(|(i, record)| {
+                                    let turn_icon = if i % 2 == 0 { "🔴" } else { "⚫" };
+                                    let turn_text = if i % 2 == 0 { "Red" } else { "Black" };
+                                    let note = record.note.clone().unwrap_or_default();
 
-                                // Format coordinates to be more readable (e.g. A1, B2 style or just standard)
-                                // Here we stick to (row, col) but maybe 1-based for user friendliness?
-                                // Let's keep 0-8, 0-9 for now but make it clear.
-                                // Actually, Xiangqi notation is complex. Let's stick to coordinates but make them clear.
-                                let from_str = format!("({}, {})", record.from.0, record.from.1);
-                                let to_str = format!("({}, {})", record.to.0, record.to.1);
+                                    // Format coordinates to be more readable (e.g. A1, B2 style or just standard)
+                                    // Here we stick to (row, col) but maybe 1-based for user friendliness?
+                                    // Let's keep 0-8, 0-9 for now but make it clear.
+                                    // Actually, Xiangqi notation is complex. Let's stick to coordinates but make them clear.
+                                    let from_str = format!("({}, {})", record.from.0, record.from.1);
+                                    let to_str = format!("({}, {})", record.to.0, record.to.1);
 
-                                view! {
-                                    <li class="log-item">
-                                        <div class="move-info">
-                                            <span>{format!("{}. {} {}", i + 1, turn_icon, turn_text)}</span>
-                                            <div style="display: flex; align-items: center; gap: 5px;">
-                                                <span>{format!("{from_str} ➝ {to_str}")}</span>
-                                                {record.captured.map_or_else(
-                                                    || view! {}.into_view(),
-                                                    |cap| view! {
-                                                        <span style="color: #ff9800; font-size: 0.9em; margin-left: 5px;">
-                                                            {format!("(Eat {})", get_piece_symbol(cap.piece_type, cap.color))}
-                                                        </span>
-                                                    }.into_view()
-                                                )}
+                                    view! {
+                                        <li class="log-item">
+                                            <div class="move-info">
+                                                <span>{format!("{}. {} {}", i + 1, turn_icon, turn_text)}</span>
+                                                <div style="display: flex; align-items: center; gap: 5px;">
+                                                    <span>{format!("{from_str} ➝ {to_str}")}</span>
+                                                    {record.captured.map_or_else(
+                                                        || view! {}.into_view(),
+                                                        |cap| view! {
+                                                            <span style="color: #ff9800; font-size: 0.9em; margin-left: 5px;">
+                                                                {format!("(Eat {})", get_piece_symbol(cap.piece_type, cap.color))}
+                                                            </span>
+                                                        }.into_view()
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                        {if note.is_empty() {
-                                            view! {}.into_view()
-                                        } else {
-                                            view! { <div class="ai-stats">{note}</div> }.into_view()
-                                        }}
-                                    </li>
-                                }
-                            }).collect::<Vec<_>>()
-                        }}
-                    </ul>
+                                            {if note.is_empty() {
+                                                view! {}.into_view()
+                                            } else {
+                                                view! { <div class="ai-stats">{note}</div> }.into_view()
+                                            }}
+                                        </li>
+                                    }
+                                }).collect::<Vec<_>>()
+                            }}
+                        </ul>
+                    </div>
                 </div>
 
                 // Board View (Order 2 in HTML)
                 <BoardView game_state=game_state set_game_state=set_game_state />
+
+                // Spacer for centering (Order 3)
+                <div class="side-column right">
+                    // Empty spacer div, or just the column itself acts as spacer
+                </div>
             </div>
 
             <div style="margin-top: 20px; text-align: center;">
