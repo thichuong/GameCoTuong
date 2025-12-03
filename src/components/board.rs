@@ -440,7 +440,7 @@ pub fn BoardView(
                 _ref=canvas_ref
                 width=450
                 height=500
-                style="width: min(96vw, 72vh); aspect-ratio: 9/10; background-color: #eecfa1; border: 2px solid #5c3a1e; box-shadow: 0 5px 15px rgba(0,0,0,0.3); cursor: pointer;"
+                style="width: min(96vw, 72vh); aspect-ratio: 9/10; background-color: #eecfa1; border: 2px solid #5c3a1e; box-shadow: 0 5px 15px rgba(0,0,0,0.3); cursor: pointer; -webkit-tap-highlight-color: transparent;"
                 on:click=on_click
             />
 
