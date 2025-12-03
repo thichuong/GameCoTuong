@@ -1,0 +1,13 @@
+    Checking web-sys v0.3.83
+    Checking gloo-utils v0.2.0
+    Checking wasm-streams v0.4.2
+    Checking leptos_reactive v0.6.15
+    Checking console_log v1.0.0
+    Checking cotuong_core v0.1.0 (/home/tchuong/Màn hình nền/GameCoTuong/cotuong_core)
+    Checking gloo-net v0.6.0
+    Checking server_fn v0.6.15
+    Checking leptos_server v0.6.15
+    Checking leptos_dom v0.6.15
+    Checking leptos v0.6.15
+    Checking CoTuong v0.1.0 (/home/tchuong/Màn hình nền/GameCoTuong)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.14s
