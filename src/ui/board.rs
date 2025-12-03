@@ -1,14 +1,73 @@
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
 use crate::resources::GameStateWrapper;
 use bevy::prelude::*;
+
 use cotuong_core::logic::board::{Color, PieceType};
 
 pub struct BoardPlugin;
 
 impl Plugin for BoardPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_camera)
+        app.init_resource::<PieceAssets>()
+            .add_systems(
+                Startup,
+                (
+                    setup_camera,
+                    load_piece_assets,
+                    spawn_board.after(load_piece_assets),
+                ),
+            )
             .add_systems(Update, (draw_board, spawn_pieces, handle_input));
     }
+}
+
+#[derive(Resource, Default)]
+struct PieceAssets {
+    textures: std::collections::HashMap<(PieceType, Color), Handle<Image>>,
+    board: Handle<Image>,
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn load_piece_assets(mut piece_assets: ResMut<PieceAssets>, asset_server: Res<AssetServer>) {
+    let pieces = [
+        (PieceType::General, "general"),
+        (PieceType::Advisor, "advisor"),
+        (PieceType::Elephant, "elephant"),
+        (PieceType::Horse, "horse"),
+        (PieceType::Chariot, "chariot"),
+        (PieceType::Cannon, "cannon"),
+        (PieceType::Soldier, "soldier"),
+    ];
+
+    for (piece_type, name) in pieces {
+        // Red
+        let red_path = format!("textures/red_{name}.png");
+        piece_assets
+            .textures
+            .insert((piece_type, Color::Red), asset_server.load(red_path));
+
+        // Black
+        let black_path = format!("textures/black_{name}.png");
+        piece_assets
+            .textures
+            .insert((piece_type, Color::Black), asset_server.load(black_path));
+    }
+    piece_assets.board = asset_server.load("textures/board.png");
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn spawn_board(mut commands: Commands, piece_assets: Res<PieceAssets>) {
+    commands.spawn(SpriteBundle {
+        texture: piece_assets.board.clone(),
+        transform: Transform::from_xyz(0.0, 0.0, 0.0),
+        sprite: Sprite {
+            custom_size: Some(Vec2::new(BOARD_WIDTH + 100.0, BOARD_HEIGHT + 100.0)),
+            ..default()
+        },
+        ..default()
+    });
 }
 
 // Constants for board layout
@@ -37,7 +96,7 @@ fn draw_board(mut gizmos: Gizmos) {
 
     // Horizontal lines
     for r in 0..10 {
-        let y = start_y + r as f32 * CELL_SIZE;
+        let y = (r as f32).mul_add(CELL_SIZE, start_y);
         gizmos.line_2d(
             Vec2::new(start_x, y),
             Vec2::new(start_x + BOARD_WIDTH, y),
@@ -47,25 +106,25 @@ fn draw_board(mut gizmos: Gizmos) {
 
     // Vertical lines
     for c in 0..9 {
-        let x = start_x + c as f32 * CELL_SIZE;
+        let x = (c as f32).mul_add(CELL_SIZE, start_x);
         // Top half
         gizmos.line_2d(
-            Vec2::new(x, start_y + 5.0 * CELL_SIZE),
-            Vec2::new(x, start_y + 9.0 * CELL_SIZE),
+            Vec2::new(x, 5.0f32.mul_add(CELL_SIZE, start_y)),
+            Vec2::new(x, 9.0f32.mul_add(CELL_SIZE, start_y)),
             color,
         );
         // Bottom half
         gizmos.line_2d(
             Vec2::new(x, start_y),
-            Vec2::new(x, start_y + 4.0 * CELL_SIZE),
+            Vec2::new(x, 4.0f32.mul_add(CELL_SIZE, start_y)),
             color,
         );
 
         // Connect sides completely
         if c == 0 || c == 8 {
             gizmos.line_2d(
-                Vec2::new(x, start_y + 4.0 * CELL_SIZE),
-                Vec2::new(x, start_y + 5.0 * CELL_SIZE),
+                Vec2::new(x, 4.0f32.mul_add(CELL_SIZE, start_y)),
+                Vec2::new(x, 5.0f32.mul_add(CELL_SIZE, start_y)),
                 color,
             );
         }
@@ -74,34 +133,53 @@ fn draw_board(mut gizmos: Gizmos) {
     // Palaces (X shapes)
     // Bottom (Red)
     gizmos.line_2d(
-        Vec2::new(start_x + 3.0 * CELL_SIZE, start_y),
-        Vec2::new(start_x + 5.0 * CELL_SIZE, start_y + 2.0 * CELL_SIZE),
+        Vec2::new(3.0f32.mul_add(CELL_SIZE, start_x), start_y),
+        Vec2::new(
+            5.0f32.mul_add(CELL_SIZE, start_x),
+            2.0f32.mul_add(CELL_SIZE, start_y),
+        ),
         color,
     );
     gizmos.line_2d(
-        Vec2::new(start_x + 5.0 * CELL_SIZE, start_y),
-        Vec2::new(start_x + 3.0 * CELL_SIZE, start_y + 2.0 * CELL_SIZE),
+        Vec2::new(5.0f32.mul_add(CELL_SIZE, start_x), start_y),
+        Vec2::new(
+            3.0f32.mul_add(CELL_SIZE, start_x),
+            2.0f32.mul_add(CELL_SIZE, start_y),
+        ),
         color,
     );
 
     // Top (Black)
     gizmos.line_2d(
-        Vec2::new(start_x + 3.0 * CELL_SIZE, start_y + 7.0 * CELL_SIZE),
-        Vec2::new(start_x + 5.0 * CELL_SIZE, start_y + 9.0 * CELL_SIZE),
+        Vec2::new(
+            3.0f32.mul_add(CELL_SIZE, start_x),
+            7.0f32.mul_add(CELL_SIZE, start_y),
+        ),
+        Vec2::new(
+            5.0f32.mul_add(CELL_SIZE, start_x),
+            9.0f32.mul_add(CELL_SIZE, start_y),
+        ),
         color,
     );
     gizmos.line_2d(
-        Vec2::new(start_x + 5.0 * CELL_SIZE, start_y + 7.0 * CELL_SIZE),
-        Vec2::new(start_x + 3.0 * CELL_SIZE, start_y + 9.0 * CELL_SIZE),
+        Vec2::new(
+            5.0f32.mul_add(CELL_SIZE, start_x),
+            7.0f32.mul_add(CELL_SIZE, start_y),
+        ),
+        Vec2::new(
+            3.0f32.mul_add(CELL_SIZE, start_x),
+            9.0f32.mul_add(CELL_SIZE, start_y),
+        ),
         color,
     );
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn spawn_pieces(
     mut commands: Commands,
     game_state: Res<GameStateWrapper>,
     query: Query<Entity, With<PieceComponent>>,
-    asset_server: Res<AssetServer>,
+    piece_assets: Res<PieceAssets>,
 ) {
     // Ideally, we only update when state changes. For now, simple re-render.
     // Optimization: Diffing or event-based updates.
@@ -116,58 +194,37 @@ fn spawn_pieces(
         commands.entity(entity).despawn_recursive();
     }
 
-    let font = asset_server.load("fonts/KaiTi.ttf"); // We need to ensure this font exists or use default
-                                                     // Since I don't have the font file, I should use a system font or just basic text.
-                                                     // Bevy's default font is FiraMono.
-
     let start_x = -BOARD_WIDTH / 2.0;
     let start_y = -BOARD_HEIGHT / 2.0;
 
     for r in 0..10 {
         for c in 0..9 {
             if let Some(piece) = game_state.0.board.get_piece(r, c) {
-                let x = start_x + c as f32 * CELL_SIZE;
-                let y = start_y + r as f32 * CELL_SIZE;
+                let x = (c as f32).mul_add(CELL_SIZE, start_x);
+                let y = (r as f32).mul_add(CELL_SIZE, start_y);
 
-                let color = match piece.color {
-                    Color::Red => bevy::prelude::Color::srgb(0.8, 0.0, 0.0),
-                    Color::Black => bevy::prelude::Color::BLACK,
-                };
-
-                let symbol = get_piece_symbol(piece.piece_type, piece.color);
-
-                commands
-                    .spawn((
+                if let Some(texture_handle) =
+                    piece_assets.textures.get(&(piece.piece_type, piece.color))
+                {
+                    commands.spawn((
                         SpriteBundle {
+                            texture: texture_handle.clone(),
+                            transform: Transform::from_xyz(x, y, 1.0),
                             sprite: Sprite {
-                                color: bevy::prelude::Color::srgb(0.94, 0.85, 0.71), // #f0d9b5
                                 custom_size: Some(Vec2::new(PIECE_SIZE, PIECE_SIZE)),
                                 ..default()
                             },
-                            transform: Transform::from_xyz(x, y, 1.0),
                             ..default()
                         },
                         PieceComponent { row: r, col: c },
-                    ))
-                    .with_children(|parent| {
-                        parent.spawn(Text2dBundle {
-                            text: Text::from_section(
-                                symbol,
-                                TextStyle {
-                                    font: font.clone(),
-                                    font_size: 40.0,
-                                    color,
-                                },
-                            ),
-                            transform: Transform::from_xyz(0.0, 0.0, 1.0),
-                            ..default()
-                        });
-                    });
+                    ));
+                }
             }
         }
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn handle_input(
     // mut commands: Commands,
     windows: Query<&Window>,
@@ -190,7 +247,7 @@ fn handle_input(
                 let c = ((point.x - start_x + HALF_CELL) / CELL_SIZE).floor() as i32;
                 let r = ((point.y - start_y + HALF_CELL) / CELL_SIZE).floor() as i32;
 
-                if c >= 0 && c < 9 && r >= 0 && r < 10 {
+                if (0..9).contains(&c) && (0..10).contains(&r) {
                     let r = r as usize;
                     let c = c as usize;
 
@@ -221,60 +278,6 @@ fn handle_input(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-fn get_piece_symbol(p: PieceType, c: Color) -> &'static str {
-    match p {
-        PieceType::General => {
-            if c == Color::Red {
-                "帥"
-            } else {
-                "將"
-            }
-        }
-        PieceType::Advisor => {
-            if c == Color::Red {
-                "仕"
-            } else {
-                "士"
-            }
-        }
-        PieceType::Elephant => {
-            if c == Color::Red {
-                "相"
-            } else {
-                "象"
-            }
-        }
-        PieceType::Horse => {
-            if c == Color::Red {
-                "傌"
-            } else {
-                "馬"
-            }
-        }
-        PieceType::Chariot => {
-            if c == Color::Red {
-                "俥"
-            } else {
-                "車"
-            }
-        }
-        PieceType::Cannon => {
-            if c == Color::Red {
-                "炮"
-            } else {
-                "砲"
-            }
-        }
-        PieceType::Soldier => {
-            if c == Color::Red {
-                "兵"
-            } else {
-                "卒"
             }
         }
     }

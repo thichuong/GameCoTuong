@@ -2,7 +2,7 @@ use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
 use crate::logic::eval_constants::{get_piece_value, get_pst_value};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Color {
     Red,
     Black,
@@ -18,7 +18,7 @@ impl Color {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PieceType {
     General,  // King/General
     Advisor,  // Guard

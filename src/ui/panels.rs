@@ -27,7 +27,7 @@ fn ui_panels(
             // Game Status
             let status_text = match game_state.0.status {
                 GameStatus::Playing => format!("Turn: {:?}", game_state.0.turn),
-                GameStatus::Checkmate(winner) => format!("Checkmate! {:?} Wins!", winner),
+                GameStatus::Checkmate(winner) => format!("Checkmate! {winner:?} Wins!"),
                 GameStatus::Stalemate => "Stalemate!".to_string(),
             };
             ui.label(status_text);
