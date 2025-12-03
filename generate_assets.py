@@ -73,7 +73,8 @@ try:
         print(f"Using font: {font_path}")
         # Scale font size by scale_factor (4x)
         # Original size was 40 for 128px, so 160 for 512px
-        font = ImageFont.truetype(font_path, 160)
+        # Increased to 280 for better visibility
+        font = ImageFont.truetype(font_path, 280)
     else:
         print("Warning: No suitable CJK font found. Using default. Characters may not render.")
         font = ImageFont.load_default()
