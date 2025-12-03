@@ -17,9 +17,10 @@ impl Plugin for BoardPlugin {
                     setup_camera,
                     load_piece_assets,
                     spawn_board.after(load_piece_assets),
+                    spawn_grid.after(load_piece_assets),
                 ),
             )
-            .add_systems(Update, (draw_board, spawn_pieces, handle_input));
+            .add_systems(Update, (spawn_pieces, handle_input));
     }
 }
 
@@ -27,6 +28,7 @@ impl Plugin for BoardPlugin {
 struct PieceAssets {
     textures: std::collections::HashMap<(PieceType, Color), Handle<Image>>,
     board: Handle<Image>,
+    pixel: Handle<Image>,
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -55,6 +57,7 @@ fn load_piece_assets(mut piece_assets: ResMut<PieceAssets>, asset_server: Res<As
             .insert((piece_type, Color::Black), asset_server.load(black_path));
     }
     piece_assets.board = asset_server.load("textures/board.png");
+    piece_assets.pixel = asset_server.load("textures/pixel.png");
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -89,68 +92,118 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-fn draw_board(mut gizmos: Gizmos) {
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::needless_pass_by_value)]
+fn spawn_grid(mut commands: Commands, piece_assets: Res<PieceAssets>) {
     let start_x = -BOARD_WIDTH / 2.0;
     let start_y = -BOARD_HEIGHT / 2.0;
     let color = bevy::prelude::Color::srgb(0.36, 0.23, 0.12); // #5c3a1e
+    let line_thickness = 2.0;
+    let z_index = 0.5;
 
     // Horizontal lines
     for r in 0..10 {
         let y = (r as f32).mul_add(CELL_SIZE, start_y);
-        gizmos.line_2d(
-            Vec2::new(start_x, y),
-            Vec2::new(start_x + BOARD_WIDTH, y),
-            color,
-        );
+        commands.spawn(SpriteBundle {
+            texture: piece_assets.pixel.clone(),
+            transform: Transform {
+                translation: Vec3::new(0.0, y, z_index),
+                scale: Vec3::new(BOARD_WIDTH, line_thickness, 1.0),
+                ..default()
+            },
+            sprite: Sprite { color, ..default() },
+            ..default()
+        });
     }
 
     // Vertical lines
     for c in 0..9 {
         let x = (c as f32).mul_add(CELL_SIZE, start_x);
-        // Top half
-        gizmos.line_2d(
-            Vec2::new(x, 5.0f32.mul_add(CELL_SIZE, start_y)),
-            Vec2::new(x, 9.0f32.mul_add(CELL_SIZE, start_y)),
-            color,
-        );
-        // Bottom half
-        gizmos.line_2d(
-            Vec2::new(x, start_y),
-            Vec2::new(x, 4.0f32.mul_add(CELL_SIZE, start_y)),
-            color,
-        );
 
-        // Connect sides completely
+        // Top half
+        let top_height = 4.0 * CELL_SIZE;
+        let top_y = 5.0f32.mul_add(CELL_SIZE, start_y) + top_height / 2.0;
+        commands.spawn(SpriteBundle {
+            texture: piece_assets.pixel.clone(),
+            transform: Transform {
+                translation: Vec3::new(x, top_y, z_index),
+                scale: Vec3::new(line_thickness, top_height, 1.0),
+                ..default()
+            },
+            sprite: Sprite { color, ..default() },
+            ..default()
+        });
+
+        // Bottom half
+        let bottom_height = 4.0 * CELL_SIZE;
+        let bottom_y = start_y + bottom_height / 2.0;
+        commands.spawn(SpriteBundle {
+            texture: piece_assets.pixel.clone(),
+            transform: Transform {
+                translation: Vec3::new(x, bottom_y, z_index),
+                scale: Vec3::new(line_thickness, bottom_height, 1.0),
+                ..default()
+            },
+            sprite: Sprite { color, ..default() },
+            ..default()
+        });
+
+        // Connect sides completely (River borders)
         if c == 0 || c == 8 {
-            gizmos.line_2d(
-                Vec2::new(x, 4.0f32.mul_add(CELL_SIZE, start_y)),
-                Vec2::new(x, 5.0f32.mul_add(CELL_SIZE, start_y)),
-                color,
-            );
+            let river_height = CELL_SIZE;
+            let river_y = 4.0f32.mul_add(CELL_SIZE, start_y) + river_height / 2.0;
+            commands.spawn(SpriteBundle {
+                texture: piece_assets.pixel.clone(),
+                transform: Transform {
+                    translation: Vec3::new(x, river_y, z_index),
+                    scale: Vec3::new(line_thickness, river_height, 1.0),
+                    ..default()
+                },
+                sprite: Sprite { color, ..default() },
+                ..default()
+            });
         }
     }
 
     // Palaces (X shapes)
+    // Helper to draw diagonal line
+    let draw_diagonal = |start: Vec2, end: Vec2, commands: &mut Commands| {
+        let center = (start + end) / 2.0;
+        let len = start.distance(end);
+        let angle = (end.y - start.y).atan2(end.x - start.x);
+
+        commands.spawn(SpriteBundle {
+            texture: piece_assets.pixel.clone(),
+            transform: Transform {
+                translation: Vec3::new(center.x, center.y, z_index),
+                rotation: Quat::from_rotation_z(angle),
+                scale: Vec3::new(len, line_thickness, 1.0),
+            },
+            sprite: Sprite { color, ..default() },
+            ..default()
+        });
+    };
+
     // Bottom (Red)
-    gizmos.line_2d(
+    draw_diagonal(
         Vec2::new(3.0f32.mul_add(CELL_SIZE, start_x), start_y),
         Vec2::new(
             5.0f32.mul_add(CELL_SIZE, start_x),
             2.0f32.mul_add(CELL_SIZE, start_y),
         ),
-        color,
+        &mut commands,
     );
-    gizmos.line_2d(
+    draw_diagonal(
         Vec2::new(5.0f32.mul_add(CELL_SIZE, start_x), start_y),
         Vec2::new(
             3.0f32.mul_add(CELL_SIZE, start_x),
             2.0f32.mul_add(CELL_SIZE, start_y),
         ),
-        color,
+        &mut commands,
     );
 
     // Top (Black)
-    gizmos.line_2d(
+    draw_diagonal(
         Vec2::new(
             3.0f32.mul_add(CELL_SIZE, start_x),
             7.0f32.mul_add(CELL_SIZE, start_y),
@@ -159,9 +212,9 @@ fn draw_board(mut gizmos: Gizmos) {
             5.0f32.mul_add(CELL_SIZE, start_x),
             9.0f32.mul_add(CELL_SIZE, start_y),
         ),
-        color,
+        &mut commands,
     );
-    gizmos.line_2d(
+    draw_diagonal(
         Vec2::new(
             5.0f32.mul_add(CELL_SIZE, start_x),
             7.0f32.mul_add(CELL_SIZE, start_y),
@@ -170,7 +223,7 @@ fn draw_board(mut gizmos: Gizmos) {
             3.0f32.mul_add(CELL_SIZE, start_x),
             9.0f32.mul_add(CELL_SIZE, start_y),
         ),
-        color,
+        &mut commands,
     );
 }
 
@@ -209,7 +262,7 @@ fn spawn_pieces(
                     commands.spawn((
                         SpriteBundle {
                             texture: texture_handle.clone(),
-                            transform: Transform::from_xyz(x, y, 1.0),
+                            transform: Transform::from_xyz(x, y, 2.0),
                             sprite: Sprite {
                                 custom_size: Some(Vec2::new(PIECE_SIZE, PIECE_SIZE)),
                                 ..default()

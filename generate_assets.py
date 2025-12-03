@@ -99,4 +99,9 @@ def create_board_image():
     img.save("assets/textures/board.png")
     print("Generated assets/textures/board.png")
 
-create_board_image()
+    create_board_image()
+    
+    # Create 1x1 white pixel for drawing lines
+    pixel = Image.new('RGBA', (1, 1), (255, 255, 255, 255))
+    pixel.save("assets/textures/pixel.png")
+    print("Generated assets/textures/pixel.png")
