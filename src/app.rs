@@ -450,7 +450,7 @@ pub fn App() -> impl IntoView {
                 @media (min-width: 1100px) {
                     .game-layout {
                         flex-direction: row; /* Desktop: Log left (1), Board right (2) */
-                        align-items: flex-start;
+                        align-items: stretch;
                         justify-content: center;
                     }
                 }
@@ -470,8 +470,9 @@ pub fn App() -> impl IntoView {
                 
                 @media (min-width: 1100px) {
                     .log-panel {
-                        width: 350px;
-                        height: 72vh; /* Match board height roughly */
+                        width: 480px;
+                        height: auto; /* Stretch to match board */
+                        margin-top: 45px; /* Align with board canvas (skip captured pieces) */
                     }
                 }
 
