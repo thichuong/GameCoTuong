@@ -28,7 +28,6 @@ impl Plugin for BoardPlugin {
 struct PieceAssets {
     textures: std::collections::HashMap<(PieceType, Color), Handle<Image>>,
     board: Handle<Image>,
-    pixel: Handle<Image>,
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -57,7 +56,6 @@ fn load_piece_assets(mut piece_assets: ResMut<PieceAssets>, asset_server: Res<As
             .insert((piece_type, Color::Black), asset_server.load(black_path));
     }
     piece_assets.board = asset_server.load("textures/board.png");
-    piece_assets.pixel = asset_server.load("textures/pixel.png");
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -94,7 +92,7 @@ fn setup_camera(mut commands: Commands) {
 
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::needless_pass_by_value)]
-fn spawn_grid(mut commands: Commands, piece_assets: Res<PieceAssets>) {
+fn spawn_grid(mut commands: Commands) {
     let start_x = -BOARD_WIDTH / 2.0;
     let start_y = -BOARD_HEIGHT / 2.0;
     let color = bevy::prelude::Color::srgb(0.36, 0.23, 0.12); // #5c3a1e
@@ -105,13 +103,15 @@ fn spawn_grid(mut commands: Commands, piece_assets: Res<PieceAssets>) {
     for r in 0..10 {
         let y = (r as f32).mul_add(CELL_SIZE, start_y);
         commands.spawn(SpriteBundle {
-            texture: piece_assets.pixel.clone(),
             transform: Transform {
                 translation: Vec3::new(0.0, y, z_index),
-                scale: Vec3::new(BOARD_WIDTH, line_thickness, 1.0),
                 ..default()
             },
-            sprite: Sprite { color, ..default() },
+            sprite: Sprite {
+                color,
+                custom_size: Some(Vec2::new(BOARD_WIDTH, line_thickness)),
+                ..default()
+            },
             ..default()
         });
     }
@@ -124,13 +124,15 @@ fn spawn_grid(mut commands: Commands, piece_assets: Res<PieceAssets>) {
         let top_height = 4.0 * CELL_SIZE;
         let top_y = 5.0f32.mul_add(CELL_SIZE, start_y) + top_height / 2.0;
         commands.spawn(SpriteBundle {
-            texture: piece_assets.pixel.clone(),
             transform: Transform {
                 translation: Vec3::new(x, top_y, z_index),
-                scale: Vec3::new(line_thickness, top_height, 1.0),
                 ..default()
             },
-            sprite: Sprite { color, ..default() },
+            sprite: Sprite {
+                color,
+                custom_size: Some(Vec2::new(line_thickness, top_height)),
+                ..default()
+            },
             ..default()
         });
 
@@ -138,13 +140,15 @@ fn spawn_grid(mut commands: Commands, piece_assets: Res<PieceAssets>) {
         let bottom_height = 4.0 * CELL_SIZE;
         let bottom_y = start_y + bottom_height / 2.0;
         commands.spawn(SpriteBundle {
-            texture: piece_assets.pixel.clone(),
             transform: Transform {
                 translation: Vec3::new(x, bottom_y, z_index),
-                scale: Vec3::new(line_thickness, bottom_height, 1.0),
                 ..default()
             },
-            sprite: Sprite { color, ..default() },
+            sprite: Sprite {
+                color,
+                custom_size: Some(Vec2::new(line_thickness, bottom_height)),
+                ..default()
+            },
             ..default()
         });
 
@@ -153,13 +157,15 @@ fn spawn_grid(mut commands: Commands, piece_assets: Res<PieceAssets>) {
             let river_height = CELL_SIZE;
             let river_y = 4.0f32.mul_add(CELL_SIZE, start_y) + river_height / 2.0;
             commands.spawn(SpriteBundle {
-                texture: piece_assets.pixel.clone(),
                 transform: Transform {
                     translation: Vec3::new(x, river_y, z_index),
-                    scale: Vec3::new(line_thickness, river_height, 1.0),
                     ..default()
                 },
-                sprite: Sprite { color, ..default() },
+                sprite: Sprite {
+                    color,
+                    custom_size: Some(Vec2::new(line_thickness, river_height)),
+                    ..default()
+                },
                 ..default()
             });
         }
@@ -173,13 +179,16 @@ fn spawn_grid(mut commands: Commands, piece_assets: Res<PieceAssets>) {
         let angle = (end.y - start.y).atan2(end.x - start.x);
 
         commands.spawn(SpriteBundle {
-            texture: piece_assets.pixel.clone(),
             transform: Transform {
                 translation: Vec3::new(center.x, center.y, z_index),
                 rotation: Quat::from_rotation_z(angle),
-                scale: Vec3::new(len, line_thickness, 1.0),
+                ..default()
             },
-            sprite: Sprite { color, ..default() },
+            sprite: Sprite {
+                color,
+                custom_size: Some(Vec2::new(len, line_thickness)),
+                ..default()
+            },
             ..default()
         });
     };
