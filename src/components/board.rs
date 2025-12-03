@@ -139,6 +139,7 @@ pub fn BoardView(
     set_game_state: WriteSignal<GameState>,
 ) -> impl IntoView {
     let (selected, set_selected) = create_signal(Option::<(usize, usize)>::None);
+    let (valid_moves, set_valid_moves) = create_signal(Vec::<(usize, usize)>::new());
     let canvas_ref: NodeRef<Canvas> = create_node_ref();
 
     // Draw function
@@ -262,8 +263,29 @@ pub fn BoardView(
         let _ = ctx.fill_text("楚 河", 112.5 + PADDING, 250.0 + 8.0);
         let _ = ctx.fill_text("漢 界", 337.5 - PADDING, 250.0 + 8.0);
 
+        // Draw Valid Move Highlights
+        let moves = valid_moves.get();
+        let state = game_state.get(); // Get state here for checking captures
+        for (r, c) in moves {
+            #[allow(clippy::cast_possible_truncation)]
+            let x = f64::from(c as u32).mul_add(CELL_SIZE, PADDING);
+            #[allow(clippy::cast_possible_truncation)]
+            let y = f64::from((9 - r) as u32).mul_add(CELL_SIZE, PADDING);
+
+            ctx.begin_path();
+            let _ = ctx.arc(x, y, 8.0, 0.0, std::f64::consts::PI * 2.0);
+
+            // Check if it's a capture (enemy piece at target)
+            if state.board.get_piece(r, c).is_some() {
+                ctx.set_fill_style(&"rgba(255, 0, 0, 0.5)".into()); // Red for capture
+            } else {
+                ctx.set_fill_style(&"rgba(0, 255, 0, 0.5)".into()); // Green for move
+            }
+            ctx.fill();
+        }
+
         // Draw Pieces
-        let state = game_state.get();
+        // state is already retrieved above
         for r in 0..10 {
             for c in 0..9 {
                 if let Some(piece) = state.board.get_piece(r, c) {
@@ -306,6 +328,7 @@ pub fn BoardView(
     create_effect(move |_| {
         game_state.track(); // Track changes
         selected.track();
+        valid_moves.track();
         draw();
     });
 
@@ -344,15 +367,36 @@ pub fn BoardView(
             if let Some((from_row, from_col)) = selected.get() {
                 if from_row == r && from_col == c {
                     set_selected.set(None);
+                    set_valid_moves.set(Vec::new());
                 } else if let Some(p) = clicked_piece {
                     if p.color == current_turn {
                         set_selected.set(Some((r, c)));
+                        // Calculate valid moves for new selection
+                        let mut moves = Vec::new();
+                        for tr in 0..10 {
+                            for tc in 0..9 {
+                                if cotuong_core::logic::rules::is_valid_move(
+                                    &state.board,
+                                    r,
+                                    c,
+                                    tr,
+                                    tc,
+                                    current_turn,
+                                )
+                                .is_ok()
+                                {
+                                    moves.push((tr, tc));
+                                }
+                            }
+                        }
+                        set_valid_moves.set(moves);
                     } else {
                         let mut new_state = state;
                         match new_state.make_move(from_row, from_col, r, c) {
                             Ok(()) => {
                                 set_game_state.set(new_state);
                                 set_selected.set(None);
+                                set_valid_moves.set(Vec::new());
                             }
                             Err(e) => {
                                 leptos::logging::log!("Invalid move: {:?}", e);
@@ -365,6 +409,7 @@ pub fn BoardView(
                         Ok(()) => {
                             set_game_state.set(new_state);
                             set_selected.set(None);
+                            set_valid_moves.set(Vec::new());
                         }
                         Err(e) => {
                             leptos::logging::log!("Invalid move: {:?}", e);
@@ -374,6 +419,25 @@ pub fn BoardView(
             } else if let Some(p) = clicked_piece {
                 if p.color == current_turn {
                     set_selected.set(Some((r, c)));
+                    // Calculate valid moves
+                    let mut moves = Vec::new();
+                    for tr in 0..10 {
+                        for tc in 0..9 {
+                            if cotuong_core::logic::rules::is_valid_move(
+                                &state.board,
+                                r,
+                                c,
+                                tr,
+                                tc,
+                                current_turn,
+                            )
+                            .is_ok()
+                            {
+                                moves.push((tr, tc));
+                            }
+                        }
+                    }
+                    set_valid_moves.set(moves);
                 }
             }
         }
