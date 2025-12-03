@@ -1,2 +1,0 @@
-    Checking CoTuong v0.1.0 (/home/tchuong/Màn hình nền/GameCoTuong)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
