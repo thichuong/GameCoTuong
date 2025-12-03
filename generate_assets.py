@@ -1,45 +1,21 @@
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-def create_piece_image(filename, text, text_color, bg_color):
-    size = (128, 128)
+def create_piece_image(filename, text, text_color, bg_color, font):
+    # Supersampling: Draw at 4x resolution and downscale
+    target_size = 128
+    scale_factor = 4
+    size = (target_size * scale_factor, target_size * scale_factor)
+    
     img = Image.new('RGBA', size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     
     # Draw circle background
-    draw.ellipse([4, 4, 124, 124], fill=bg_color, outline=text_color, width=4)
+    border_width = 4 * scale_factor
+    draw.ellipse([border_width, border_width, size[0] - border_width, size[1] - border_width], 
+                 fill=bg_color, outline=text_color, width=border_width)
     
-    # Draw text
-    # Load default font (or try to find a better one)
-    try:
-        # Try common Linux paths for DejaVuSans
-        font_paths = [
-            "DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-            "/usr/share/fonts/google-noto/NotoSans-Bold.ttf",
-            "/usr/share/fonts/google-noto/NotoSans-Regular.ttf"
-        ]
-        font = None
-        for path in font_paths:
-            try:
-                font = ImageFont.truetype(path, 40)
-                print(f"Loaded font: {path}")
-                break
-            except OSError:
-                continue
-        
-        if font is None:
-            raise Exception("No suitable font found")
-            
-    except Exception as e:
-        print(f"Font loading failed: {e}. Using default.")
-        font = ImageFont.load_default()
-        
-    # Calculate text position (approximate centering)
-    # PIL's default font doesn't support getsize well in newer versions, using bbox
+    # Calculate text position (centering)
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
@@ -47,21 +23,28 @@ def create_piece_image(filename, text, text_color, bg_color):
     x = (size[0] - text_width) / 2
     y = (size[1] - text_height) / 2
     
+    # Offset y slightly to center visually (fonts often have baseline issues)
+    y -= text_height * 0.1 
+
     draw.text((x, y), text, font=font, fill=text_color)
+    
+    # Downscale using LANCZOS for high quality antialiasing
+    img = img.resize((target_size, target_size), resample=Image.Resampling.LANCZOS)
     
     img.save(filename)
     print(f"Generated {filename}")
 
 os.makedirs("assets/textures", exist_ok=True)
 
-pieces = {
-    "General": "Gen",
-    "Advisor": "Adv",
-    "Elephant": "Ele",
-    "Horse": "Hor",
-    "Chariot": "Cha",
-    "Cannon": "Can",
-    "Soldier": "Sol"
+# Xiangqi pieces: (Red Character, Black Character)
+pieces_map = {
+    "General": ("帥", "將"),
+    "Advisor": ("仕", "士"),
+    "Elephant": ("相", "象"),
+    "Horse": ("傌", "馬"),
+    "Chariot": ("俥", "車"),
+    "Cannon": ("炮", "砲"),
+    "Soldier": ("兵", "卒")
 }
 
 colors = {
@@ -69,10 +52,44 @@ colors = {
     "black": {"text": "#000000", "bg": "#F0D9B5"} # Black text on Wood
 }
 
-for color_name, color_vals in colors.items():
-    for piece_name, symbol in pieces.items():
-        filename = f"assets/textures/{color_name}_{piece_name.lower()}.png"
-        create_piece_image(filename, symbol, color_vals["text"], color_vals["bg"])
+# Load font once
+try:
+    # Try to find a font that supports Chinese characters
+    font_paths = [
+        "/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "DroidSansFallbackFull.ttf" # Local fallback
+    ]
+    
+    font_path = None
+    for path in font_paths:
+        if os.path.exists(path):
+            font_path = path
+            break
+            
+    if font_path:
+        print(f"Using font: {font_path}")
+        # Scale font size by scale_factor (4x)
+        # Original size was 40 for 128px, so 160 for 512px
+        font = ImageFont.truetype(font_path, 160)
+    else:
+        print("Warning: No suitable CJK font found. Using default. Characters may not render.")
+        font = ImageFont.load_default()
+        
+except Exception as e:
+    print(f"Font loading failed: {e}. Using default.")
+    font = ImageFont.load_default()
+
+for piece_name, (red_char, black_char) in pieces_map.items():
+    # Generate Red Piece
+    filename_red = f"assets/textures/red_{piece_name.lower()}.png"
+    create_piece_image(filename_red, red_char, colors["red"]["text"], colors["red"]["bg"], font)
+    
+    # Generate Black Piece
+    filename_black = f"assets/textures/black_{piece_name.lower()}.png"
+    create_piece_image(filename_black, black_char, colors["black"]["text"], colors["black"]["bg"], font)
 
 def create_board_image():
     # Wood color
