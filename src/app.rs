@@ -6,7 +6,7 @@ use cotuong_core::logic::board::{Color, PieceType};
 use cotuong_core::logic::game::{GameState, GameStatus};
 use leptos::{
     component, create_effect, create_signal, document, event_target_value, set_timeout, view,
-    wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet, WriteSignal,
+    wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet, SignalUpdate, WriteSignal,
 };
 use std::fmt::Write;
 use std::sync::Arc;
@@ -36,6 +36,7 @@ pub fn App() -> impl IntoView {
     let (game_mode, set_game_mode) = create_signal(GameMode::HumanVsComputer);
     let (is_thinking, set_is_thinking) = create_signal(false);
     let (is_paused, set_is_paused) = create_signal(false);
+    let (show_config, set_show_config) = create_signal(false);
 
     // Dual Configs
     let (red_config, set_red_config) = create_signal(EngineConfig::default());
@@ -795,78 +796,95 @@ pub fn App() -> impl IntoView {
                 <BoardView game_state=game_state set_game_state=set_game_state />
             </div>
 
-            <div class="config-panel">
-                <div class="config-column">
-                    <div class="config-title" style="color: #ff6b6b;">"Cấu hình Đỏ (Red)"</div>
-                    <div style="margin-bottom: 15px; text-align: center;">
-                        <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
-                        <input type="file" accept=".json" on:change=handle_file_upload(set_red_config) style="color: #ccc;" />
-                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(red_config.get(), "red_config.json")>"Export JSON"</button>
-                    </div>
-                    {
-                        move || {
-                            let config = red_config.get();
-                            view! {
-                                <div>
-                                    {slider("Tốt (Pawn)", config.val_pawn, 0, 200, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_pawn = v; set_red_config.set(c); }))}
-                                    {slider("Sĩ (Advisor)", config.val_advisor, 0, 400, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_advisor = v; set_red_config.set(c); }))}
-                                    {slider("Tượng (Elephant)", config.val_elephant, 0, 400, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_elephant = v; set_red_config.set(c); }))}
-                                    {slider("Mã (Horse)", config.val_horse, 0, 800, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_horse = v; set_red_config.set(c); }))}
-                                    {slider("Pháo (Cannon)", config.val_cannon, 0, 900, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_cannon = v; set_red_config.set(c); }))}
-                                    {slider("Xe (Rook)", config.val_rook, 0, 1800, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_rook = v; set_red_config.set(c); }))}
-                                    {slider("Tướng (King)", config.val_king, 5000, 20000, 100, Box::new(move |v| { let mut c = red_config.get(); c.val_king = v; set_red_config.set(c); }))}
-                                    <hr style="border-color: #444; margin: 10px 0;"/>
-                                    {slider("Hash Move", config.score_hash_move, 0, 5_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_hash_move = v; set_red_config.set(c); }))}
-                                    {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_capture_base = v; set_red_config.set(c); }))}
-                                    {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_killer_move = v; set_red_config.set(c); }))}
-                                    {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_history_max = v; set_red_config.set(c); }))}
-                                    {dropdown("Pruning Method", config.pruning_method, vec![
-                                        (0, "Dynamic Limiting"),
-                                        (1, "Late Move Reductions (LMR)"),
-                                        (2, "Both (Aggressive)"),
-                                    ], Box::new(move |v| { let mut c = red_config.get(); c.pruning_method = v; set_red_config.set(c); }))}
-                                    {float_slider("Multiplier", config.pruning_multiplier, 0.1, 2.0, 0.1, Box::new(move |v| { let mut c = red_config.get(); c.pruning_multiplier = v; set_red_config.set(c); }))}
-                                </div>
-                            }
-                        }
-                    }
-                </div>
-                <div class="config-column">
-                    <div class="config-title" style="color: #a8e6cf;">"Cấu hình Đen (Black)"</div>
-                    <div style="margin-bottom: 15px; text-align: center;">
-                        <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
-                        <input type="file" accept=".json" on:change=handle_file_upload(set_black_config) style="color: #ccc;" />
-                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(black_config.get(), "black_config.json")>"Export JSON"</button>
-                    </div>
-                    {
-                        move || {
-                            let config = black_config.get();
-                            view! {
-                                <div>
-                                    {slider("Tốt (Pawn)", config.val_pawn, 0, 200, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_pawn = v; set_black_config.set(c); }))}
-                                    {slider("Sĩ (Advisor)", config.val_advisor, 0, 400, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_advisor = v; set_black_config.set(c); }))}
-                                    {slider("Tượng (Elephant)", config.val_elephant, 0, 400, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_elephant = v; set_black_config.set(c); }))}
-                                    {slider("Mã (Horse)", config.val_horse, 0, 800, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_horse = v; set_black_config.set(c); }))}
-                                    {slider("Pháo (Cannon)", config.val_cannon, 0, 900, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_cannon = v; set_black_config.set(c); }))}
-                                    {slider("Xe (Rook)", config.val_rook, 0, 1800, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_rook = v; set_black_config.set(c); }))}
-                                    {slider("Tướng (King)", config.val_king, 5000, 20000, 100, Box::new(move |v| { let mut c = black_config.get(); c.val_king = v; set_black_config.set(c); }))}
-                                    <hr style="border-color: #444; margin: 10px 0;"/>
-                                    {slider("Hash Move", config.score_hash_move, 0, 5_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_hash_move = v; set_black_config.set(c); }))}
-                                    {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_capture_base = v; set_black_config.set(c); }))}
-                                    {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_killer_move = v; set_black_config.set(c); }))}
-                                    {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_history_max = v; set_black_config.set(c); }))}
-                                    {dropdown("Pruning Method", config.pruning_method, vec![
-                                        (0, "Dynamic Limiting"),
-                                        (1, "Late Move Reductions (LMR)"),
-                                        (2, "Both (Aggressive)"),
-                                    ], Box::new(move |v| { let mut c = black_config.get(); c.pruning_method = v; set_black_config.set(c); }))}
-                                    {float_slider("Multiplier", config.pruning_multiplier, 0.1, 2.0, 0.1, Box::new(move |v| { let mut c = black_config.get(); c.pruning_multiplier = v; set_black_config.set(c); }))}
-                                </div>
-                            }
-                        }
-                    }
-                </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <button
+                    style=move || if show_config.get() { "background: #555; color: white;" } else { "background: #444; color: #eee;" }
+                    on:click=move |_| set_show_config.update(|v| *v = !*v)
+                >
+                    "Cấu hình engine"
+                </button>
             </div>
+
+            {move || {
+                if show_config.get() {
+                    view! {
+                        <div class="config-panel">
+                            <div class="config-column">
+                                <div class="config-title" style="color: #ff6b6b;">"Cấu hình Đỏ (Red)"</div>
+                                <div style="margin-bottom: 15px; text-align: center;">
+                                    <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
+                                    <input type="file" accept=".json" on:change=handle_file_upload(set_red_config) style="color: #ccc;" />
+                                    <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(red_config.get(), "red_config.json")>"Export JSON"</button>
+                                </div>
+                                {
+                                    move || {
+                                        let config = red_config.get();
+                                        view! {
+                                            <div>
+                                                {slider("Tốt (Pawn)", config.val_pawn, 0, 200, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_pawn = v; set_red_config.set(c); }))}
+                                                {slider("Sĩ (Advisor)", config.val_advisor, 0, 400, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_advisor = v; set_red_config.set(c); }))}
+                                                {slider("Tượng (Elephant)", config.val_elephant, 0, 400, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_elephant = v; set_red_config.set(c); }))}
+                                                {slider("Mã (Horse)", config.val_horse, 0, 800, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_horse = v; set_red_config.set(c); }))}
+                                                {slider("Pháo (Cannon)", config.val_cannon, 0, 900, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_cannon = v; set_red_config.set(c); }))}
+                                                {slider("Xe (Rook)", config.val_rook, 0, 1800, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_rook = v; set_red_config.set(c); }))}
+                                                {slider("Tướng (King)", config.val_king, 5000, 20000, 100, Box::new(move |v| { let mut c = red_config.get(); c.val_king = v; set_red_config.set(c); }))}
+                                                <hr style="border-color: #444; margin: 10px 0;"/>
+                                                {slider("Hash Move", config.score_hash_move, 0, 5_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_hash_move = v; set_red_config.set(c); }))}
+                                                {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_capture_base = v; set_red_config.set(c); }))}
+                                                {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_killer_move = v; set_red_config.set(c); }))}
+                                                {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_history_max = v; set_red_config.set(c); }))}
+                                                {dropdown("Pruning Method", config.pruning_method, vec![
+                                                    (0, "Dynamic Limiting"),
+                                                    (1, "Late Move Reductions (LMR)"),
+                                                    (2, "Both (Aggressive)"),
+                                                ], Box::new(move |v| { let mut c = red_config.get(); c.pruning_method = v; set_red_config.set(c); }))}
+                                                {float_slider("Multiplier", config.pruning_multiplier, 0.1, 2.0, 0.1, Box::new(move |v| { let mut c = red_config.get(); c.pruning_multiplier = v; set_red_config.set(c); }))}
+                                            </div>
+                                        }
+                                    }
+                                }
+                            </div>
+                            <div class="config-column">
+                                <div class="config-title" style="color: #a8e6cf;">"Cấu hình Đen (Black)"</div>
+                                <div style="margin-bottom: 15px; text-align: center;">
+                                    <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
+                                    <input type="file" accept=".json" on:change=handle_file_upload(set_black_config) style="color: #ccc;" />
+                                    <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(black_config.get(), "black_config.json")>"Export JSON"</button>
+                                </div>
+                                {
+                                    move || {
+                                        let config = black_config.get();
+                                        view! {
+                                            <div>
+                                                {slider("Tốt (Pawn)", config.val_pawn, 0, 200, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_pawn = v; set_black_config.set(c); }))}
+                                                {slider("Sĩ (Advisor)", config.val_advisor, 0, 400, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_advisor = v; set_black_config.set(c); }))}
+                                                {slider("Tượng (Elephant)", config.val_elephant, 0, 400, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_elephant = v; set_black_config.set(c); }))}
+                                                {slider("Mã (Horse)", config.val_horse, 0, 800, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_horse = v; set_black_config.set(c); }))}
+                                                {slider("Pháo (Cannon)", config.val_cannon, 0, 900, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_cannon = v; set_black_config.set(c); }))}
+                                                {slider("Xe (Rook)", config.val_rook, 0, 1800, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_rook = v; set_black_config.set(c); }))}
+                                                {slider("Tướng (King)", config.val_king, 5000, 20000, 100, Box::new(move |v| { let mut c = black_config.get(); c.val_king = v; set_black_config.set(c); }))}
+                                                <hr style="border-color: #444; margin: 10px 0;"/>
+                                                {slider("Hash Move", config.score_hash_move, 0, 5_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_hash_move = v; set_black_config.set(c); }))}
+                                                {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_capture_base = v; set_black_config.set(c); }))}
+                                                {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_killer_move = v; set_black_config.set(c); }))}
+                                                {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_history_max = v; set_black_config.set(c); }))}
+                                                {dropdown("Pruning Method", config.pruning_method, vec![
+                                                    (0, "Dynamic Limiting"),
+                                                    (1, "Late Move Reductions (LMR)"),
+                                                    (2, "Both (Aggressive)"),
+                                                ], Box::new(move |v| { let mut c = black_config.get(); c.pruning_method = v; set_black_config.set(c); }))}
+                                                {float_slider("Multiplier", config.pruning_multiplier, 0.1, 2.0, 0.1, Box::new(move |v| { let mut c = black_config.get(); c.pruning_multiplier = v; set_black_config.set(c); }))}
+                                            </div>
+                                        }
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }.into_view()
+                } else {
+                    view! {}.into_view()
+                }
+            }}
         </div>
     }
 }
