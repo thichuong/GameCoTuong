@@ -16,9 +16,11 @@ use wasm_bindgen::JsCast;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Difficulty {
-    Easy,
-    Medium,
-    Hard,
+    Level1,
+    Level2,
+    Level3,
+    Level4,
+    Level5,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +34,7 @@ enum GameMode {
 #[allow(clippy::too_many_lines)]
 pub fn App() -> impl IntoView {
     let (game_state, set_game_state) = create_signal(GameState::new());
-    let (difficulty, set_difficulty) = create_signal(Difficulty::Easy);
+    let (difficulty, set_difficulty) = create_signal(Difficulty::Level1);
     let (game_mode, set_game_mode) = create_signal(GameMode::HumanVsComputer);
     let (is_thinking, set_is_thinking) = create_signal(false);
     let (is_paused, set_is_paused) = create_signal(false);
@@ -145,9 +147,11 @@ pub fn App() -> impl IntoView {
                         let mut engine = AlphaBetaEngine::new(config);
 
                         let limit = match diff {
-                            Difficulty::Easy => SearchLimit::Time(500),
-                            Difficulty::Medium => SearchLimit::Time(2000),
-                            Difficulty::Hard => SearchLimit::Time(5000),
+                            Difficulty::Level1 => SearchLimit::Time(1000),
+                            Difficulty::Level2 => SearchLimit::Time(2000),
+                            Difficulty::Level3 => SearchLimit::Time(5000),
+                            Difficulty::Level4 => SearchLimit::Time(10000),
+                            Difficulty::Level5 => SearchLimit::Time(20000),
                         };
 
                         // 1. Check Opening Book
@@ -726,16 +730,20 @@ pub fn App() -> impl IntoView {
                         on:change=move |ev| {
                             let val = event_target_value(&ev);
                             match val.as_str() {
-                                "Easy" => set_difficulty.set(Difficulty::Easy),
-                                "Medium" => set_difficulty.set(Difficulty::Medium),
-                                "Hard" => set_difficulty.set(Difficulty::Hard),
+                                "Level1" => set_difficulty.set(Difficulty::Level1),
+                                "Level2" => set_difficulty.set(Difficulty::Level2),
+                                "Level3" => set_difficulty.set(Difficulty::Level3),
+                                "Level4" => set_difficulty.set(Difficulty::Level4),
+                                "Level5" => set_difficulty.set(Difficulty::Level5),
                                 _ => {},
                             }
                         }
                     >
-                        <option value="Easy">"Dễ (0.5s)"</option>
-                        <option value="Medium">"Trung bình (2s)"</option>
-                        <option value="Hard">"Khó (5s)"</option>
+                        <option value="Level1">"Mức 1 (1s)"</option>
+                        <option value="Level2">"Mức 2 (2s)"</option>
+                        <option value="Level3">"Mức 3 (5s)"</option>
+                        <option value="Level4">"Mức 4 (10s)"</option>
+                        <option value="Level5">"Mức 5 (20s)"</option>
                     </select>
                 </div>
 
