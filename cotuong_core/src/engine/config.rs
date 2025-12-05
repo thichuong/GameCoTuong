@@ -50,7 +50,7 @@ impl Default for EngineConfig {
             score_capture_base: 1_000_000,
             score_killer_move: 900_000,
             score_history_max: 800_000,
-            pruning_method: 0, // Default to Dynamic Limiting
+            pruning_method: 1, // Default to LMR
             pruning_multiplier: 1.0,
         }
     }
