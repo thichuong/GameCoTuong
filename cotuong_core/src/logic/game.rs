@@ -66,10 +66,10 @@ impl GameState {
 
         // Construct Move for apply_move
         let mv = Move {
-            from_row,
-            from_col,
-            to_row,
-            to_col,
+            from_row: from_row as u8,
+            from_col: from_col as u8,
+            to_row: to_row as u8,
+            to_col: to_col as u8,
             score: 0,
         };
 

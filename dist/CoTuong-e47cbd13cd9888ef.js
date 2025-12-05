@@ -970,6 +970,11 @@ function __wbg_get_imports() {
         const ret = arg0.width;
         return ret;
     };
+    imports.wbg.__wbindgen_cast_083c8d4443372701 = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 132, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 133, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen_fc29594c9a3d2786___closure__destroy___dyn_core_46f35e066d77df9d___ops__function__FnMut__web_sys_72c9d7f2f27d63df___features__gen_MouseEvent__MouseEvent____Output_______, wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_72c9d7f2f27d63df___features__gen_MouseEvent__MouseEvent_____);
+        return ret;
+    };
     imports.wbg.__wbindgen_cast_25a6c89b3b1c6dc3 = function(arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 351, function: Function { arguments: [Externref], shim_idx: 352, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
         const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen_fc29594c9a3d2786___closure__destroy___dyn_core_46f35e066d77df9d___ops__function__FnMut__wasm_bindgen_fc29594c9a3d2786___JsValue____Output_______, wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___wasm_bindgen_fc29594c9a3d2786___JsValue_____);
@@ -989,11 +994,6 @@ function __wbg_get_imports() {
         var v0 = getCachedStringFromWasm0(arg0, arg1);
         // Cast intrinsic for `Ref(CachedString) -> Externref`.
         const ret = v0;
-        return ret;
-    };
-    imports.wbg.__wbindgen_cast_a596bf5c66c5876b = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 125, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 126, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen_fc29594c9a3d2786___closure__destroy___dyn_core_46f35e066d77df9d___ops__function__FnMut__web_sys_72c9d7f2f27d63df___features__gen_MouseEvent__MouseEvent____Output_______, wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_72c9d7f2f27d63df___features__gen_MouseEvent__MouseEvent_____);
         return ret;
     };
     imports.wbg.__wbindgen_cast_cb9088102bce6b30 = function(arg0, arg1) {

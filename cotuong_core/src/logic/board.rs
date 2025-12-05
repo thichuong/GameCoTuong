@@ -193,13 +193,32 @@ impl Board {
         from_col: usize,
         to_row: usize,
         to_col: usize,
+    ) -> Option<Piece> {
+        let piece = self.get_piece(from_row, from_col)?;
+        self.remove_piece(from_row, from_col, piece.piece_type, piece.color);
+        let captured = self.get_piece(to_row, to_col);
+        if let Some(cap) = captured {
+            self.remove_piece(to_row, to_col, cap.piece_type, cap.color);
+        }
+        self.add_piece(to_row, to_col, piece.piece_type, piece.color);
+        captured
+    }
+
+    pub fn undo_move_quiet(
+        &mut self,
+        from_row: usize,
+        from_col: usize,
+        to_row: usize,
+        to_col: usize,
+        captured: Option<Piece>,
     ) {
-        if let Some(piece) = self.get_piece(from_row, from_col) {
-            self.remove_piece(from_row, from_col, piece.piece_type, piece.color);
-            if let Some(captured) = self.get_piece(to_row, to_col) {
-                self.remove_piece(to_row, to_col, captured.piece_type, captured.color);
-            }
-            self.add_piece(to_row, to_col, piece.piece_type, piece.color);
+        let piece = self
+            .get_piece(to_row, to_col)
+            .expect("No piece at destination in undo_move_quiet");
+        self.remove_piece(to_row, to_col, piece.piece_type, piece.color);
+        self.add_piece(from_row, from_col, piece.piece_type, piece.color);
+        if let Some(cap) = captured {
+            self.add_piece(to_row, to_col, cap.piece_type, cap.color);
         }
     }
 
@@ -309,19 +328,22 @@ impl Board {
 
     pub fn apply_move(&mut self, mv: &Move, _turn: Color) {
         let keys = ZobristKeys::get();
+        let from_row = mv.from_row as usize;
+        let from_col = mv.from_col as usize;
+        let to_row = mv.to_row as usize;
+        let to_col = mv.to_col as usize;
 
         // 1. Get piece at source
         let piece = self
-            .get_piece(mv.from_row, mv.from_col)
+            .get_piece(from_row, from_col)
             .expect("No piece at source in apply_move");
 
         // Remove from source
-        self.remove_piece(mv.from_row, mv.from_col, piece.piece_type, piece.color);
-        self.zobrist_hash ^=
-            keys.get_piece_key(piece.piece_type, piece.color, mv.from_row, mv.from_col);
+        self.remove_piece(from_row, from_col, piece.piece_type, piece.color);
+        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
 
         // Update Score (Remove from source)
-        let pst_from = get_pst_value(piece.piece_type, piece.color, mv.from_row, mv.from_col);
+        let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
         if piece.color == Color::Red {
             self.red_pst -= pst_from;
         } else {
@@ -329,14 +351,14 @@ impl Board {
         }
 
         // 2. Remove captured piece (if any)
-        if let Some(captured) = self.get_piece(mv.to_row, mv.to_col) {
-            self.remove_piece(mv.to_row, mv.to_col, captured.piece_type, captured.color);
+        if let Some(captured) = self.get_piece(to_row, to_col) {
+            self.remove_piece(to_row, to_col, captured.piece_type, captured.color);
             self.zobrist_hash ^=
-                keys.get_piece_key(captured.piece_type, captured.color, mv.to_row, mv.to_col);
+                keys.get_piece_key(captured.piece_type, captured.color, to_row, to_col);
 
             // Update Score (Remove captured)
             let cap_val = get_piece_value(captured.piece_type);
-            let cap_pst = get_pst_value(captured.piece_type, captured.color, mv.to_row, mv.to_col);
+            let cap_pst = get_pst_value(captured.piece_type, captured.color, to_row, to_col);
 
             if captured.color == Color::Red {
                 self.red_material -= cap_val;
@@ -348,12 +370,11 @@ impl Board {
         }
 
         // 3. Place piece at destination
-        self.add_piece(mv.to_row, mv.to_col, piece.piece_type, piece.color);
-        self.zobrist_hash ^=
-            keys.get_piece_key(piece.piece_type, piece.color, mv.to_row, mv.to_col);
+        self.add_piece(to_row, to_col, piece.piece_type, piece.color);
+        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
 
         // Update Score (Add to dest)
-        let pst_to = get_pst_value(piece.piece_type, piece.color, mv.to_row, mv.to_col);
+        let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
         if piece.color == Color::Red {
             self.red_pst += pst_to;
         } else {
@@ -362,6 +383,64 @@ impl Board {
 
         // 4. Switch turn hash
         self.zobrist_hash ^= keys.side_key;
+    }
+
+    pub fn undo_move(&mut self, mv: &Move, captured: Option<Piece>, _turn: Color) {
+        let keys = ZobristKeys::get();
+        let from_row = mv.from_row as usize;
+        let from_col = mv.from_col as usize;
+        let to_row = mv.to_row as usize;
+        let to_col = mv.to_col as usize;
+
+        // 4. Switch turn hash (back)
+        self.zobrist_hash ^= keys.side_key;
+
+        // 3. Move piece back from destination to source
+        let piece = self
+            .get_piece(to_row, to_col)
+            .expect("No piece at destination in undo_move");
+
+        // Remove from destination
+        self.remove_piece(to_row, to_col, piece.piece_type, piece.color);
+        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
+
+        // Update Score (Remove from dest)
+        let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
+        if piece.color == Color::Red {
+            self.red_pst -= pst_to;
+        } else {
+            self.black_pst -= pst_to;
+        }
+
+        // Place back at source
+        self.add_piece(from_row, from_col, piece.piece_type, piece.color);
+        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
+
+        // Update Score (Add to source)
+        let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
+        if piece.color == Color::Red {
+            self.red_pst += pst_from;
+        } else {
+            self.black_pst += pst_from;
+        }
+
+        // 2. Restore captured piece (if any)
+        if let Some(cap) = captured {
+            self.add_piece(to_row, to_col, cap.piece_type, cap.color);
+            self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
+
+            // Update Score (Restore captured)
+            let cap_val = get_piece_value(cap.piece_type);
+            let cap_pst = get_pst_value(cap.piece_type, cap.color, to_row, to_col);
+
+            if cap.color == Color::Red {
+                self.red_material += cap_val;
+                self.red_pst += cap_pst;
+            } else {
+                self.black_material += cap_val;
+                self.black_pst += cap_pst;
+            }
+        }
     }
 }
 

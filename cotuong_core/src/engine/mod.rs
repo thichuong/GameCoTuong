@@ -13,10 +13,10 @@ mod bench_test;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Move {
-    pub from_row: usize,
-    pub from_col: usize,
-    pub to_row: usize,
-    pub to_col: usize,
+    pub from_row: u8,
+    pub from_col: u8,
+    pub to_row: u8,
+    pub to_col: u8,
     pub score: i32,
 }
 

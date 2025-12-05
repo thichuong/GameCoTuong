@@ -28,6 +28,11 @@ pub struct EngineConfig {
     pub score_history_max: i32,
     pub pruning_method: i32, // 0: Dynamic Limiting, 1: LMR, 2: Both
     pub pruning_multiplier: f32,
+
+    // ProbCut Parameters
+    pub probcut_depth: u8,
+    pub probcut_margin: i32,
+    pub probcut_reduction: u8,
 }
 
 impl Default for EngineConfig {
@@ -52,6 +57,10 @@ impl Default for EngineConfig {
             score_history_max: 800_000,
             pruning_method: 1, // Default to LMR
             pruning_multiplier: 1.0,
+
+            probcut_depth: 5,
+            probcut_margin: 200,
+            probcut_reduction: 4,
         }
     }
 }
@@ -78,6 +87,10 @@ struct EngineConfigJson {
     score_history_max: Option<f32>,
     pruning_method: Option<i32>,
     pruning_multiplier: Option<f32>,
+
+    probcut_depth: Option<u8>,
+    probcut_margin: Option<i32>,
+    probcut_reduction: Option<u8>,
 }
 
 impl EngineConfig {
@@ -117,6 +130,12 @@ impl EngineConfig {
             pruning_multiplier: json_config
                 .pruning_multiplier
                 .unwrap_or(default.pruning_multiplier),
+
+            probcut_depth: json_config.probcut_depth.unwrap_or(default.probcut_depth),
+            probcut_margin: json_config.probcut_margin.unwrap_or(default.probcut_margin),
+            probcut_reduction: json_config
+                .probcut_reduction
+                .unwrap_or(default.probcut_reduction),
         })
     }
 }
@@ -231,7 +250,10 @@ mod tests {
             "score_killer_move": 0.7,
             "score_history_max": 0.8,
             "pruning_method": 1,
-            "pruning_multiplier": 2.5
+            "pruning_multiplier": 2.5,
+            "probcut_depth": 6,
+            "probcut_margin": 250,
+            "probcut_reduction": 3
         }"#;
         let config = EngineConfig::load_from_json(json).unwrap();
 
@@ -239,6 +261,9 @@ mod tests {
         assert_eq!(config.val_advisor, (VAL_ADVISOR as f32 * 1.2) as i32);
         assert_eq!(config.pruning_method, 1);
         assert!((config.pruning_multiplier - 2.5).abs() < f32::EPSILON);
+        assert_eq!(config.probcut_depth, 6);
+        assert_eq!(config.probcut_margin, 250);
+        assert_eq!(config.probcut_reduction, 3);
     }
 
     #[test]

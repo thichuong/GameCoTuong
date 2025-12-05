@@ -186,10 +186,10 @@ pub fn App() -> impl IntoView {
                                 engine.search(&current_state, limit, &excluded_moves)
                             {
                                 match current_state.make_move(
-                                    mv.from_row,
-                                    mv.from_col,
-                                    mv.to_row,
-                                    mv.to_col,
+                                    mv.from_row as usize,
+                                    mv.from_col as usize,
+                                    mv.to_row as usize,
+                                    mv.to_col as usize,
                                 ) {
                                     Ok(()) => {
                                         #[allow(clippy::cast_precision_loss)]
