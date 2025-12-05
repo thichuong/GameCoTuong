@@ -1,17 +1,18 @@
 use crate::engine::config::EngineConfig;
 use crate::engine::eval::SimpleEvaluator;
 use crate::engine::move_list::MoveList;
-use crate::engine::zobrist::{TTFlag, TranspositionTable};
+use crate::engine::tt::{TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, Color, PieceType};
 use crate::logic::game::GameState;
 use crate::logic::rules::{is_flying_general, is_in_check};
 use std::sync::Arc;
+
 pub struct AlphaBetaEngine {
     config: Arc<EngineConfig>,
     evaluator: SimpleEvaluator,
     tt: TranspositionTable,
-    killer_moves: [[Option<Move>; 2]; 64], // Max depth 64
+    killer_moves: [[Option<Move>; 2]; 64],
     history_stack: Vec<u64>,
     pub history_table: Box<[[i32; 90]]>,
     nodes_searched: u32,
@@ -24,7 +25,7 @@ impl AlphaBetaEngine {
         Self {
             evaluator: SimpleEvaluator::new(config.clone()),
             config,
-            tt: TranspositionTable::new(1), // 1MB (approx 65536 entries)
+            tt: TranspositionTable::new(64),
             killer_moves: [[None; 2]; 64],
             history_stack: Vec::with_capacity(64),
             history_table: vec![[0; 90]; 90].into_boxed_slice(),
@@ -73,31 +74,16 @@ impl AlphaBetaEngine {
     #[allow(clippy::too_many_lines)]
     fn alpha_beta(
         &mut self,
-        board: &Board,
-        depth: u8,
+        board: &mut Board,
         mut alpha: i32,
-        beta: i32,
+        mut beta: i32,
+        depth: u8,
         turn: Color,
     ) -> Option<i32> {
         self.nodes_searched += 1;
 
         if self.check_time() {
-            // If we timeout, we might have pushed to stack?
-            // No, check_time is called at start.
-            // But if we recurse, we pushed.
-            // If check_time returns true, we return None.
-            // The caller (parent alpha_beta) will see None and propagate it.
-            // The parent MUST pop the stack if it pushed.
-            // My implementation:
-            // self.history_stack.push(hash);
-            // ...
-            // score = self.alpha_beta(...)
-            // if score is None -> return None.
-            // Wait, if I return None here, I haven't popped!
-            // I need to pop if I return None?
-            // No, `check_time` is at the very beginning, BEFORE push.
-            // So it's fine.
-            return None; // Time out
+            return None;
         }
 
         // Repetition Check
@@ -108,9 +94,34 @@ impl AlphaBetaEngine {
         self.history_stack.push(hash);
 
         // TT Probe
-        if let Some(score) = self.tt.probe(hash, depth, alpha, beta) {
-            self.history_stack.pop();
-            return Some(score);
+        let tt_entry = self.tt.probe(hash);
+        if let Some(entry) = tt_entry {
+            if entry.depth >= depth {
+                match entry.flag {
+                    TTFlag::Exact => {
+                        self.history_stack.pop();
+                        return Some(entry.score);
+                    }
+                    TTFlag::LowerBound => {
+                        if entry.score >= beta {
+                            self.history_stack.pop();
+                            return Some(entry.score);
+                        }
+                        alpha = alpha.max(entry.score);
+                    }
+                    TTFlag::UpperBound => {
+                        if entry.score <= alpha {
+                            self.history_stack.pop();
+                            return Some(entry.score);
+                        }
+                        beta = beta.min(entry.score);
+                    }
+                }
+                if alpha >= beta {
+                    self.history_stack.pop();
+                    return Some(entry.score);
+                }
+            }
         }
 
         if depth == 0 {
@@ -120,56 +131,40 @@ impl AlphaBetaEngine {
         }
 
         // Null Move Pruning
-        // Conditions:
-        // 1. Depth >= 3 (avoid pruning at low depths)
-        // 2. Not in check (null move is illegal in check)
-        // 3. Not a mate score (beta < 15000)
-        // 4. Not in PV? (We don't track PV explicitly here yet, but beta-alpha > 1 usually implies PV)
-        //    For simplicity, we just do it if depth >= 3.
         if depth >= 3 && beta.abs() < 15000 && !crate::logic::rules::is_in_check(board, turn) {
-            let r = 2; // Reduction
+            let r = 2;
             let mut next_board = board.clone();
             next_board.apply_null_move();
 
-            // Null window search with reduced depth
-            // We pass -beta, -beta+1 because we want to prove that null move is >= beta (fail high)
             if let Some(score) = self.alpha_beta(
-                &next_board,
-                depth - 1 - r,
+                &mut next_board,
                 -beta,
                 -beta + 1,
+                depth - 1 - r,
                 turn.opposite(),
             ) {
                 if -score >= beta {
                     self.history_stack.pop();
-                    return Some(beta); // Cutoff
+                    return Some(beta);
                 }
             } else {
                 self.history_stack.pop();
-                return None; // Time out
+                return None;
             }
         }
 
-        let best_move = self.tt.get_move(hash);
+        let best_move_tt = tt_entry.and_then(|e| e.best_move);
+        let mut moves = self.generate_moves(board, turn, best_move_tt, depth);
 
-        let mut moves = self.generate_moves(board, turn, best_move, depth);
         if moves.is_empty() {
-            // No moves: Checkmate or Stalemate
             self.history_stack.pop();
             return Some(-20000 + (10 - i32::from(depth)));
         }
 
-        // Dynamic Move Limiting (Forward Pruning)
-        // Method 0: Dynamic Limiting
-        // Method 2: Both
+        // Forward Pruning
         if self.config.pruning_method == 0 || self.config.pruning_method == 2 {
-            // Formula: keep_count = base + (depth^2 * multiplier)
-            // Base = 8
             let d = f32::from(depth);
             let multiplier = self.config.pruning_multiplier;
-            // Safety: depth is u8 (max 255), multiplier is f32 (max 2.0).
-            // 8 + 255^2 * 2.0 ≈ 130,000, which fits easily in usize.
-            // All inputs are positive, so no sign loss.
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let limit = (d * d).mul_add(multiplier, 8.0) as usize;
             let limit = limit.min(moves.len());
@@ -179,8 +174,8 @@ impl AlphaBetaEngine {
         }
 
         let mut best_score = -30000;
-        let mut best_move_this_node = None; // Renamed to avoid conflict with `best_move` from TT
-        let alpha_orig = alpha;
+        let mut best_move_this_node = None;
+        let mut tt_flag = TTFlag::UpperBound;
 
         for (moves_searched, mv) in moves.into_iter().enumerate() {
             let mut next_board = board.clone();
@@ -188,16 +183,14 @@ impl AlphaBetaEngine {
 
             let mut score;
 
-            // LMR Logic
+            // LMR
             let mut reduction = 0;
             if depth >= 3
                 && moves_searched >= 4
                 && (self.config.pruning_method == 1 || self.config.pruning_method == 2)
             {
                 let is_capture = board.get_piece(mv.to_row, mv.to_col).is_some();
-                // Also check if it gives check? (Expensive to check here, maybe skip for now)
                 if !is_capture {
-                    // Formula: reduction = 1 + ln(depth) * ln(moves_searched) / 2
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     {
                         let r = 1.0
@@ -208,8 +201,8 @@ impl AlphaBetaEngine {
             }
 
             if moves_searched == 0 {
-                // First move: Full window search
-                let val = self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
+                let val =
+                    self.alpha_beta(&mut next_board, -beta, -alpha, depth - 1, turn.opposite());
                 match val {
                     None => {
                         self.history_stack.pop();
@@ -218,29 +211,22 @@ impl AlphaBetaEngine {
                     Some(v) => score = -v,
                 }
             } else {
-                // Late moves: Null window search (PVS) with LMR
-                // Try with reduced depth first
                 let search_depth = depth - 1 - reduction;
-
-                // Ensure we don't drop below 0 (handled by min(depth-1) above, but safe check)
-                // if search_depth == 0 { search_depth = 1; } // This caused infinite recursion at depth 1!
-
                 let mut val = self.alpha_beta(
-                    &next_board,
-                    search_depth,
+                    &mut next_board,
                     -alpha - 1,
                     -alpha,
+                    search_depth,
                     turn.opposite(),
                 );
 
-                // If we reduced and it failed high (score > alpha), re-search with full depth (null window)
                 if let Some(v) = val {
                     if -v > alpha && reduction > 0 {
                         val = self.alpha_beta(
-                            &next_board,
-                            depth - 1,
+                            &mut next_board,
                             -alpha - 1,
                             -alpha,
+                            depth - 1,
                             turn.opposite(),
                         );
                     }
@@ -255,9 +241,8 @@ impl AlphaBetaEngine {
                 }
 
                 if score > alpha && score < beta {
-                    // Fail high in null window, re-search with full window
                     let val =
-                        self.alpha_beta(&next_board, depth - 1, -beta, -alpha, turn.opposite());
+                        self.alpha_beta(&mut next_board, -beta, -alpha, depth - 1, turn.opposite());
                     match val {
                         None => {
                             self.history_stack.pop();
@@ -274,38 +259,25 @@ impl AlphaBetaEngine {
             }
             if score > alpha {
                 alpha = score;
+                tt_flag = TTFlag::Exact;
             }
 
-            // moves_searched is now updated by enumerate
-
             if alpha >= beta {
-                // Killer Heuristic: Store quiet move that caused cutoff
-                // A move is considered quiet if it's not a capture (score < 1_000_000)
-                // Store Killer Move
                 self.store_killer(depth, mv);
-                // History Heuristic
                 let from = mv.from_row * 9 + mv.from_col;
                 let to = mv.to_row * 9 + mv.to_col;
                 if let Some(row) = self.history_table.get_mut(from) {
-                    if let Some(score) = row.get_mut(to) {
-                        *score += i32::from(depth) * i32::from(depth);
+                    if let Some(s) = row.get_mut(to) {
+                        *s += i32::from(depth) * i32::from(depth);
                     }
                 }
-
-                break; // Beta cutoff
+                tt_flag = TTFlag::LowerBound;
+                break;
             }
         }
 
-        // TT Store
-        let flag = if best_score <= alpha_orig {
-            TTFlag::UpperBound
-        } else if best_score >= beta {
-            TTFlag::LowerBound
-        } else {
-            TTFlag::Exact
-        };
         self.tt
-            .store(hash, depth, best_score, flag, best_move_this_node);
+            .store(hash, best_move_this_node, best_score, depth, tt_flag);
 
         self.history_stack.pop();
         Some(best_score)
@@ -937,7 +909,7 @@ impl Searcher for AlphaBetaEngine {
                 next_board.apply_move(&mv, turn);
 
                 if let Some(score) =
-                    self.alpha_beta(&next_board, d - 1, -beta, -alpha, turn.opposite())
+                    self.alpha_beta(&mut next_board, -beta, -alpha, d - 1, turn.opposite())
                 {
                     let score = -score;
                     if score > best_score {

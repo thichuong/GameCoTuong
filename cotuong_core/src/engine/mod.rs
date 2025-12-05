@@ -5,6 +5,7 @@ pub mod config;
 pub mod eval;
 pub mod move_list;
 pub mod search;
+pub mod tt;
 pub mod zobrist;
 
 #[cfg(test)]
