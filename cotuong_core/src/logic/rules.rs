@@ -29,21 +29,7 @@ pub fn is_valid_move(
     // 2. Simulate move to check for self-check
     let mut next_board = board.clone();
     // We know the move is valid geometrically, so we can just move the piece
-    // (We don't need to handle capture logic here other than overwriting)
-    let piece = next_board
-        .grid
-        .get_mut(from_row)
-        .and_then(|r| r.get_mut(from_col))
-        .and_then(std::option::Option::take)
-        .ok_or(MoveError::NoPieceAtSource)?;
-
-    if let Some(cell) = next_board
-        .grid
-        .get_mut(to_row)
-        .and_then(|r| r.get_mut(to_col))
-    {
-        *cell = Some(piece);
-    }
+    next_board.move_piece_quiet(from_row, from_col, to_row, to_col);
 
     if is_in_check(&next_board, turn) {
         return Err(MoveError::SelfCheck);

@@ -46,9 +46,14 @@ mod tests {
 
         // Setup Endgame Position
         // Red: King(0,4), Rook(0,0), Horse(2,2), Pawn(6,4)
+        // Red: King(0,4), Rook(0,0), Horse(2,2), Pawn(6,4)
         // Black: King(9,4), Advisor(9,3), Advisor(9,5), Cannon(7,4), Rook(9,8)
         let mut board = Board {
-            grid: [[None; 9]; 10],
+            bitboards: [0; 14],
+            occupied: 0,
+            grid: [None; 90],
+            occupied_rows: [0; 10],
+            occupied_cols: [0; 9],
             zobrist_hash: 0,
             red_material: 0,
             black_material: 0,
@@ -57,44 +62,80 @@ mod tests {
         };
 
         // Red Pieces
-        board.grid[0][4] = Some(Piece {
-            piece_type: PieceType::General,
-            color: Color::Red,
-        });
-        board.grid[0][0] = Some(Piece {
-            piece_type: PieceType::Chariot,
-            color: Color::Red,
-        });
-        board.grid[2][2] = Some(Piece {
-            piece_type: PieceType::Horse,
-            color: Color::Red,
-        });
-        board.grid[6][4] = Some(Piece {
-            piece_type: PieceType::Soldier,
-            color: Color::Red,
-        });
+        board.set_piece(
+            0,
+            4,
+            Some(Piece {
+                piece_type: PieceType::General,
+                color: Color::Red,
+            }),
+        );
+        board.set_piece(
+            0,
+            0,
+            Some(Piece {
+                piece_type: PieceType::Chariot,
+                color: Color::Red,
+            }),
+        );
+        board.set_piece(
+            2,
+            2,
+            Some(Piece {
+                piece_type: PieceType::Horse,
+                color: Color::Red,
+            }),
+        );
+        board.set_piece(
+            6,
+            4,
+            Some(Piece {
+                piece_type: PieceType::Soldier,
+                color: Color::Red,
+            }),
+        );
 
         // Black Pieces
-        board.grid[9][4] = Some(Piece {
-            piece_type: PieceType::General,
-            color: Color::Black,
-        });
-        board.grid[9][3] = Some(Piece {
-            piece_type: PieceType::Advisor,
-            color: Color::Black,
-        });
-        board.grid[9][5] = Some(Piece {
-            piece_type: PieceType::Advisor,
-            color: Color::Black,
-        });
-        board.grid[7][4] = Some(Piece {
-            piece_type: PieceType::Cannon,
-            color: Color::Black,
-        });
-        board.grid[9][8] = Some(Piece {
-            piece_type: PieceType::Chariot,
-            color: Color::Black,
-        });
+        board.set_piece(
+            9,
+            4,
+            Some(Piece {
+                piece_type: PieceType::General,
+                color: Color::Black,
+            }),
+        );
+        board.set_piece(
+            9,
+            3,
+            Some(Piece {
+                piece_type: PieceType::Advisor,
+                color: Color::Black,
+            }),
+        );
+        board.set_piece(
+            9,
+            5,
+            Some(Piece {
+                piece_type: PieceType::Advisor,
+                color: Color::Black,
+            }),
+        );
+        board.set_piece(
+            7,
+            4,
+            Some(Piece {
+                piece_type: PieceType::Cannon,
+                color: Color::Black,
+            }),
+        );
+        board.set_piece(
+            9,
+            8,
+            Some(Piece {
+                piece_type: PieceType::Chariot,
+                color: Color::Black,
+            }),
+        );
 
         board.zobrist_hash = board.calculate_initial_hash();
         board.calculate_initial_score();

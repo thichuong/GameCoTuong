@@ -378,83 +378,95 @@ impl AlphaBetaEngine {
             &[None; 2]
         };
 
-        for r in 0..10 {
-            for c in 0..9 {
-                if let Some(p) = board.get_piece(r, c) {
-                    if p.color == turn {
-                        match p.piece_type {
-                            PieceType::Chariot => self.gen_rook_moves(
-                                board,
-                                turn,
-                                r,
-                                c,
-                                &mut moves,
-                                best_move,
-                                killers,
-                                only_captures,
-                            ),
-                            PieceType::Cannon => self.gen_cannon_moves(
-                                board,
-                                turn,
-                                r,
-                                c,
-                                &mut moves,
-                                best_move,
-                                killers,
-                                only_captures,
-                            ),
-                            PieceType::Horse => self.gen_horse_moves(
-                                board,
-                                turn,
-                                r,
-                                c,
-                                &mut moves,
-                                best_move,
-                                killers,
-                                only_captures,
-                            ),
-                            PieceType::Elephant => self.gen_elephant_moves(
-                                board,
-                                turn,
-                                r,
-                                c,
-                                &mut moves,
-                                best_move,
-                                killers,
-                                only_captures,
-                            ),
-                            PieceType::Advisor => self.gen_advisor_moves(
-                                board,
-                                turn,
-                                r,
-                                c,
-                                &mut moves,
-                                best_move,
-                                killers,
-                                only_captures,
-                            ),
-                            PieceType::General => self.gen_king_moves(
-                                board,
-                                turn,
-                                r,
-                                c,
-                                &mut moves,
-                                best_move,
-                                killers,
-                                only_captures,
-                            ),
-                            PieceType::Soldier => self.gen_pawn_moves(
-                                board,
-                                turn,
-                                r,
-                                c,
-                                &mut moves,
-                                best_move,
-                                killers,
-                                only_captures,
-                            ),
-                        }
-                    }
+        use crate::logic::board::BitboardIterator;
+
+        let start = turn.index() * 7;
+        for pt_idx in 0..7 {
+            let bb = board.bitboards[start + pt_idx];
+            for sq in BitboardIterator::new(bb) {
+                let (r, c) = Board::index_to_coord(sq);
+                let piece_type = match pt_idx {
+                    0 => PieceType::General,
+                    1 => PieceType::Advisor,
+                    2 => PieceType::Elephant,
+                    3 => PieceType::Horse,
+                    4 => PieceType::Chariot,
+                    5 => PieceType::Cannon,
+                    6 => PieceType::Soldier,
+                    _ => unreachable!(),
+                };
+
+                match piece_type {
+                    PieceType::Chariot => self.gen_rook_moves(
+                        board,
+                        turn,
+                        r,
+                        c,
+                        &mut moves,
+                        best_move,
+                        killers,
+                        only_captures,
+                    ),
+                    PieceType::Cannon => self.gen_cannon_moves(
+                        board,
+                        turn,
+                        r,
+                        c,
+                        &mut moves,
+                        best_move,
+                        killers,
+                        only_captures,
+                    ),
+                    PieceType::Horse => self.gen_horse_moves(
+                        board,
+                        turn,
+                        r,
+                        c,
+                        &mut moves,
+                        best_move,
+                        killers,
+                        only_captures,
+                    ),
+                    PieceType::Elephant => self.gen_elephant_moves(
+                        board,
+                        turn,
+                        r,
+                        c,
+                        &mut moves,
+                        best_move,
+                        killers,
+                        only_captures,
+                    ),
+                    PieceType::Advisor => self.gen_advisor_moves(
+                        board,
+                        turn,
+                        r,
+                        c,
+                        &mut moves,
+                        best_move,
+                        killers,
+                        only_captures,
+                    ),
+                    PieceType::General => self.gen_king_moves(
+                        board,
+                        turn,
+                        r,
+                        c,
+                        &mut moves,
+                        best_move,
+                        killers,
+                        only_captures,
+                    ),
+                    PieceType::Soldier => self.gen_pawn_moves(
+                        board,
+                        turn,
+                        r,
+                        c,
+                        &mut moves,
+                        best_move,
+                        killers,
+                        only_captures,
+                    ),
                 }
             }
         }
@@ -477,40 +489,27 @@ impl AlphaBetaEngine {
         let (r, c) = from;
         let (tr, tc) = to;
 
-        let target = board.get_piece(tr, tc);
-        if let Some(t) = target {
-            if t.color == turn {
+        let target_sq = Board::square_index(tr, tc);
+        let is_occupied = (board.occupied & (1 << target_sq)) != 0;
+
+        if is_occupied {
+            if (board.get_color_bb(turn) & (1 << target_sq)) != 0 {
                 return; // Blocked by friendly
             }
-        }
-
-        if only_captures && target.is_none() {
+        } else if only_captures {
             return;
         }
 
+        let target = if is_occupied {
+            board.get_piece(tr, tc)
+        } else {
+            None
+        };
+
         // Legality Check (Self-check & Flying General)
         // We must clone to check. This is the cost we pay, but we do it far less often now.
-        // Optimization: We could implement a lighter check that doesn't full clone,
-        // but for now, let's rely on the reduction in candidate moves.
         let mut next_board = board.clone();
-        // Manually apply move to avoid overhead of Board::apply_move (hashing etc not needed for check)
-        // Actually, is_in_check doesn't need hash.
-        // But we need to move the piece.
-        // Let's just use a simplified move application on the grid.
-        // Safe indexing
-        // Safe indexing
-        if let Some(piece) = next_board.grid.get(r).and_then(|row| row.get(c)).copied() {
-            if let Some(row) = next_board.grid.get_mut(tr) {
-                if let Some(cell) = row.get_mut(tc) {
-                    *cell = piece;
-                }
-            }
-        }
-        if let Some(row) = next_board.grid.get_mut(r) {
-            if let Some(cell) = row.get_mut(c) {
-                *cell = None;
-            }
-        }
+        next_board.move_piece_quiet(r, c, tr, tc);
 
         if is_in_check(&next_board, turn) || is_flying_general(&next_board) {
             return;
@@ -581,24 +580,29 @@ impl AlphaBetaEngine {
         k: &[Option<Move>; 2],
         oc: bool,
     ) {
-        let dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-        for (dr, dc) in dirs {
-            for i in 1..10 {
-                let Some(tr) = Self::offset(r, dr * i) else {
-                    break;
-                };
-                let Some(tc) = Self::offset(c, dc * i) else {
-                    break;
-                };
-                if tr >= 10 || tc >= 9 {
-                    break;
-                }
+        use crate::logic::lookup::AttackTables;
+        let tables = AttackTables::get();
 
-                self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
-                if board.get_piece(tr, tc).is_some() {
-                    break;
-                } // Blocked
-            }
+        // Rank attacks (Horizontal)
+        let rank_occ = board.occupied_rows[r];
+        let rank_attacks = tables.get_rook_attacks(c, rank_occ, 9);
+
+        let mut attacks = rank_attacks;
+        while attacks != 0 {
+            let col = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            self.add_move(board, turn, (r, c), (r, col), moves, bm, k, oc);
+        }
+
+        // File attacks (Vertical)
+        let file_occ = board.occupied_cols[c];
+        let file_attacks = tables.get_rook_attacks(r, file_occ, 10);
+
+        let mut attacks = file_attacks;
+        while attacks != 0 {
+            let row = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            self.add_move(board, turn, (r, c), (row, c), moves, bm, k, oc);
         }
     }
 
@@ -614,34 +618,29 @@ impl AlphaBetaEngine {
         k: &[Option<Move>; 2],
         oc: bool,
     ) {
-        let dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-        for (dr, dc) in dirs {
-            let mut jumped = false;
-            for i in 1..10 {
-                let Some(tr) = Self::offset(r, dr * i) else {
-                    break;
-                };
-                let Some(tc) = Self::offset(c, dc * i) else {
-                    break;
-                };
-                if tr >= 10 || tc >= 9 {
-                    break;
-                }
+        use crate::logic::lookup::AttackTables;
+        let tables = AttackTables::get();
 
-                if board.get_piece(tr, tc).is_some() {
-                    if jumped {
-                        // Second piece (capture target)
-                        self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
-                        break; // Cannot jump over two
-                    }
-                    jumped = true;
-                    continue;
-                }
+        // Rank attacks (Horizontal)
+        let rank_occ = board.occupied_rows[r];
+        let rank_attacks = tables.get_cannon_attacks(c, rank_occ, 9);
 
-                if !jumped {
-                    self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
-                }
-            }
+        let mut attacks = rank_attacks;
+        while attacks != 0 {
+            let col = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            self.add_move(board, turn, (r, c), (r, col), moves, bm, k, oc);
+        }
+
+        // File attacks (Vertical)
+        let file_occ = board.occupied_cols[c];
+        let file_attacks = tables.get_cannon_attacks(r, file_occ, 10);
+
+        let mut attacks = file_attacks;
+        while attacks != 0 {
+            let row = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            self.add_move(board, turn, (r, c), (row, c), moves, bm, k, oc);
         }
     }
 
@@ -667,11 +666,6 @@ impl AlphaBetaEngine {
             (1, -2),
             (1, 2),
         ];
-        // Corresponding blocking legs
-        // If move is (-2, -1) or (-2, 1), leg is (-1, 0)
-        // If move is (2, -1) or (2, 1), leg is (1, 0)
-        // If move is (-1, -2) or (1, -2), leg is (0, -1)
-        // If move is (-1, 2) or (1, 2), leg is (0, 1)
 
         for (dr, dc) in moves_offsets {
             let Some(tr) = Self::offset(r, dr) else {
@@ -692,7 +686,8 @@ impl AlphaBetaEngine {
                 continue;
             };
 
-            if board.get_piece(leg_r, leg_c).is_none() {
+            let leg_sq = Board::square_index(leg_r, leg_c);
+            if (board.occupied & (1 << leg_sq)) == 0 {
                 self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
             }
         }
@@ -737,7 +732,9 @@ impl AlphaBetaEngine {
             let Some(eye_c) = Self::offset(c, dc / 2) else {
                 continue;
             };
-            if board.get_piece(eye_r, eye_c).is_none() {
+
+            let eye_sq = Board::square_index(eye_r, eye_c);
+            if (board.occupied & (1 << eye_sq)) == 0 {
                 self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
             }
         }

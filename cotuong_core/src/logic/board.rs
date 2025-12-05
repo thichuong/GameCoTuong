@@ -2,6 +2,8 @@ use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
 use crate::logic::eval_constants::{get_piece_value, get_pst_value};
 
+pub type Bitboard = u128;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     Red,
@@ -16,17 +18,30 @@ impl Color {
             Self::Black => Self::Red,
         }
     }
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Red => 0,
+            Self::Black => 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PieceType {
-    General,  // King/General
-    Advisor,  // Guard
-    Elephant, // Bishop/Elephant
-    Horse,    // Knight/Horse
-    Chariot,  // Rook/Chariot
-    Cannon,
-    Soldier, // Pawn/Soldier
+    General = 0,
+    Advisor = 1,
+    Elephant = 2,
+    Horse = 3,
+    Chariot = 4,
+    Cannon = 5,
+    Soldier = 6,
+}
+
+impl PieceType {
+    pub const fn index(self) -> usize {
+        self as usize
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,11 +51,18 @@ pub struct Piece {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(clippy::indexing_slicing)]
 pub struct Board {
-    // 10 rows (0..9), 9 columns (0..8)
-    // (0,0) is bottom-left from Red's perspective (if Red is at bottom)
-    pub grid: [[Option<Piece>; 9]; 10],
+    // Bitboards for each piece type and color
+    // Index: color.index() * 7 + piece_type.index()
+    pub bitboards: [Bitboard; 14],
+    pub occupied: Bitboard,
+    // Mailbox for O(1) lookup
+    pub grid: [Option<Piece>; 90],
+
+    // Fast occupancy for sliding pieces
+    pub occupied_rows: [u16; 10], // 9 bits used
+    pub occupied_cols: [u16; 9],  // 10 bits used
+
     pub zobrist_hash: u64,
     pub red_material: i32,
     pub black_material: i32,
@@ -56,13 +78,7 @@ impl Board {
         for r in (0..10).rev() {
             let mut empty_count = 0;
             for c in 0..9 {
-                if let Some(piece) = self
-                    .grid
-                    .get(r)
-                    .and_then(|row| row.get(c))
-                    .copied()
-                    .flatten()
-                {
+                if let Some(piece) = self.get_piece(r, c) {
                     if empty_count > 0 {
                         fen.push_str(&empty_count.to_string());
                         empty_count = 0;
@@ -96,7 +112,7 @@ impl Board {
 
         // 2. Turn
         fen.push(' ');
-        fen.push(if turn == Color::Red { 'w' } else { 'b' }); // 'w' for Red (White equivalent), 'b' for Black
+        fen.push(if turn == Color::Red { 'w' } else { 'b' });
 
         fen
     }
@@ -112,7 +128,11 @@ impl Board {
     #[must_use]
     pub fn new() -> Self {
         let mut board = Self {
-            grid: [[None; 9]; 10],
+            bitboards: [0; 14],
+            occupied: 0,
+            grid: [None; 90],
+            occupied_rows: [0; 10],
+            occupied_cols: [0; 9],
             zobrist_hash: 0,
             red_material: 0,
             black_material: 0,
@@ -154,50 +174,95 @@ impl Board {
 
         // Back row
         for (col, &pt) in pieces.iter().enumerate() {
-            if let Some(cell) = self.grid.get_mut(back_row).and_then(|row| row.get_mut(col)) {
-                *cell = Some(Piece {
-                    piece_type: pt,
-                    color,
-                });
-            }
+            self.add_piece(back_row, col, pt, color);
         }
 
         // Cannons
-        if let Some(cell) = self.grid.get_mut(cannon_row).and_then(|row| row.get_mut(1)) {
-            *cell = Some(Piece {
-                piece_type: PieceType::Cannon,
-                color,
-            });
-        }
-        if let Some(cell) = self.grid.get_mut(cannon_row).and_then(|row| row.get_mut(7)) {
-            *cell = Some(Piece {
-                piece_type: PieceType::Cannon,
-                color,
-            });
-        }
+        self.add_piece(cannon_row, 1, PieceType::Cannon, color);
+        self.add_piece(cannon_row, 7, PieceType::Cannon, color);
 
         // Soldiers
         for col in (0..9).step_by(2) {
-            if let Some(cell) = self
-                .grid
-                .get_mut(soldier_row)
-                .and_then(|row| row.get_mut(col))
-            {
-                *cell = Some(Piece {
-                    piece_type: PieceType::Soldier,
-                    color,
-                });
-            }
+            self.add_piece(soldier_row, col, PieceType::Soldier, color);
         }
+    }
+
+    pub fn move_piece_quiet(
+        &mut self,
+        from_row: usize,
+        from_col: usize,
+        to_row: usize,
+        to_col: usize,
+    ) {
+        if let Some(piece) = self.get_piece(from_row, from_col) {
+            self.remove_piece(from_row, from_col, piece.piece_type, piece.color);
+            if let Some(captured) = self.get_piece(to_row, to_col) {
+                self.remove_piece(to_row, to_col, captured.piece_type, captured.color);
+            }
+            self.add_piece(to_row, to_col, piece.piece_type, piece.color);
+        }
+    }
+
+    pub fn set_piece(&mut self, row: usize, col: usize, piece: Option<Piece>) {
+        // Remove existing
+        if let Some(p) = self.get_piece(row, col) {
+            self.remove_piece(row, col, p.piece_type, p.color);
+        }
+        // Add new
+        if let Some(p) = piece {
+            self.add_piece(row, col, p.piece_type, p.color);
+        }
+    }
+
+    // Helper to add a piece
+    fn add_piece(&mut self, row: usize, col: usize, piece_type: PieceType, color: Color) {
+        let sq = Self::square_index(row, col);
+        let bit = 1u128 << sq;
+        let idx = color.index() * 7 + piece_type.index();
+        self.bitboards[idx] |= bit;
+        self.occupied |= bit;
+        self.grid[sq] = Some(Piece { piece_type, color });
+
+        self.occupied_rows[row] |= 1 << col;
+        self.occupied_cols[col] |= 1 << row;
+    }
+
+    // Helper to remove a piece
+    fn remove_piece(&mut self, row: usize, col: usize, piece_type: PieceType, color: Color) {
+        let sq = Self::square_index(row, col);
+        let bit = 1u128 << sq;
+        let idx = color.index() * 7 + piece_type.index();
+        self.bitboards[idx] &= !bit;
+        self.occupied &= !bit;
+        self.grid[sq] = None;
+
+        self.occupied_rows[row] &= !(1 << col);
+        self.occupied_cols[col] &= !(1 << row);
+    }
+
+    #[must_use]
+    pub const fn square_index(row: usize, col: usize) -> usize {
+        row * 9 + col
+    }
+
+    #[must_use]
+    pub const fn index_to_coord(sq: usize) -> (usize, usize) {
+        (sq / 9, sq % 9)
     }
 
     #[must_use]
     pub fn get_piece(&self, row: usize, col: usize) -> Option<Piece> {
-        self.grid
-            .get(row)
-            .and_then(|r| r.get(col))
-            .copied()
-            .flatten()
+        let sq = Self::square_index(row, col);
+        self.grid[sq]
+    }
+
+    pub fn get_color_bb(&self, color: Color) -> u128 {
+        let start = color.index() * 7;
+        let mut bb = 0;
+        for i in 0..7 {
+            bb |= self.bitboards[start + i];
+        }
+        bb
     }
 
     pub fn calculate_initial_hash(&self) -> u64 {
@@ -205,20 +270,11 @@ impl Board {
         let mut hash = 0;
         for r in 0..10 {
             for c in 0..9 {
-                if let Some(piece) = self
-                    .grid
-                    .get(r)
-                    .and_then(|row| row.get(c))
-                    .copied()
-                    .flatten()
-                {
+                if let Some(piece) = self.get_piece(r, c) {
                     hash ^= keys.get_piece_key(piece.piece_type, piece.color, r, c);
                 }
             }
         }
-        // We assume Red starts, so we don't XOR side_key initially if Red is 0 and side_key is for Black?
-        // Actually, usually we XOR side_key if it's Black's turn.
-        // Let's assume Red starts and hash starts without side_key.
         hash
     }
 
@@ -252,80 +308,56 @@ impl Board {
     }
 
     pub fn apply_move(&mut self, mv: &Move, _turn: Color) {
-        let keys = ZobristKeys::get(); // Use global static instance
-                                       // Since we made it cheap to create (just constants/XorShift), it's okay-ish.
-                                       // But ideally we should have a static instance.
-                                       // For now, let's just create it. It's fast enough.
+        let keys = ZobristKeys::get();
 
-        // 1. Remove piece from source
-        if let Some(piece) = self
-            .grid
-            .get(mv.from_row)
-            .and_then(|r| r.get(mv.from_col))
-            .copied()
-            .flatten()
-        {
+        // 1. Get piece at source
+        let piece = self
+            .get_piece(mv.from_row, mv.from_col)
+            .expect("No piece at source in apply_move");
+
+        // Remove from source
+        self.remove_piece(mv.from_row, mv.from_col, piece.piece_type, piece.color);
+        self.zobrist_hash ^=
+            keys.get_piece_key(piece.piece_type, piece.color, mv.from_row, mv.from_col);
+
+        // Update Score (Remove from source)
+        let pst_from = get_pst_value(piece.piece_type, piece.color, mv.from_row, mv.from_col);
+        if piece.color == Color::Red {
+            self.red_pst -= pst_from;
+        } else {
+            self.black_pst -= pst_from;
+        }
+
+        // 2. Remove captured piece (if any)
+        if let Some(captured) = self.get_piece(mv.to_row, mv.to_col) {
+            self.remove_piece(mv.to_row, mv.to_col, captured.piece_type, captured.color);
             self.zobrist_hash ^=
-                keys.get_piece_key(piece.piece_type, piece.color, mv.from_row, mv.from_col);
+                keys.get_piece_key(captured.piece_type, captured.color, mv.to_row, mv.to_col);
 
-            // Update Score (Remove from source)
-            let pst_from = get_pst_value(piece.piece_type, piece.color, mv.from_row, mv.from_col);
+            // Update Score (Remove captured)
+            let cap_val = get_piece_value(captured.piece_type);
+            let cap_pst = get_pst_value(captured.piece_type, captured.color, mv.to_row, mv.to_col);
 
-            if piece.color == Color::Red {
-                self.red_pst -= pst_from;
+            if captured.color == Color::Red {
+                self.red_material -= cap_val;
+                self.red_pst -= cap_pst;
             } else {
-                self.black_pst -= pst_from;
+                self.black_material -= cap_val;
+                self.black_pst -= cap_pst;
             }
+        }
 
-            // 2. Remove captured piece (if any)
-            if let Some(captured) = self
-                .grid
-                .get(mv.to_row)
-                .and_then(|r| r.get(mv.to_col))
-                .copied()
-                .flatten()
-            {
-                self.zobrist_hash ^=
-                    keys.get_piece_key(captured.piece_type, captured.color, mv.to_row, mv.to_col);
+        // 3. Place piece at destination
+        self.add_piece(mv.to_row, mv.to_col, piece.piece_type, piece.color);
+        self.zobrist_hash ^=
+            keys.get_piece_key(piece.piece_type, piece.color, mv.to_row, mv.to_col);
 
-                // Update Score (Remove captured)
-                let cap_val = get_piece_value(captured.piece_type);
-                let cap_pst =
-                    get_pst_value(captured.piece_type, captured.color, mv.to_row, mv.to_col);
-
-                if captured.color == Color::Red {
-                    self.red_material -= cap_val;
-                    self.red_pst -= cap_pst;
-                } else {
-                    self.black_material -= cap_val;
-                    self.black_pst -= cap_pst;
-                }
-            }
-
-            // 3. Place piece at destination
-            self.zobrist_hash ^=
-                keys.get_piece_key(piece.piece_type, piece.color, mv.to_row, mv.to_col);
-
-            // Update Score (Add to dest)
-            let pst_to = get_pst_value(piece.piece_type, piece.color, mv.to_row, mv.to_col);
-            if piece.color == Color::Red {
-                self.red_pst += pst_to;
-            } else {
-                self.black_pst += pst_to;
-            }
-
-            // Update grid
-            // Move piece
-            if let Some(row) = self.grid.get_mut(mv.to_row) {
-                if let Some(cell) = row.get_mut(mv.to_col) {
-                    *cell = Some(piece);
-                }
-            }
-            if let Some(row) = self.grid.get_mut(mv.from_row) {
-                if let Some(cell) = row.get_mut(mv.from_col) {
-                    *cell = None;
-                }
-            }
+        // Update Score (Add to dest)
+        let pst_to = get_pst_value(piece.piece_type, piece.color, mv.to_row, mv.to_col);
+        if piece.color == Color::Red {
+            self.red_pst += pst_to;
+        } else {
+            self.black_pst += pst_to;
         }
 
         // 4. Switch turn hash
@@ -379,5 +411,29 @@ mod tests {
         let piece = board.get_piece(4, 4).unwrap();
         assert_eq!(piece.piece_type, PieceType::Soldier);
         assert_eq!(piece.color, Color::Red);
+    }
+}
+
+pub struct BitboardIterator {
+    bb: u128,
+}
+
+impl BitboardIterator {
+    pub const fn new(bb: u128) -> Self {
+        Self { bb }
+    }
+}
+
+impl Iterator for BitboardIterator {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.bb == 0 {
+            None
+        } else {
+            let lsb = self.bb.trailing_zeros() as usize;
+            self.bb &= self.bb - 1;
+            Some(lsb)
+        }
     }
 }
