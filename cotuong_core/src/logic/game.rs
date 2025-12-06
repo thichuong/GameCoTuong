@@ -157,4 +157,100 @@ impl GameState {
         }
         false
     }
+
+    pub fn undo_move(&mut self) -> bool {
+        if let Some(record) = self.history.pop() {
+            let mv = Move {
+                from_row: record.from.0 as u8,
+                from_col: record.from.1 as u8,
+                to_row: record.to.0 as u8,
+                to_col: record.to.1 as u8,
+                score: 0,
+            };
+
+            self.board
+                .undo_move(&mv, record.captured, self.turn.opposite());
+            self.turn = self.turn.opposite();
+
+            // Restore last_move from the previous record in history, if any
+            if let Some(prev) = self.history.last() {
+                self.last_move = Some((prev.from, prev.to));
+            } else {
+                self.last_move = None;
+            }
+
+            // Reset status to Playing since we undid a move (even if it was checkmate)
+            self.status = GameStatus::Playing;
+
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logic::board::PieceType;
+
+    #[test]
+    fn test_undo_move() {
+        let mut game = GameState::new();
+        let initial_fen = game.board.to_fen_string(game.turn);
+
+        // Make a move: Red Central Soldier forward
+        // From (3, 4) to (4, 4)
+        game.make_move(3, 4, 4, 4).unwrap();
+
+        assert_eq!(game.history.len(), 1);
+        assert_eq!(game.turn, Color::Black);
+        assert!(game.board.get_piece(3, 4).is_none());
+        assert!(game.board.get_piece(4, 4).is_some());
+
+        // Undo
+        let success = game.undo_move();
+        assert!(success);
+
+        assert_eq!(game.history.len(), 0);
+        assert_eq!(game.turn, Color::Red);
+        assert!(game.board.get_piece(3, 4).is_some());
+        assert!(game.board.get_piece(4, 4).is_none());
+
+        let restored_fen = game.board.to_fen_string(game.turn);
+        assert_eq!(initial_fen, restored_fen);
+    }
+
+    #[test]
+    fn test_undo_capture() {
+        let mut game = GameState::new();
+
+        // 1. Red Soldier (3,4) -> (4,4)
+        game.make_move(3, 4, 4, 4).unwrap();
+        // 2. Black Soldier (6,4) -> (5,4)
+        game.make_move(6, 4, 5, 4).unwrap();
+        // 3. Red Soldier (4,4) -> (5,4) Capture!
+        game.make_move(4, 4, 5, 4).unwrap();
+
+        assert_eq!(game.history.len(), 3);
+        let last_record = game.history.last().unwrap();
+        assert!(last_record.captured.is_some());
+        assert_eq!(last_record.captured.unwrap().piece_type, PieceType::Soldier);
+
+        // Undo Capture
+        let success = game.undo_move();
+        assert!(success);
+
+        assert_eq!(game.history.len(), 2);
+        assert_eq!(game.turn, Color::Red);
+        // Check Red Soldier back at (4,4)
+        let p = game.board.get_piece(4, 4).unwrap();
+        assert_eq!(p.piece_type, PieceType::Soldier);
+        assert_eq!(p.color, Color::Red);
+
+        // Check Black Soldier restored at (5,4)
+        let cap = game.board.get_piece(5, 4).unwrap();
+        assert_eq!(cap.piece_type, PieceType::Soldier);
+        assert_eq!(cap.color, Color::Black);
+    }
 }

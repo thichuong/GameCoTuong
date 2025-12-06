@@ -769,6 +769,27 @@ pub fn App() -> impl IntoView {
                     }
                 }>"Chơi mới"</button>
 
+                <button style="background: #FF9800; color: white;" on:click=move |_| {
+                    if is_thinking.get() {
+                        return;
+                    }
+                    let mut state = game_state.get();
+                    let mode = game_mode.get();
+
+                    if mode == GameMode::HumanVsComputer {
+                        // If it's human's turn (meaning computer just moved), undo 2 moves to get back to human's turn.
+                        if state.turn == Color::Red { // Assuming Human is Red
+                            // Undo twice if possible (Computer + Human)
+                            if state.history.len() >= 2 {
+                                state.undo_move(); // Undo Computer's move
+                            }
+                        }
+                    }
+                    // Always undo at least one move (Human's move, or the single move in other modes)
+                    state.undo_move();
+                    set_game_state.set(state);
+                }>"Đi lại"</button>
+
                 <button on:click=export_csv>"Xuất CSV"</button>
             </div>
 
