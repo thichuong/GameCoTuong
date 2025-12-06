@@ -310,6 +310,16 @@ impl AlphaBetaEngine {
                 continue;
             }
 
+            // Absolute Checkmate Detection
+            // If this move gives check, verify if it's an absolute checkmate (Mate in 1)
+            if is_in_check(board, turn.opposite()) {
+                if self.is_mate(board, turn.opposite()) {
+                    board.undo_move(&mv, captured, turn);
+                    self.history_stack.pop();
+                    return Some(20000 - (10 - i32::from(depth)));
+                }
+            }
+
             // Repetition Check (Pruning)
             // Check if this position has occurred 2 times before (so this is the 3rd)
             let mut rep_count = 0;
@@ -335,11 +345,12 @@ impl AlphaBetaEngine {
                 && moves_searched >= 4
                 && (self.config.pruning_method == 1 || self.config.pruning_method == 2)
                 && !in_check
-                && !is_capture {
-                    let d = (depth as usize).min(63);
-                    let m = moves_searched.min(63);
-                    reduction = self.lmr_table[d][m];
-                }
+                && !is_capture
+            {
+                let d = (depth as usize).min(63);
+                let m = moves_searched.min(63);
+                reduction = self.lmr_table[d][m];
+            }
 
             // PVS (Principal Variation Search)
             if moves_searched == 0 {
@@ -632,6 +643,20 @@ impl AlphaBetaEngine {
         }
         moves.sort_by(|a, b| b.score.cmp(&a.score));
         moves
+    }
+
+    fn is_mate(&self, board: &mut Board, turn: Color) -> bool {
+        let moves = self.generate_moves_internal(board, turn, None, 0, false);
+        for mv in moves {
+            let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+            board.apply_move(&mv, turn);
+            let legal = !is_in_check(board, turn) && !is_flying_general(board);
+            board.undo_move(&mv, captured, turn);
+            if legal {
+                return false;
+            }
+        }
+        true
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1120,6 +1145,26 @@ impl Searcher for AlphaBetaEngine {
                 {
                     board.undo_move(&mv, captured, turn);
                     continue;
+                }
+
+                // Absolute Checkmate Detection at Root
+                if crate::logic::rules::is_in_check(board, turn.opposite()) {
+                    if self.is_mate(board, turn.opposite()) {
+                        board.undo_move(&mv, captured, turn);
+                        // Found absolute mate at root!
+                        // Return immediately.
+                        // Score is Mate.
+                        let mut mate_move = mv;
+                        mate_move.score = 20000 - (10 - i32::from(d));
+                        return Some((
+                            mate_move,
+                            SearchStats {
+                                depth: d,
+                                nodes: self.nodes_searched,
+                                time_ms: (Self::now() - self.start_time) as u64,
+                            },
+                        ));
+                    }
                 }
 
                 if let Some(score) = self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite()) {

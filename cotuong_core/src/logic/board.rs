@@ -233,8 +233,21 @@ impl Board {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.bitboards = [0; 14];
+        self.occupied = 0;
+        self.grid = [None; 90];
+        self.occupied_rows = [0; 10];
+        self.occupied_cols = [0; 9];
+        self.zobrist_hash = 0;
+        self.red_material = 0;
+        self.black_material = 0;
+        self.red_pst = 0;
+        self.black_pst = 0;
+    }
+
     // Helper to add a piece
-    fn add_piece(&mut self, row: usize, col: usize, piece_type: PieceType, color: Color) {
+    pub fn add_piece(&mut self, row: usize, col: usize, piece_type: PieceType, color: Color) {
         let sq = Self::square_index(row, col);
         let bit = 1u128 << sq;
         let idx = color.index() * 7 + piece_type.index();

@@ -10,6 +10,7 @@ pub mod zobrist;
 
 #[cfg(test)]
 mod bench_test;
+mod mate_test;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Move {
