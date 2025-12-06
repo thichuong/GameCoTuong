@@ -268,11 +268,9 @@ impl AlphaBetaEngine {
             board.apply_move(&mv, turn);
 
             // Deferred Legality Check
-            if !in_check {
-                if is_in_check(board, turn) || is_flying_general(board) {
-                    board.undo_move(&mv, captured, turn);
-                    continue;
-                }
+            if !in_check && (is_in_check(board, turn) || is_flying_general(board)) {
+                board.undo_move(&mv, captured, turn);
+                continue;
             }
 
             // Repetition Check (Pruning)
