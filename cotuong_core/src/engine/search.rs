@@ -18,10 +18,13 @@ pub struct AlphaBetaEngine {
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
+    dynamic_limits: [usize; 64],
+    lmr_table: [[u8; 64]; 64],
 }
 
 impl AlphaBetaEngine {
     pub fn new(config: Arc<EngineConfig>) -> Self {
+        let dynamic_limits = Self::precompute_limits(&config);
         Self {
             evaluator: SimpleEvaluator::new(config.clone()),
             config,
@@ -32,7 +35,43 @@ impl AlphaBetaEngine {
             nodes_searched: 0,
             start_time: 0.0,
             time_limit: None,
+            dynamic_limits,
+            lmr_table: Self::precompute_lmr(),
         }
+    }
+
+    fn precompute_lmr() -> [[u8; 64]; 64] {
+        let mut table = [[0; 64]; 64];
+        for (depth, row) in table.iter_mut().enumerate() {
+            for (moves_searched, val) in row.iter_mut().enumerate() {
+                if depth >= 3 && moves_searched >= 4 {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    {
+                        let r = 1.0
+                            + (f64::from(depth as u32).ln()
+                                * f64::from(moves_searched as u32).ln())
+                                / 2.0;
+                        *val = (r as u8).min((depth - 1) as u8);
+                    }
+                } else {
+                    *val = 0;
+                }
+            }
+        }
+        table
+    }
+
+    fn precompute_limits(config: &EngineConfig) -> [usize; 64] {
+        let mut limits = [0; 64];
+        for (d, limit) in limits.iter_mut().enumerate() {
+            let depth = d as f32;
+            let multiplier = config.pruning_multiplier;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            {
+                *limit = (depth * depth).mul_add(multiplier, 8.0) as usize;
+            }
+        }
+        limits
     }
 
     fn now() -> f64 {
@@ -186,10 +225,12 @@ impl AlphaBetaEngine {
 
         // Forward Pruning
         if self.config.pruning_method == 0 || self.config.pruning_method == 2 {
-            let d = f32::from(depth);
-            let multiplier = self.config.pruning_multiplier;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let limit = (d * d).mul_add(multiplier, 8.0) as usize;
+            let limit = if (depth as usize) < 64 {
+                self.dynamic_limits[depth as usize]
+            } else {
+                moves.len()
+            };
+
             let limit = limit.min(moves.len());
             if moves.len() > limit {
                 moves.truncate(limit);
@@ -216,12 +257,9 @@ impl AlphaBetaEngine {
                     .get_piece(mv.to_row as usize, mv.to_col as usize)
                     .is_some();
                 if !is_capture {
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    {
-                        let r = 1.0
-                            + (f64::from(depth).ln() * f64::from(moves_searched as u32).ln()) / 2.0;
-                        reduction = (r as u8).min(depth - 1);
-                    }
+                    let d = (depth as usize).min(63);
+                    let m = moves_searched.min(63);
+                    reduction = self.lmr_table[d][m];
                 }
             }
 

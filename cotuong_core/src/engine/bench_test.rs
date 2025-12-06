@@ -162,4 +162,100 @@ mod tests {
             panic!("Search returned None");
         }
     }
+
+    #[test]
+    fn bench_dynamic_limiting() {
+        println!("--- Benchmarking Dynamic Limiting (Method 0) ---");
+        let mut config = EngineConfig::default();
+        config.pruning_method = 0; // Dynamic Limiting
+        let config = Arc::new(config);
+        let mut engine = AlphaBetaEngine::new(config);
+
+        let board = Board::new();
+        let game_state = GameState {
+            board,
+            turn: Color::Red,
+            ..Default::default()
+        };
+
+        // Warmup
+        engine.search(&game_state, SearchLimit::Depth(2), &[]);
+
+        let start = std::time::Instant::now();
+        let result = engine.search(&game_state, SearchLimit::Depth(6), &[]);
+        let duration = start.elapsed();
+
+        if let Some((_mv, stats)) = result {
+            println!("Dynamic Limiting Depth 6 stats: {stats:?}");
+            println!("Time taken: {duration:?}");
+            let nps = (stats.nodes as f64 / duration.as_secs_f64()) as u64;
+            println!("NPS: {nps}");
+        } else {
+            panic!("Search returned None");
+        }
+    }
+
+    #[test]
+    fn bench_aggressive() {
+        println!("--- Benchmarking Aggressive Pruning (Method 2) ---");
+        let mut config = EngineConfig::default();
+        config.pruning_method = 2; // Both (Aggressive)
+        let config = Arc::new(config);
+        let mut engine = AlphaBetaEngine::new(config);
+
+        let board = Board::new();
+        let game_state = GameState {
+            board,
+            turn: Color::Red,
+            ..Default::default()
+        };
+
+        // Warmup
+        engine.search(&game_state, SearchLimit::Depth(2), &[]);
+
+        let start = std::time::Instant::now();
+        let result = engine.search(&game_state, SearchLimit::Depth(6), &[]);
+        let duration = start.elapsed();
+
+        if let Some((_mv, stats)) = result {
+            println!("Aggressive Pruning Depth 6 stats: {stats:?}");
+            println!("Time taken: {duration:?}");
+            let nps = (stats.nodes as f64 / duration.as_secs_f64()) as u64;
+            println!("NPS: {nps}");
+        } else {
+            panic!("Search returned None");
+        }
+    }
+
+    #[test]
+    fn bench_lmr() {
+        println!("--- Benchmarking LMR (Method 1) ---");
+        let mut config = EngineConfig::default();
+        config.pruning_method = 1; // LMR
+        let config = Arc::new(config);
+        let mut engine = AlphaBetaEngine::new(config);
+
+        let board = Board::new();
+        let game_state = GameState {
+            board,
+            turn: Color::Red,
+            ..Default::default()
+        };
+
+        // Warmup
+        engine.search(&game_state, SearchLimit::Depth(2), &[]);
+
+        let start = std::time::Instant::now();
+        let result = engine.search(&game_state, SearchLimit::Depth(6), &[]);
+        let duration = start.elapsed();
+
+        if let Some((_mv, stats)) = result {
+            println!("LMR Depth 6 stats: {stats:?}");
+            println!("Time taken: {duration:?}");
+            let nps = (stats.nodes as f64 / duration.as_secs_f64()) as u64;
+            println!("NPS: {nps}");
+        } else {
+            panic!("Search returned None");
+        }
+    }
 }
