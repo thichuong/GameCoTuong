@@ -244,19 +244,17 @@ impl AlphaBetaEngine {
             return Some(-20000 + (10 - i32::from(depth)));
         }
 
-        // Forward Pruning (Only if not in check)
-        if !in_check && (self.config.pruning_method == 0 || self.config.pruning_method == 2) {
-            let limit = if (depth as usize) < 64 {
-                self.dynamic_limits[depth as usize]
+        // Dynamic Limiting Limit Calculation (Moved here, but applied inside loop)
+        let dynamic_limit =
+            if !in_check && (self.config.pruning_method == 0 || self.config.pruning_method == 2) {
+                if (depth as usize) < 64 {
+                    self.dynamic_limits[depth as usize]
+                } else {
+                    moves.len()
+                }
             } else {
                 moves.len()
             };
-
-            let limit = limit.min(moves.len());
-            if moves.len() > limit {
-                moves.truncate(limit);
-            }
-        }
 
         let mut best_score = -30000;
         let mut best_move_this_node = None;
@@ -265,7 +263,44 @@ impl AlphaBetaEngine {
         let mut legal_moves_count = 0;
         let mut has_repetition_move = false;
 
+        // Static Eval for Futility Pruning
+        let static_eval = if depth <= 3 && !in_check {
+            if turn == Color::Red {
+                self.evaluator.evaluate(board)
+            } else {
+                -self.evaluator.evaluate(board)
+            }
+        } else {
+            -30000 // Dummy
+        };
+
         for (moves_searched, mv) in moves.into_iter().enumerate() {
+            let is_capture = board
+                .get_piece(mv.to_row as usize, mv.to_col as usize)
+                .is_some();
+
+            // Safe Dynamic Limiting:
+            // Only prune if:
+            // 1. We have searched enough moves (moves_searched >= dynamic_limit)
+            // 2. It is NOT a capture (captures are important)
+            // 3. Not in check (already handled by limit calculation usually, but good to be safe)
+            if !in_check && moves_searched >= dynamic_limit && !is_capture {
+                continue;
+            }
+
+            // Futility Pruning
+            // Prune quiet moves at low depth if static eval is far below alpha
+            if !in_check
+                && depth <= 3
+                && !is_capture
+                && (self.config.pruning_method == 0 || self.config.pruning_method == 2)
+            {
+                let margin = 150 * i32::from(depth);
+                if static_eval + margin < alpha {
+                    continue;
+                }
+            }
+
             let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
             board.apply_move(&mv, turn);
 
@@ -283,12 +318,6 @@ impl AlphaBetaEngine {
                     rep_count += 1;
                 }
             }
-            // Also check current board hash (which is not in stack yet? Wait, alpha_beta pushes it?)
-            // No, alpha_beta pushes `hash` at start.
-            // But we are inside the loop, we applied `mv`.
-            // `board.zobrist_hash` is the NEW hash.
-            // `self.history_stack` contains history up to current node.
-            // So we just check `self.history_stack`.
 
             if rep_count >= 2 {
                 board.undo_move(&mv, captured, turn);
@@ -306,16 +335,11 @@ impl AlphaBetaEngine {
                 && moves_searched >= 4
                 && (self.config.pruning_method == 1 || self.config.pruning_method == 2)
                 && !in_check
-            {
-                let is_capture = board
-                    .get_piece(mv.to_row as usize, mv.to_col as usize)
-                    .is_some();
-                if !is_capture {
+                && !is_capture {
                     let d = (depth as usize).min(63);
                     let m = moves_searched.min(63);
                     reduction = self.lmr_table[d][m];
                 }
-            }
 
             // PVS (Principal Variation Search)
             if moves_searched == 0 {
@@ -342,22 +366,6 @@ impl AlphaBetaEngine {
                     let s = -v;
                     if s > alpha {
                         // Fail High: Re-search with full window
-                        // If we reduced, re-search with full depth first?
-                        // Standard PVS re-searches with full window if null window fails high.
-                        // If we also reduced, we might need to re-search with full depth.
-                        // For simplicity: if score > alpha, re-search full window at full depth (if reduced) or just full window.
-
-                        // If we reduced, we must re-search at full depth first?
-                        // Usually:
-                        // 1. Search with reduced depth, null window.
-                        // 2. If fail high, search with full depth, null window.
-                        // 3. If fail high, search with full depth, full window.
-
-                        // Simplified PVS + LMR:
-                        // 1. Search (depth-1-R), (-alpha-1, -alpha)
-                        // 2. If fail high and R > 0, re-search (depth-1), (-alpha-1, -alpha)
-                        // 3. If fail high, re-search (depth-1), (-beta, -alpha)
-
                         if reduction > 0 {
                             val = self.alpha_beta(
                                 board,
@@ -464,6 +472,18 @@ impl AlphaBetaEngine {
 
         for mv in captures {
             let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+
+            // Delta Pruning
+            // If stand_pat + capture_value + margin < alpha, we can skip this capture.
+            // We need to know the value of the captured piece.
+            if let Some(cap_piece) = captured {
+                let cap_val = self.get_piece_value(cap_piece.piece_type);
+                // Margin of 200 for safety (e.g. positional gains)
+                if stand_pat + cap_val + 200 < alpha {
+                    continue;
+                }
+            }
+
             board.apply_move(&mv, turn);
 
             // Legality Check (Crucial for Q-Search to avoid illegal captures)

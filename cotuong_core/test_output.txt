@@ -1,0 +1,32 @@
+    Finished `release` profile [optimized] target(s) in 0.03s
+     Running unittests src/lib.rs (/home/tchuong/Màn hình nền/GameCoTuong/target/release/deps/cotuong_core-c891261082324614)
+
+running 5 tests
+--- Benchmarking Dynamic Limiting (Method 0) ---
+--- Benchmarking Aggressive Pruning (Method 2) ---
+--- Benchmarking LMR (Method 1) ---
+--- Benchmarking Endgame ---
+--- Benchmarking Opening ---
+Endgame Depth 7 stats: SearchStats { depth: 7, nodes: 3307, time_ms: 0 }
+Time taken: 963.386µs
+NPS: 3432684
+test engine::bench_test::tests::bench_endgame ... ok
+Opening Depth 5 stats: SearchStats { depth: 5, nodes: 96431, time_ms: 37 }
+Time taken: 37.301307ms
+NPS: 2585190
+test engine::bench_test::tests::bench_opening ... ok
+Aggressive Pruning Depth 6 stats: SearchStats { depth: 6, nodes: 96658, time_ms: 44 }
+Time taken: 44.097942ms
+NPS: 2191893
+test engine::bench_test::tests::bench_aggressive ... ok
+LMR Depth 6 stats: SearchStats { depth: 6, nodes: 189842, time_ms: 77 }
+Time taken: 77.305342ms
+NPS: 2455742
+test engine::bench_test::tests::bench_lmr ... ok
+Dynamic Limiting Depth 6 stats: SearchStats { depth: 6, nodes: 207034, time_ms: 112 }
+Time taken: 112.608575ms
+NPS: 1838527
+test engine::bench_test::tests::bench_dynamic_limiting ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.14s
+
