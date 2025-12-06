@@ -218,13 +218,32 @@ impl AlphaBetaEngine {
         let best_move_tt = tt_entry.and_then(|e| e.best_move);
         let mut moves = self.generate_moves(board, turn, best_move_tt, depth);
 
+        let in_check = is_in_check(board, turn);
+
+        if in_check {
+            // If in check, filter for legal moves immediately.
+            // We cannot prune because the only legal moves might be "bad" ones.
+            moves.retain(|mv| {
+                let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+                board.apply_move(mv, turn);
+                let legal = !is_in_check(board, turn) && !is_flying_general(board);
+                board.undo_move(mv, captured, turn);
+                legal
+            });
+
+            if moves.is_empty() {
+                self.history_stack.pop();
+                return Some(-20000 + (10 - i32::from(depth)));
+            }
+        }
+
         if moves.is_empty() {
             self.history_stack.pop();
             return Some(-20000 + (10 - i32::from(depth)));
         }
 
-        // Forward Pruning
-        if self.config.pruning_method == 0 || self.config.pruning_method == 2 {
+        // Forward Pruning (Only if not in check)
+        if !in_check && (self.config.pruning_method == 0 || self.config.pruning_method == 2) {
             let limit = if (depth as usize) < 64 {
                 self.dynamic_limits[depth as usize]
             } else {
@@ -242,16 +261,41 @@ impl AlphaBetaEngine {
         let mut tt_flag = TTFlag::UpperBound;
 
         let mut legal_moves_count = 0;
+        let mut has_repetition_move = false;
 
         for (moves_searched, mv) in moves.into_iter().enumerate() {
             let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
             board.apply_move(&mv, turn);
 
             // Deferred Legality Check
-            if is_in_check(board, turn) || is_flying_general(board) {
+            if !in_check {
+                if is_in_check(board, turn) || is_flying_general(board) {
+                    board.undo_move(&mv, captured, turn);
+                    continue;
+                }
+            }
+
+            // Repetition Check (Pruning)
+            // Check if this position has occurred 2 times before (so this is the 3rd)
+            let mut rep_count = 0;
+            for &h in &self.history_stack {
+                if h == board.zobrist_hash {
+                    rep_count += 1;
+                }
+            }
+            // Also check current board hash (which is not in stack yet? Wait, alpha_beta pushes it?)
+            // No, alpha_beta pushes `hash` at start.
+            // But we are inside the loop, we applied `mv`.
+            // `board.zobrist_hash` is the NEW hash.
+            // `self.history_stack` contains history up to current node.
+            // So we just check `self.history_stack`.
+
+            if rep_count >= 2 {
                 board.undo_move(&mv, captured, turn);
+                has_repetition_move = true;
                 continue;
             }
+
             legal_moves_count += 1;
 
             let score;
@@ -261,6 +305,7 @@ impl AlphaBetaEngine {
             if depth >= 3
                 && moves_searched >= 4
                 && (self.config.pruning_method == 1 || self.config.pruning_method == 2)
+                && !in_check
             {
                 let is_capture = board
                     .get_piece(mv.to_row as usize, mv.to_col as usize)
@@ -377,9 +422,15 @@ impl AlphaBetaEngine {
         if legal_moves_count == 0 {
             self.history_stack.pop();
             // Checkmate or Stalemate
-            // If in check, it's checkmate.
-            // If not in check, it's stalemate (draw).
-            // For now, assume loss if no moves (Xiangqi rules usually say no moves = loss).
+            if in_check {
+                // Checkmate
+                return Some(-20000 + (10 - i32::from(depth)));
+            }
+            if has_repetition_move {
+                // All legal moves were pruned due to repetition -> Draw
+                return Some(0);
+            }
+            // Stalemate (Loss in Xiangqi)
             return Some(-20000 + (10 - i32::from(depth)));
         }
 
@@ -981,6 +1032,12 @@ impl Searcher for AlphaBetaEngine {
         let mut board = game_state.board.clone();
         let board = &mut board;
         let turn = game_state.turn;
+
+        // Initialize history stack
+        self.history_stack.clear();
+        for record in &game_state.history {
+            self.history_stack.push(record.hash);
+        }
 
         let mut best_move = None;
         let mut final_depth = 0;
