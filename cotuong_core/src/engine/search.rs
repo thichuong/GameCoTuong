@@ -126,8 +126,10 @@ impl AlphaBetaEngine {
         }
 
         // Repetition Check
+        // Repetition Check (3-fold)
         let hash = board.zobrist_hash;
-        if self.history_stack.contains(&hash) {
+        let rep_count = self.history_stack.iter().filter(|&&h| h == hash).count();
+        if rep_count >= 2 {
             return Some(0);
         }
         self.history_stack.push(hash);
@@ -463,6 +465,14 @@ impl AlphaBetaEngine {
         for mv in captures {
             let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
             board.apply_move(&mv, turn);
+
+            // Legality Check (Crucial for Q-Search to avoid illegal captures)
+            if crate::logic::rules::is_in_check(board, turn)
+                || crate::logic::rules::is_flying_general(board)
+            {
+                board.undo_move(&mv, captured, turn);
+                continue;
+            }
 
             let score = -self.quiescence(board, -beta, -alpha, turn.opposite());
 
@@ -1080,8 +1090,17 @@ impl Searcher for AlphaBetaEngine {
             let mut time_out = false;
 
             for mv in moves {
+                // Correct placement:
+
                 let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
                 board.apply_move(&mv, turn);
+
+                if crate::logic::rules::is_in_check(board, turn)
+                    || crate::logic::rules::is_flying_general(board)
+                {
+                    board.undo_move(&mv, captured, turn);
+                    continue;
+                }
 
                 if let Some(score) = self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite()) {
                     board.undo_move(&mv, captured, turn);
