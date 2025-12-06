@@ -241,11 +241,20 @@ impl AlphaBetaEngine {
         let mut best_move_this_node = None;
         let mut tt_flag = TTFlag::UpperBound;
 
-        for (moves_searched, mv) in moves.into_iter().enumerate() {
-            // let mut next_board = board.clone();
-            // next_board.apply_move(&mv, turn);
+        let mut legal_moves_count = 0;
 
-            let mut score;
+        for (moves_searched, mv) in moves.into_iter().enumerate() {
+            let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+            board.apply_move(&mv, turn);
+
+            // Deferred Legality Check
+            if is_in_check(board, turn) || is_flying_general(board) {
+                board.undo_move(&mv, captured, turn);
+                continue;
+            }
+            legal_moves_count += 1;
+
+            let score;
 
             // LMR
             let mut reduction = 0;
@@ -263,60 +272,84 @@ impl AlphaBetaEngine {
                 }
             }
 
+            // PVS (Principal Variation Search)
             if moves_searched == 0 {
-                let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
-                board.apply_move(&mv, turn);
+                // Full window for the first move (PV-node)
                 let val = self.alpha_beta(board, -beta, -alpha, depth - 1, turn.opposite());
-                board.undo_move(&mv, captured, turn);
 
                 match val {
                     None => {
+                        board.undo_move(&mv, captured, turn);
                         self.history_stack.pop();
                         return None;
                     }
                     Some(v) => score = -v,
                 }
             } else {
+                // Null window search for other moves (Cut-nodes)
+                // Try to prove that this move is NOT better than alpha
                 let search_depth = depth - 1 - reduction;
-
-                let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
-                board.apply_move(&mv, turn);
 
                 let mut val =
                     self.alpha_beta(board, -alpha - 1, -alpha, search_depth, turn.opposite());
 
                 if let Some(v) = val {
-                    if -v > alpha && reduction > 0 {
-                        val =
-                            self.alpha_beta(board, -alpha - 1, -alpha, depth - 1, turn.opposite());
+                    let s = -v;
+                    if s > alpha {
+                        // Fail High: Re-search with full window
+                        // If we reduced, re-search with full depth first?
+                        // Standard PVS re-searches with full window if null window fails high.
+                        // If we also reduced, we might need to re-search with full depth.
+                        // For simplicity: if score > alpha, re-search full window at full depth (if reduced) or just full window.
+
+                        // If we reduced, we must re-search at full depth first?
+                        // Usually:
+                        // 1. Search with reduced depth, null window.
+                        // 2. If fail high, search with full depth, null window.
+                        // 3. If fail high, search with full depth, full window.
+
+                        // Simplified PVS + LMR:
+                        // 1. Search (depth-1-R), (-alpha-1, -alpha)
+                        // 2. If fail high and R > 0, re-search (depth-1), (-alpha-1, -alpha)
+                        // 3. If fail high, re-search (depth-1), (-beta, -alpha)
+
+                        if reduction > 0 {
+                            val = self.alpha_beta(
+                                board,
+                                -alpha - 1,
+                                -alpha,
+                                depth - 1,
+                                turn.opposite(),
+                            );
+                        }
+
+                        if let Some(v2) = val {
+                            let s2 = -v2;
+                            if s2 > alpha {
+                                val = self.alpha_beta(
+                                    board,
+                                    -beta,
+                                    -alpha,
+                                    depth - 1,
+                                    turn.opposite(),
+                                );
+                            }
+                        }
                     }
                 }
 
-                board.undo_move(&mv, captured, turn);
-
+                // Handle result
                 match val {
                     None => {
+                        board.undo_move(&mv, captured, turn);
                         self.history_stack.pop();
                         return None;
                     }
                     Some(v) => score = -v,
                 }
-
-                if score > alpha && score < beta {
-                    let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
-                    board.apply_move(&mv, turn);
-                    let val = self.alpha_beta(board, -beta, -alpha, depth - 1, turn.opposite());
-                    board.undo_move(&mv, captured, turn);
-
-                    match val {
-                        None => {
-                            self.history_stack.pop();
-                            return None;
-                        }
-                        Some(v) => score = -v,
-                    }
-                }
             }
+
+            board.undo_move(&mv, captured, turn);
 
             if score > best_score {
                 best_score = score;
@@ -339,6 +372,15 @@ impl AlphaBetaEngine {
                 tt_flag = TTFlag::LowerBound;
                 break;
             }
+        }
+
+        if legal_moves_count == 0 {
+            self.history_stack.pop();
+            // Checkmate or Stalemate
+            // If in check, it's checkmate.
+            // If not in check, it's stalemate (draw).
+            // For now, assume loss if no moves (Xiangqi rules usually say no moves = loss).
+            return Some(-20000 + (10 - i32::from(depth)));
         }
 
         self.tt
@@ -546,14 +588,8 @@ impl AlphaBetaEngine {
         };
 
         // Legality Check (Self-check & Flying General)
-        // Optimization: Apply move, check, undo. No clone.
-        let captured = board.move_piece_quiet(r, c, tr, tc);
-
-        if is_in_check(board, turn) || is_flying_general(board) {
-            board.undo_move_quiet(r, c, tr, tc, captured);
-            return;
-        }
-        board.undo_move_quiet(r, c, tr, tc, captured);
+        // Optimization: DEFERRED to search loop.
+        // We generate pseudo-legal moves here.
 
         // Scoring
         let mut score;
