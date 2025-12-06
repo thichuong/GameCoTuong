@@ -312,12 +312,10 @@ impl AlphaBetaEngine {
 
             // Absolute Checkmate Detection
             // If this move gives check, verify if it's an absolute checkmate (Mate in 1)
-            if is_in_check(board, turn.opposite()) {
-                if self.is_mate(board, turn.opposite()) {
-                    board.undo_move(&mv, captured, turn);
-                    self.history_stack.pop();
-                    return Some(20000 - (10 - i32::from(depth)));
-                }
+            if is_in_check(board, turn.opposite()) && self.is_mate(board, turn.opposite()) {
+                board.undo_move(&mv, captured, turn);
+                self.history_stack.pop();
+                return Some(20000 - (10 - i32::from(depth)));
             }
 
             // Repetition Check (Pruning)
@@ -1148,23 +1146,23 @@ impl Searcher for AlphaBetaEngine {
                 }
 
                 // Absolute Checkmate Detection at Root
-                if crate::logic::rules::is_in_check(board, turn.opposite()) {
-                    if self.is_mate(board, turn.opposite()) {
-                        board.undo_move(&mv, captured, turn);
-                        // Found absolute mate at root!
-                        // Return immediately.
-                        // Score is Mate.
-                        let mut mate_move = mv;
-                        mate_move.score = 20000 - (10 - i32::from(d));
-                        return Some((
-                            mate_move,
-                            SearchStats {
-                                depth: d,
-                                nodes: self.nodes_searched,
-                                time_ms: (Self::now() - self.start_time) as u64,
-                            },
-                        ));
-                    }
+                if crate::logic::rules::is_in_check(board, turn.opposite())
+                    && self.is_mate(board, turn.opposite())
+                {
+                    board.undo_move(&mv, captured, turn);
+                    // Found absolute mate at root!
+                    // Return immediately.
+                    // Score is Mate.
+                    let mut mate_move = mv;
+                    mate_move.score = 20000 - (10 - i32::from(d));
+                    return Some((
+                        mate_move,
+                        SearchStats {
+                            depth: d,
+                            nodes: self.nodes_searched,
+                            time_ms: (Self::now() - self.start_time) as u64,
+                        },
+                    ));
                 }
 
                 if let Some(score) = self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite()) {

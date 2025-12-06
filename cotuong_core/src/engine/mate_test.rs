@@ -1,10 +1,3 @@
-use crate::engine::config::EngineConfig;
-use crate::engine::search::AlphaBetaEngine;
-use crate::engine::{SearchLimit, Searcher};
-use crate::logic::board::{Board, Color};
-use crate::logic::game::GameState;
-use std::sync::Arc;
-
 #[test]
 fn test_absolute_checkmate() {
     // Setup a "Mate in 1" position
