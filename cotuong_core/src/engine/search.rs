@@ -205,6 +205,22 @@ impl AlphaBetaEngine {
             }
         }
 
+        let in_check = is_in_check(board, turn);
+
+        // Reverse Futility Pruning
+        if depth <= 3 && !in_check && beta.abs() < 15000 {
+            let eval = if turn == Color::Red {
+                self.evaluator.evaluate(board)
+            } else {
+                -self.evaluator.evaluate(board)
+            };
+            let margin = 120 * i32::from(depth);
+            if eval - margin >= beta {
+                self.history_stack.pop();
+                return Some(eval);
+            }
+        }
+
         // Null Move Pruning
         if depth >= 3 && beta.abs() < 15000 && !crate::logic::rules::is_in_check(board, turn) {
             let r = 2;
@@ -227,10 +243,19 @@ impl AlphaBetaEngine {
             }
         }
 
-        let best_move_tt = tt_entry.and_then(|e| e.best_move);
-        let mut moves = self.generate_moves(board, turn, best_move_tt, depth);
+        let mut best_move_tt = tt_entry.and_then(|e| e.best_move);
 
-        let in_check = is_in_check(board, turn);
+        // Internal Iterative Deepening (IID)
+        if best_move_tt.is_none() && depth >= 4 {
+            // Search with reduced depth to populate TT
+            let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn);
+            // We don't use the score, just hope TT is populated
+            if let Some(entry) = self.tt.probe(hash) {
+                best_move_tt = entry.best_move;
+            }
+        }
+
+        let mut moves = self.generate_moves(board, turn, best_move_tt, depth);
 
         if in_check {
             // If in check, filter for legal moves immediately.
@@ -363,10 +388,13 @@ impl AlphaBetaEngine {
                 reduction = self.lmr_table[d][m];
             }
 
+            let extension = if in_check { 1 } else { 0 };
+
             // PVS (Principal Variation Search)
             if moves_searched == 0 {
                 // Full window for the first move (PV-node)
-                let val = self.alpha_beta(board, -beta, -alpha, depth - 1, turn.opposite());
+                let val =
+                    self.alpha_beta(board, -beta, -alpha, depth - 1 + extension, turn.opposite());
 
                 match val {
                     None => {
@@ -379,7 +407,7 @@ impl AlphaBetaEngine {
             } else {
                 // Null window search for other moves (Cut-nodes)
                 // Try to prove that this move is NOT better than alpha
-                let search_depth = depth - 1 - reduction;
+                let search_depth = depth - 1 - reduction + extension;
 
                 let mut val =
                     self.alpha_beta(board, -alpha - 1, -alpha, search_depth, turn.opposite());
@@ -393,7 +421,7 @@ impl AlphaBetaEngine {
                                 board,
                                 -alpha - 1,
                                 -alpha,
-                                depth - 1,
+                                depth - 1 + extension,
                                 turn.opposite(),
                             );
                         }
@@ -405,7 +433,7 @@ impl AlphaBetaEngine {
                                     board,
                                     -beta,
                                     -alpha,
-                                    depth - 1,
+                                    depth - 1 + extension,
                                     turn.opposite(),
                                 );
                             }
@@ -1105,6 +1133,7 @@ impl Searcher for AlphaBetaEngine {
 
         let mut best_move = None;
         let mut final_depth = 0;
+        let mut previous_score: Option<i32> = None;
 
         for d in 1..=max_depth {
             // Check soft limit before starting new depth
@@ -1116,95 +1145,142 @@ impl Searcher for AlphaBetaEngine {
             }
 
             let mut alpha = -30000;
-            let beta = 30000;
-            let mut current_best_move = None;
-            let mut best_score = -30000;
+            let mut beta = 30000;
+            let mut delta = 50;
 
-            // Try to get best move from TT for this depth (or previous)
-            let hash = board.zobrist_hash;
-            let tt_move = self.tt.get_move(hash);
-
-            let mut moves = self.generate_moves(board, turn, tt_move, d);
-
-            // Filter excluded moves at root
-            if !excluded_moves.is_empty() {
-                moves.retain(|m| {
-                    !excluded_moves.iter().any(|ex| {
-                        m.from_row == ex.from_row
-                            && m.from_col == ex.from_col
-                            && m.to_row == ex.to_row
-                            && m.to_col == ex.to_col
-                    })
-                });
+            if let Some(score) = previous_score {
+                if d >= 3 {
+                    alpha = (score - delta).max(-30000);
+                    beta = (score + delta).min(30000);
+                }
             }
 
-            // Check time (hard limit)
-            if self.check_time() {
-                break;
-            }
+            loop {
+                let alpha_orig = alpha;
+                let beta_orig = beta;
+                let mut best_score_this_iteration = -30000;
+                let mut current_best_move_this_iteration = None;
 
-            let mut time_out = false;
+                // Try to get best move from TT for this depth (or previous)
+                let hash = board.zobrist_hash;
+                let tt_move = self.tt.get_move(hash);
 
-            for mv in moves {
-                // Correct placement:
+                let mut moves = self.generate_moves(board, turn, tt_move, d);
 
-                let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
-                board.apply_move(&mv, turn);
+                // Filter excluded moves at root
+                if !excluded_moves.is_empty() {
+                    moves.retain(|m| {
+                        !excluded_moves.iter().any(|ex| {
+                            m.from_row == ex.from_row
+                                && m.from_col == ex.from_col
+                                && m.to_row == ex.to_row
+                                && m.to_col == ex.to_col
+                        })
+                    });
+                }
 
-                if crate::logic::rules::is_in_check(board, turn)
-                    || crate::logic::rules::is_flying_general(board)
-                {
+                if self.check_time() {
+                    break;
+                }
+
+                let mut time_out = false;
+                let mut moves_searched = 0;
+
+                for mv in moves {
+                    let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+                    board.apply_move(&mv, turn);
+
+                    if crate::logic::rules::is_in_check(board, turn)
+                        || crate::logic::rules::is_flying_general(board)
+                    {
+                        board.undo_move(&mv, captured, turn);
+                        continue;
+                    }
+
+                    // Absolute Checkmate Detection at Root
+                    if crate::logic::rules::is_in_check(board, turn.opposite())
+                        && self.is_mate(board, turn.opposite())
+                    {
+                        board.undo_move(&mv, captured, turn);
+                        // Found absolute mate at root!
+                        let mut mate_move = mv;
+                        mate_move.score = 20000 - (10 - i32::from(d));
+                        return Some((
+                            mate_move,
+                            SearchStats {
+                                depth: d,
+                                nodes: self.nodes_searched,
+                                time_ms: (Self::now() - self.start_time) as u64,
+                            },
+                        ));
+                    }
+
+                    let score_opt;
+                    if moves_searched == 0 {
+                        score_opt = self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite());
+                    } else {
+                        // Root PVS
+                        let mut val =
+                            self.alpha_beta(board, -alpha - 1, -alpha, d - 1, turn.opposite());
+                        if let Some(v) = val {
+                            let s = -v;
+                            if s > alpha && s < beta {
+                                val = self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite());
+                            }
+                        }
+                        score_opt = val;
+                    }
+
                     board.undo_move(&mv, captured, turn);
+
+                    if let Some(s) = score_opt {
+                        let score = -s;
+                        if score > best_score_this_iteration {
+                            best_score_this_iteration = score;
+                            current_best_move_this_iteration = Some(mv);
+                        }
+                        if score > alpha {
+                            alpha = score;
+                        }
+                    } else {
+                        time_out = true;
+                        break;
+                    }
+                    moves_searched += 1;
+                }
+
+                if time_out {
+                    // If we timed out during a depth, don't use partial results unless we have nothing else
+                    if best_move.is_none() && current_best_move_this_iteration.is_some() {
+                        best_move = current_best_move_this_iteration;
+                        final_depth = d;
+                    }
+                    break;
+                }
+
+                if best_score_this_iteration <= alpha_orig {
+                    // Fail Low
+                    alpha = (alpha_orig - delta).max(-30000);
+                    delta += delta / 2;
+                    continue;
+                }
+                if best_score_this_iteration >= beta_orig {
+                    // Fail High
+                    beta = (beta_orig + delta).min(30000);
+                    delta += delta / 2;
                     continue;
                 }
 
-                // Absolute Checkmate Detection at Root
-                if crate::logic::rules::is_in_check(board, turn.opposite())
-                    && self.is_mate(board, turn.opposite())
-                {
-                    board.undo_move(&mv, captured, turn);
-                    // Found absolute mate at root!
-                    // Return immediately.
-                    // Score is Mate.
-                    let mut mate_move = mv;
-                    mate_move.score = 20000 - (10 - i32::from(d));
-                    return Some((
-                        mate_move,
-                        SearchStats {
-                            depth: d,
-                            nodes: self.nodes_searched,
-                            time_ms: (Self::now() - self.start_time) as u64,
-                        },
-                    ));
-                }
-
-                if let Some(score) = self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite()) {
-                    board.undo_move(&mv, captured, turn);
-                    let score = -score;
-                    if score > best_score {
-                        best_score = score;
-                        current_best_move = Some(mv);
-                    }
-                    if score > alpha {
-                        alpha = score;
-                    }
-                } else {
-                    board.undo_move(&mv, captured, turn);
-                    time_out = true;
-                    break;
-                }
-            }
-
-            if time_out {
-                // If we timed out during a depth, don't use partial results unless we have nothing else
-                if best_move.is_none() && current_best_move.is_some() {
-                    best_move = current_best_move;
+                if let Some(mv) = current_best_move_this_iteration {
+                    best_move = Some(mv);
                     final_depth = d;
+                    previous_score = Some(best_score_this_iteration);
                 }
                 break;
-            } else if let Some(mv) = current_best_move {
-                best_move = Some(mv);
-                final_depth = d;
+            }
+
+            if self.check_time() {
+                break;
             }
         }
 
