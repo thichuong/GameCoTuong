@@ -322,7 +322,10 @@ impl AlphaBetaEngine {
 
             // Absolute Checkmate Detection
             // If this move gives check, verify if it's an absolute checkmate (Mate in 1)
-            if is_in_check(board, turn.opposite()) && self.is_mate(board, turn.opposite()) {
+            if depth <= 7
+                && is_in_check(board, turn.opposite())
+                && self.is_mate(board, turn.opposite())
+            {
                 board.undo_move(&mv, captured, turn);
                 self.history_stack.pop();
                 return Some(20000 - (10 - i32::from(depth)));
