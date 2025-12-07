@@ -1,9 +1,0 @@
-    Checking cotuong_core v0.1.0 (/home/tchuong/Màn hình nền/GameCoTuong/cotuong_core)
-error[E0425]: cannot find value `in_check` in this scope
-   --> cotuong_core/src/engine/search.rs:209:27
-    |
-209 | ...3 && !in_check && beta.abs() < 15000 {
-    |          ^^^^^^^^ not found in this scope
-
-For more information about this error, try `rustc --explain E0425`.
-error: could not compile `cotuong_core` (lib) due to 1 previous error
