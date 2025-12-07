@@ -40,6 +40,12 @@ impl AlphaBetaEngine {
         }
     }
 
+    pub fn update_config(&mut self, config: Arc<EngineConfig>) {
+        self.dynamic_limits = Self::precompute_limits(&config);
+        self.evaluator = SimpleEvaluator::new(config.clone());
+        self.config = config;
+    }
+
     fn precompute_lmr() -> [[u8; 64]; 64] {
         let mut table = [[0; 64]; 64];
         for (depth, row) in table.iter_mut().enumerate() {
@@ -77,11 +83,15 @@ impl AlphaBetaEngine {
     fn now() -> f64 {
         #[cfg(target_arch = "wasm32")]
         {
-            web_sys::window()
-                .expect("should have window")
-                .performance()
-                .expect("should have performance")
-                .now()
+            use wasm_bindgen::JsCast;
+            if let Some(window) = web_sys::window() {
+                return window.performance().expect("should have performance").now();
+            }
+            let global = js_sys::global();
+            if let Ok(worker) = global.dyn_into::<web_sys::WorkerGlobalScope>() {
+                return worker.performance().expect("should have performance").now();
+            }
+            panic!("Could not find window or worker global scope");
         }
         #[cfg(not(target_arch = "wasm32"))]
         {

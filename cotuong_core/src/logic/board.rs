@@ -1,10 +1,11 @@
 use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
 use crate::logic::eval_constants::{get_piece_value, get_pst_value};
+use serde::{Deserialize, Serialize};
 
 pub type Bitboard = u128;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Color {
     Red,
     Black,
@@ -27,7 +28,7 @@ impl Color {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PieceType {
     General = 0,
     Advisor = 1,
@@ -44,19 +45,20 @@ impl PieceType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Piece {
     pub piece_type: PieceType,
     pub color: Color,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Board {
     // Bitboards for each piece type and color
     // Index: color.index() * 7 + piece_type.index()
     pub bitboards: [Bitboard; 14],
     pub occupied: Bitboard,
     // Mailbox for O(1) lookup
+    #[serde(with = "serde_big_array::BigArray")]
     pub grid: [Option<Piece>; 90],
 
     // Fast occupancy for sliding pieces

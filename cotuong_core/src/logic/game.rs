@@ -1,15 +1,16 @@
 use crate::engine::Move;
 use crate::logic::board::{Board, Color};
 use crate::logic::rules::{is_in_check, is_valid_move, MoveError};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameStatus {
     Playing,
     Checkmate(Color), // Winner
     Stalemate,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct MoveRecord {
     pub from: (usize, usize),
@@ -21,7 +22,7 @@ pub struct MoveRecord {
     pub hash: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
     pub board: Board,
     pub turn: Color,

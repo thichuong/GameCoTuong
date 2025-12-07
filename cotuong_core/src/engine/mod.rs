@@ -1,5 +1,6 @@
 use crate::logic::board::Board;
 use crate::logic::game::GameState;
+use serde::{Deserialize, Serialize};
 
 pub mod config;
 pub mod eval;
@@ -12,7 +13,7 @@ pub mod zobrist;
 mod bench_test;
 mod mate_test;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Move {
     pub from_row: u8,
     pub from_col: u8,
@@ -21,14 +22,14 @@ pub struct Move {
     pub score: i32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub enum SearchLimit {
     Depth(u8),
     Time(u64), // milliseconds
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct SearchStats {
     pub depth: u8,
     pub nodes: u32,
