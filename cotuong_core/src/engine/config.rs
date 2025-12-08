@@ -1,6 +1,5 @@
 use crate::logic::eval_constants::{
-    PST_CANNON, PST_HORSE, PST_PAWN, PST_ROOK, VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE,
-    VAL_KING, VAL_PAWN, VAL_ROOK,
+    VAL_ADVISOR, VAL_CANNON, VAL_ELEPHANT, VAL_HORSE, VAL_KING, VAL_PAWN, VAL_ROOK,
 };
 use serde::{Deserialize, Serialize};
 
@@ -16,16 +15,12 @@ pub struct EngineConfig {
     pub val_rook: i32,
     pub val_king: i32,
 
-    pub pst_pawn: [[i32; 9]; 10],
-    pub pst_horse: [[i32; 9]; 10],
-    pub pst_cannon: [[i32; 9]; 10],
-    pub pst_rook: [[i32; 9]; 10],
-
     // Search Parameters
     pub score_hash_move: i32,
     pub score_capture_base: i32,
     pub score_killer_move: i32,
     pub score_history_max: i32,
+    pub depth_discount: i32, // Points subtracted per depth level
     pub pruning_method: i32, // 0: Dynamic Limiting, 1: LMR, 2: Both
     pub pruning_multiplier: f32,
 
@@ -46,16 +41,12 @@ impl Default for EngineConfig {
             val_rook: VAL_ROOK,
             val_king: VAL_KING,
 
-            pst_pawn: PST_PAWN,
-            pst_horse: PST_HORSE,
-            pst_cannon: PST_CANNON,
-            pst_rook: PST_ROOK,
-
             score_hash_move: 2_000_000,
-            score_capture_base: 1_000_000,
-            score_killer_move: 900_000,
+            score_capture_base: 900_000,
+            score_killer_move: 1_200_000,
             score_history_max: 800_000,
-            pruning_method: 1, // Default to LMR
+            depth_discount: 1000, // Subtract 1000 per depth
+            pruning_method: 1,    // Default to LMR
             pruning_multiplier: 1.0,
 
             probcut_depth: 5,
@@ -76,15 +67,11 @@ struct EngineConfigJson {
     val_rook: Option<f32>,
     val_king: Option<f32>,
 
-    pst_pawn: Option<[[f32; 9]; 10]>,
-    pst_horse: Option<[[f32; 9]; 10]>,
-    pst_cannon: Option<[[f32; 9]; 10]>,
-    pst_rook: Option<[[f32; 9]; 10]>,
-
     score_hash_move: Option<f32>,
     score_capture_base: Option<f32>,
     score_killer_move: Option<f32>,
     score_history_max: Option<f32>,
+    depth_discount: Option<i32>,
     pruning_method: Option<i32>,
     pruning_multiplier: Option<f32>,
 
@@ -108,11 +95,6 @@ impl EngineConfig {
             val_rook: apply_scale(default.val_rook, json_config.val_rook),
             val_king: apply_scale(default.val_king, json_config.val_king),
 
-            pst_pawn: apply_scale_pst(&default.pst_pawn, json_config.pst_pawn.as_ref()),
-            pst_horse: apply_scale_pst(&default.pst_horse, json_config.pst_horse.as_ref()),
-            pst_cannon: apply_scale_pst(&default.pst_cannon, json_config.pst_cannon.as_ref()),
-            pst_rook: apply_scale_pst(&default.pst_rook, json_config.pst_rook.as_ref()),
-
             score_hash_move: apply_scale(default.score_hash_move, json_config.score_hash_move),
             score_capture_base: apply_scale(
                 default.score_capture_base,
@@ -126,6 +108,7 @@ impl EngineConfig {
                 default.score_history_max,
                 json_config.score_history_max,
             ),
+            depth_discount: json_config.depth_discount.unwrap_or(default.depth_discount),
             pruning_method: json_config.pruning_method.unwrap_or(default.pruning_method),
             pruning_multiplier: json_config
                 .pruning_multiplier
@@ -144,31 +127,6 @@ impl EngineConfig {
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn apply_scale(default_val: i32, scale: Option<f32>) -> i32 {
     scale.map_or(default_val, |s| (default_val as f32 * s) as i32)
-}
-
-#[allow(dead_code)]
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn apply_scale_pst(
-    default_pst: &[[i32; 9]; 10],
-    scale_pst: Option<&[[f32; 9]; 10]>,
-) -> [[i32; 9]; 10] {
-    scale_pst.map_or(*default_pst, |s_pst| {
-        let mut new_pst = [[0; 9]; 10];
-        for (r, row) in new_pst.iter_mut().enumerate() {
-            for (c, cell) in row.iter_mut().enumerate() {
-                if let Some(def_row) = default_pst.get(r) {
-                    if let Some(def_val) = def_row.get(c) {
-                        if let Some(scale_row) = s_pst.get(r) {
-                            if let Some(scale_val) = scale_row.get(c) {
-                                *cell = (*def_val as f32 * *scale_val) as i32;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        new_pst
-    })
 }
 
 #[cfg(test)]
@@ -194,28 +152,6 @@ mod tests {
         assert_eq!(config.score_hash_move, 1_000_000);
     }
 
-    #[test]
-    fn test_load_config_pst() {
-        // Test scaling a PST
-        // Default PST_PAWN[4][0] is 10.
-        let json = r#"{
-            "pst_pawn": [
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-            ]
-        }"#;
-        let config = EngineConfig::load_from_json(json).unwrap();
-        // Row 4, Col 0 is 10 in default. Scaled by 2.0 should be 20.
-        assert_eq!(config.pst_pawn[4][0], 20);
-    }
     #[test]
     fn test_load_config_invalid_json() {
         let json = "{ invalid json }";

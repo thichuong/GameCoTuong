@@ -680,6 +680,21 @@ impl AlphaBetaEngine {
                 }
             }
         }
+
+        // Apply depth discount - deeper depths get lower scores
+        // The discount is: score -= depth_discount * (max_depth - depth)
+        // This encourages choosing moves that lead to gains at shallower depths
+        let discount_per_depth = self.config.depth_discount;
+        if discount_per_depth > 0 {
+            let depth_factor = i32::from(depth);
+            for mv in moves.iter_mut() {
+                // Hash moves should not be discounted as they are already ordered
+                if mv.score < self.config.score_hash_move {
+                    mv.score -= discount_per_depth * depth_factor;
+                }
+            }
+        }
+
         moves.sort_by(|a, b| b.score.cmp(&a.score));
         moves
     }
