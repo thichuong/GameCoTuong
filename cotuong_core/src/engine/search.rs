@@ -270,13 +270,13 @@ impl AlphaBetaEngine {
 
             if moves.is_empty() {
                 self.history_stack.pop();
-                return Some(-20000 + (10 - i32::from(depth)));
+                return Some(-self.config.mate_score + (10 - i32::from(depth)));
             }
         }
 
         if moves.is_empty() {
             self.history_stack.pop();
-            return Some(-20000 + (10 - i32::from(depth)));
+            return Some(-self.config.mate_score + (10 - i32::from(depth)));
         }
 
         // Dynamic Limiting Limit Calculation (Moved here, but applied inside loop)
@@ -353,7 +353,7 @@ impl AlphaBetaEngine {
             {
                 board.undo_move(&mv, captured, turn);
                 self.history_stack.pop();
-                return Some(20000 - (10 - i32::from(depth)));
+                return Some(self.config.mate_score - (10 - i32::from(depth)));
             }
 
             // Repetition Check (Pruning)
@@ -482,14 +482,14 @@ impl AlphaBetaEngine {
             // Checkmate or Stalemate
             if in_check {
                 // Checkmate
-                return Some(-20000 + (10 - i32::from(depth)));
+                return Some(-self.config.mate_score + (10 - i32::from(depth)));
             }
             if has_repetition_move {
                 // All legal moves were pruned due to repetition -> Draw
                 return Some(0);
             }
             // Stalemate (Loss in Xiangqi)
-            return Some(-20000 + (10 - i32::from(depth)));
+            return Some(-self.config.mate_score + (10 - i32::from(depth)));
         }
 
         self.tt
@@ -1219,7 +1219,7 @@ impl Searcher for AlphaBetaEngine {
                         board.undo_move(&mv, captured, turn);
                         // Found absolute mate at root!
                         let mut mate_move = mv;
-                        mate_move.score = 20000 - (10 - i32::from(d));
+                        mate_move.score = self.config.mate_score - (10 - i32::from(d));
                         return Some((
                             mate_move,
                             SearchStats {

@@ -28,6 +28,9 @@ pub struct EngineConfig {
     pub probcut_depth: u8,
     pub probcut_margin: i32,
     pub probcut_reduction: u8,
+
+    // Checkmate scoring
+    pub mate_score: i32, // Base score for checkmate (higher = stronger preference)
 }
 
 impl Default for EngineConfig {
@@ -52,6 +55,8 @@ impl Default for EngineConfig {
             probcut_depth: 5,
             probcut_margin: 200,
             probcut_reduction: 4,
+
+            mate_score: 100_000, // Increased from 20000 for stronger checkmate preference
         }
     }
 }
@@ -78,6 +83,8 @@ struct EngineConfigJson {
     probcut_depth: Option<u8>,
     probcut_margin: Option<i32>,
     probcut_reduction: Option<u8>,
+
+    mate_score: Option<i32>,
 }
 
 impl EngineConfig {
@@ -119,6 +126,8 @@ impl EngineConfig {
             probcut_reduction: json_config
                 .probcut_reduction
                 .unwrap_or(default.probcut_reduction),
+
+            mate_score: json_config.mate_score.unwrap_or(default.mate_score),
         })
     }
 }
