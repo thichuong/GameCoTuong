@@ -15,6 +15,9 @@ pub struct EngineConfig {
     pub val_rook: i32,
     pub val_king: i32,
 
+    // Penalties
+    pub hanging_piece_penalty: i32,
+
     // Search Parameters
     pub score_hash_move: i32,
     pub score_capture_base: i32,
@@ -31,6 +34,9 @@ pub struct EngineConfig {
 
     // Checkmate scoring
     pub mate_score: i32, // Base score for checkmate (higher = stronger preference)
+
+    // Transposition Table
+    pub tt_size_mb: usize,
 }
 
 impl Default for EngineConfig {
@@ -44,19 +50,23 @@ impl Default for EngineConfig {
             val_rook: VAL_ROOK,
             val_king: VAL_KING,
 
-            score_hash_move: 2_000_000,
-            score_capture_base: 900_000,
-            score_killer_move: 1_200_000,
-            score_history_max: 800_000,
-            depth_discount: 1000, // Subtract 1000 per depth
-            pruning_method: 1,    // Default to LMR
+            hanging_piece_penalty: 10,
+
+            score_hash_move: 200_000,
+            score_capture_base: 200_000, // Aggressive capturing
+            score_killer_move: 120_000,
+            score_history_max: 80_000,
+            depth_discount: 10, // 10% per depth level
+            pruning_method: 1,  // Default to LMR
             pruning_multiplier: 1.0,
 
             probcut_depth: 5,
             probcut_margin: 200,
             probcut_reduction: 4,
 
-            mate_score: 100_000, // Increased from 20000 for stronger checkmate preference
+            mate_score: 20_000, // Increased from 20000 for stronger checkmate preference
+
+            tt_size_mb: 256,
         }
     }
 }
@@ -72,6 +82,8 @@ struct EngineConfigJson {
     val_rook: Option<f32>,
     val_king: Option<f32>,
 
+    hanging_piece_penalty: Option<i32>,
+
     score_hash_move: Option<f32>,
     score_capture_base: Option<f32>,
     score_killer_move: Option<f32>,
@@ -85,6 +97,8 @@ struct EngineConfigJson {
     probcut_reduction: Option<u8>,
 
     mate_score: Option<i32>,
+
+    tt_size_mb: Option<usize>,
 }
 
 impl EngineConfig {
@@ -101,6 +115,10 @@ impl EngineConfig {
             val_cannon: apply_scale(default.val_cannon, json_config.val_cannon),
             val_rook: apply_scale(default.val_rook, json_config.val_rook),
             val_king: apply_scale(default.val_king, json_config.val_king),
+
+            hanging_piece_penalty: json_config
+                .hanging_piece_penalty
+                .unwrap_or(default.hanging_piece_penalty),
 
             score_hash_move: apply_scale(default.score_hash_move, json_config.score_hash_move),
             score_capture_base: apply_scale(
@@ -128,6 +146,7 @@ impl EngineConfig {
                 .unwrap_or(default.probcut_reduction),
 
             mate_score: json_config.mate_score.unwrap_or(default.mate_score),
+            tt_size_mb: json_config.tt_size_mb.unwrap_or(default.tt_size_mb),
         })
     }
 }
@@ -147,7 +166,7 @@ mod tests {
         let json = "{}";
         let config = EngineConfig::load_from_json(json).unwrap();
         assert_eq!(config.val_pawn, VAL_PAWN);
-        assert_eq!(config.score_hash_move, 2_000_000);
+        assert_eq!(config.score_hash_move, 200_000);
     }
 
     #[test]
@@ -158,7 +177,7 @@ mod tests {
         }"#;
         let config = EngineConfig::load_from_json(json).unwrap();
         assert_eq!(config.val_pawn, (VAL_PAWN as f32 * 1.5) as i32);
-        assert_eq!(config.score_hash_move, 1_000_000);
+        assert_eq!(config.score_hash_move, 100_000);
     }
 
     #[test]

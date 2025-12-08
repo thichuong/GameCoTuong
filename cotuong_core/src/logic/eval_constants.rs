@@ -1,11 +1,11 @@
 // Piece Values
-pub const VAL_PAWN: i32 = 100;
-pub const VAL_ADVISOR: i32 = 200;
-pub const VAL_ELEPHANT: i32 = 200;
-pub const VAL_HORSE: i32 = 400;
-pub const VAL_CANNON: i32 = 450;
-pub const VAL_ROOK: i32 = 900;
-pub const VAL_KING: i32 = 10000;
+pub const VAL_PAWN: i32 = 30;
+pub const VAL_ADVISOR: i32 = 50;
+pub const VAL_ELEPHANT: i32 = 50;
+pub const VAL_HORSE: i32 = 100;
+pub const VAL_CANNON: i32 = 110;
+pub const VAL_ROOK: i32 = 220;
+pub const VAL_KING: i32 = 2000;
 
 // Piece-Square Tables (Simplified for Red, flip for Black)
 // 10 rows, 9 cols.

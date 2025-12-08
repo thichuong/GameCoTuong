@@ -21,13 +21,13 @@ Bạn có thể tinh chỉnh sức mạnh và phong cách chơi của máy thôn
 
 ### 1. Giá trị quân cờ (Piece Values)
 Điểm số cơ bản cho từng loại quân. AI sẽ ưu tiên bảo vệ quân có giá trị cao và đổi quân giá trị thấp lấy quân giá trị cao.
-- **Tốt (Pawn):** Giá trị của quân Tốt (mặc định ~30-50).
-- **Sĩ (Advisor):** Giá trị quân Sĩ (mặc định ~120).
-- **Tượng (Elephant):** Giá trị quân Tượng (mặc định ~120).
-- **Mã (Horse):** Giá trị quân Mã (mặc định ~270).
-- **Pháo (Cannon):** Giá trị quân Pháo (mặc định ~285).
-- **Xe (Rook):** Giá trị quân Xe (mặc định ~600).
-- **Tướng (King):** Giá trị quân Tướng (rất lớn, mặc định ~10000).
+- **Tốt (Pawn):** Giá trị của quân Tốt (mặc định ~30).
+- **Sĩ (Advisor):** Giá trị quân Sĩ (mặc định ~50).
+- **Tượng (Elephant):** Giá trị quân Tượng (mặc định ~50).
+- **Mã (Horse):** Giá trị quân Mã (mặc định ~100).
+- **Pháo (Cannon):** Giá trị quân Pháo (mặc định ~110).
+- **Xe (Rook):** Giá trị quân Xe (mặc định ~220).
+- **Tướng (King):** Giá trị quân Tướng (rất lớn, mặc định ~2000).
 
 ### 2. Tham số tìm kiếm (Search Parameters)
 Các tham số ảnh hưởng đến thuật toán tìm kiếm Alpha-Beta và các heuristics cắt tỉa.
@@ -53,6 +53,29 @@ Các tham số ảnh hưởng đến thuật toán tìm kiếm Alpha-Beta và c�
     - **Multiplier (Hệ số nhân):** Điều chỉnh độ rộng của tìm kiếm (0.1 - 2.0). Giá trị càng cao càng giữ lại nhiều nước đi (an toàn hơn nhưng chậm hơn).
   - **Late Move Reductions (LMR):** Giảm độ sâu tìm kiếm cho các nước đi ở cuối danh sách.
   - **Both (Cả hai):** Kết hợp cả hai phương pháp để tối ưu tốc độ.
+
+- **Depth Discount (Giảm điểm theo độ sâu):**
+  - Tỉ lệ phần trăm điểm số được cộng thêm cho mỗi độ sâu (càng gần gốc càng được cộng nhiều).
+  - Công thức: `score * (100 + discount * depth) / 100`.
+  - Khuyến khích máy chọn các nước đi có lợi ngay lập tức (ở độ sâu lớn - gần gốc).
+
+- **Mate Score (Điểm chiếu bí):**
+  - Điểm thưởng cơ bản cho việc chiếu bí đối phương.
+  - Giá trị càng cao, máy càng ưu tiên các biến dẫn đến chiếu bí nhanh nhất.
+
+### 3. ProbCut (Cắt tỉa xác suất)
+Các tham số cho kỹ thuật ProbCut (Probabilistic Cutpruning) giúp cắt tỉa mạnh mẽ các nhánh không hứa hẹn.
+- **ProbCut Depth:** Độ sâu tối thiểu để áp dụng ProbCut.
+- **ProbCut Margin:** Biên độ điểm số để quyết định cắt tỉa.
+- **ProbCut Reduction:** Độ sâu giảm đi khi kiểm tra điều kiện cắt tỉa.
+
+### 4. Hình phạt (Penalties)
+- **Hanging Piece Penalty (Phạt quân treo):**
+  - Điểm phạt khi một quân cờ bị tấn công mà không có quân bảo vệ (hoặc bị tấn công bởi quân giá trị thấp hơn).
+  - Giúp máy cẩn thận hơn trong việc giữ quân.
+
+### 5. Hệ thống (System)
+- **TT Size (MB):** Kích thước bộ nhớ cho Bảng Băm (Transposition Table). Mặc định 256MB. Tăng lên giúp máy nhớ được nhiều thế cờ hơn.
 
 ## Cách chạy
 1. Cài đặt Trunk: `cargo install trunk`
@@ -82,18 +105,18 @@ Engine hỗ trợ tải cấu hình từ chuỗi JSON. Điều này hữu ích c
 
 ```json
 {
-  "val_pawn": 40,
-  "val_advisor": 120,
-  "val_elephant": 120,
-  "val_horse": 270,
-  "val_cannon": 285,
-  "val_rook": 600,
-  "val_king": 10000,
+  "val_pawn": 30,
+  "val_advisor": 50,
+  "val_elephant": 50,
+  "val_horse": 100,
+  "val_cannon": 110,
+  "val_rook": 220,
+  "val_king": 2000,
   "pst_pawn": [[1.0, ...]], 
-  "score_hash_move": 2000000,
-  "score_capture_base": 1000000,
-  "score_killer_move": 900000,
-  "score_history_max": 800000,
+  "score_hash_move": 200000,
+  "score_capture_base": 200000,
+  "score_killer_move": 120000,
+  "score_history_max": 80000,
   "pruning_method": 0,
   "pruning_multiplier": 1.0
 }

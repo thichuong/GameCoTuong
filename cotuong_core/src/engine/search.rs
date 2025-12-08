@@ -41,6 +41,9 @@ impl AlphaBetaEngine {
     }
 
     pub fn update_config(&mut self, config: Arc<EngineConfig>) {
+        if config.tt_size_mb != self.config.tt_size_mb {
+            self.tt = TranspositionTable::new(config.tt_size_mb);
+        }
         self.dynamic_limits = Self::precompute_limits(&config);
         self.evaluator = SimpleEvaluator::new(config.clone());
         self.config = config;
@@ -291,7 +294,7 @@ impl AlphaBetaEngine {
                 moves.len()
             };
 
-        let mut best_score = -30000;
+        let mut best_score = -200000;
         let mut best_move_this_node = None;
         let mut tt_flag = TTFlag::UpperBound;
 
@@ -306,7 +309,7 @@ impl AlphaBetaEngine {
                 -self.evaluator.evaluate(board)
             }
         } else {
-            -30000 // Dummy
+            -200000 // Dummy
         };
 
         for (moves_searched, mv) in moves.into_iter().enumerate() {
@@ -345,16 +348,9 @@ impl AlphaBetaEngine {
                 continue;
             }
 
-            // Absolute Checkmate Detection
-            // If this move gives check, verify if it's an absolute checkmate (Mate in 1)
-            if depth <= 3
-                && is_in_check(board, turn.opposite())
-                && self.is_mate(board, turn.opposite())
-            {
-                board.undo_move(&mv, captured, turn);
-                self.history_stack.pop();
-                return Some(self.config.mate_score - (10 - i32::from(depth)));
-            }
+            // Absolute Checkmate Detection - REMOVED for performance
+            // The search will naturally find checkmates.
+            // Explicitly checking for mate in 1 here is too expensive (full move gen for opponent).
 
             // Repetition Check (Pruning)
             // Check if this position has occurred 2 times before (so this is the 3rd)
@@ -681,16 +677,17 @@ impl AlphaBetaEngine {
             }
         }
 
-        // Apply depth discount - deeper depths get lower scores
-        // The discount is: score -= depth_discount * (max_depth - depth)
-        // This encourages choosing moves that lead to gains at shallower depths
+        // Apply depth discount - deeper depths get lower scores (relative to root)
+        // Formula: score = score * (100 + discount * depth) / 100
+        // This scales scores proportionally based on depth.
         let discount_per_depth = self.config.depth_discount;
         if discount_per_depth > 0 {
             let depth_factor = i32::from(depth);
+            let scale = 100 + discount_per_depth * depth_factor;
             for mv in moves.iter_mut() {
                 // Hash moves should not be discounted as they are already ordered
                 if mv.score < self.config.score_hash_move {
-                    mv.score -= discount_per_depth * depth_factor;
+                    mv.score = (mv.score * scale) / 100;
                 }
             }
         }
@@ -699,19 +696,7 @@ impl AlphaBetaEngine {
         moves
     }
 
-    fn is_mate(&self, board: &mut Board, turn: Color) -> bool {
-        let moves = self.generate_moves_internal(board, turn, None, 0, false);
-        for mv in moves {
-            let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
-            board.apply_move(&mv, turn);
-            let legal = !is_in_check(board, turn) && !is_flying_general(board);
-            board.undo_move(&mv, captured, turn);
-            if legal {
-                return false;
-            }
-        }
-        true
-    }
+    // is_mate removed as it is too expensive and not needed for search correctness
 
     #[allow(clippy::too_many_arguments)]
     fn add_move(
@@ -1150,6 +1135,14 @@ impl Searcher for AlphaBetaEngine {
         let mut final_depth = 0;
         let mut previous_score: Option<i32> = None;
 
+        // History Aging
+        // Decay history scores to adapt to new positions
+        for row in self.history_table.iter_mut() {
+            for val in row.iter_mut() {
+                *val /= 2;
+            }
+        }
+
         for d in 1..=max_depth {
             // Check soft limit before starting new depth
             if let Some(sl) = soft_limit {
@@ -1159,21 +1152,21 @@ impl Searcher for AlphaBetaEngine {
                 }
             }
 
-            let mut alpha = -30000;
-            let mut beta = 30000;
+            let mut alpha = -200000;
+            let mut beta = 200000;
             let mut delta = 50;
 
             if let Some(score) = previous_score {
                 if d >= 3 {
-                    alpha = (score - delta).max(-30000);
-                    beta = (score + delta).min(30000);
+                    alpha = (score - delta).max(-200000);
+                    beta = (score + delta).min(200000);
                 }
             }
 
             loop {
                 let alpha_orig = alpha;
                 let beta_orig = beta;
-                let mut best_score_this_iteration = -30000;
+                let mut best_score_this_iteration = -200000;
                 let mut current_best_move_this_iteration = None;
 
                 // Try to get best move from TT for this depth (or previous)
@@ -1212,23 +1205,8 @@ impl Searcher for AlphaBetaEngine {
                         continue;
                     }
 
-                    // Absolute Checkmate Detection at Root
-                    if crate::logic::rules::is_in_check(board, turn.opposite())
-                        && self.is_mate(board, turn.opposite())
-                    {
-                        board.undo_move(&mv, captured, turn);
-                        // Found absolute mate at root!
-                        let mut mate_move = mv;
-                        mate_move.score = self.config.mate_score - (10 - i32::from(d));
-                        return Some((
-                            mate_move,
-                            SearchStats {
-                                depth: d,
-                                nodes: self.nodes_searched,
-                                time_ms: (Self::now() - self.start_time) as u64,
-                            },
-                        ));
-                    }
+                    // Absolute Checkmate Detection at Root - REMOVED for performance
+                    // Trust the search to find mates.
 
                     let score_opt;
                     if moves_searched == 0 {
@@ -1275,14 +1253,14 @@ impl Searcher for AlphaBetaEngine {
 
                 if best_score_this_iteration <= alpha_orig {
                     // Fail Low
-                    alpha = (alpha_orig - delta).max(-30000);
-                    delta += delta / 2;
+                    alpha = (alpha_orig.saturating_sub(delta)).max(-200000);
+                    delta = delta.saturating_add(delta / 2);
                     continue;
                 }
                 if best_score_this_iteration >= beta_orig {
                     // Fail High
-                    beta = (beta_orig + delta).min(30000);
-                    delta += delta / 2;
+                    beta = (beta_orig.saturating_add(delta)).min(200000);
+                    delta = delta.saturating_add(delta / 2);
                     continue;
                 }
 
