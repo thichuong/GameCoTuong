@@ -347,7 +347,7 @@ impl AlphaBetaEngine {
 
             // Absolute Checkmate Detection
             // If this move gives check, verify if it's an absolute checkmate (Mate in 1)
-            if depth <= 7
+            if depth <= 3
                 && is_in_check(board, turn.opposite())
                 && self.is_mate(board, turn.opposite())
             {
