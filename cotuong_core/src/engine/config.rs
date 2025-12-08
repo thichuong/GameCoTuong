@@ -32,6 +32,10 @@ pub struct EngineConfig {
     pub probcut_margin: i32,
     pub probcut_reduction: u8,
 
+    // Singular Extension Parameters
+    pub singular_extension_min_depth: u8,
+    pub singular_extension_margin: i32,
+
     // Checkmate scoring
     pub mate_score: i32, // Base score for checkmate (higher = stronger preference)
 
@@ -64,6 +68,9 @@ impl Default for EngineConfig {
             probcut_margin: 200,
             probcut_reduction: 4,
 
+            singular_extension_min_depth: 8,
+            singular_extension_margin: 20,
+
             mate_score: 20_000, // Increased from 20000 for stronger checkmate preference
 
             tt_size_mb: 256,
@@ -95,6 +102,9 @@ struct EngineConfigJson {
     probcut_depth: Option<u8>,
     probcut_margin: Option<i32>,
     probcut_reduction: Option<u8>,
+
+    singular_extension_min_depth: Option<u8>,
+    singular_extension_margin: Option<i32>,
 
     mate_score: Option<i32>,
 
@@ -144,6 +154,13 @@ impl EngineConfig {
             probcut_reduction: json_config
                 .probcut_reduction
                 .unwrap_or(default.probcut_reduction),
+
+            singular_extension_min_depth: json_config
+                .singular_extension_min_depth
+                .unwrap_or(default.singular_extension_min_depth),
+            singular_extension_margin: json_config
+                .singular_extension_margin
+                .unwrap_or(default.singular_extension_margin),
 
             mate_score: json_config.mate_score.unwrap_or(default.mate_score),
             tt_size_mb: json_config.tt_size_mb.unwrap_or(default.tt_size_mb),

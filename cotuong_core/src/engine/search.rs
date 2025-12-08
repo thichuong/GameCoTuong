@@ -131,6 +131,7 @@ impl AlphaBetaEngine {
         mut beta: i32,
         depth: u8,
         turn: Color,
+        excluded_move: Option<Move>,
     ) -> Option<i32> {
         self.nodes_searched += 1;
 
@@ -196,6 +197,7 @@ impl AlphaBetaEngine {
                     -beta - margin + 1,
                     depth - reduction,
                     turn.opposite(),
+                    None,
                 ) {
                     if -score >= beta + margin {
                         self.history_stack.pop();
@@ -231,9 +233,14 @@ impl AlphaBetaEngine {
                                                    // Board::apply_null_move toggles side key.
             board.apply_null_move();
 
-            if let Some(score) =
-                self.alpha_beta(board, -beta, -beta + 1, depth - 1 - r, turn.opposite())
-            {
+            if let Some(score) = self.alpha_beta(
+                board,
+                -beta,
+                -beta + 1,
+                depth - 1 - r,
+                turn.opposite(),
+                None,
+            ) {
                 board.apply_null_move(); // Undo null move (toggle back)
                 if -score >= beta {
                     self.history_stack.pop();
@@ -251,10 +258,49 @@ impl AlphaBetaEngine {
         // Internal Iterative Deepening (IID)
         if best_move_tt.is_none() && depth >= 4 {
             // Search with reduced depth to populate TT
-            let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn);
+            let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn, None);
             // We don't use the score, just hope TT is populated
             if let Some(entry) = self.tt.probe(hash) {
                 best_move_tt = entry.best_move;
+            }
+        }
+
+        // Singular Extension
+        let mut singular_extension = 0;
+        // Only trigger SE if:
+        // 1. We are at sufficient depth
+        // 2. We have a TT move (which is likely the singular move)
+        // 3. The TT entry is strong enough (Exact or LowerBound) and has sufficient depth
+        // 4. We are NOT already in a singular search (excluded_move is None)
+        if depth >= self.config.singular_extension_min_depth
+            && excluded_move.is_none()
+            && best_move_tt.is_some()
+        {
+            if let Some(entry) = tt_entry {
+                if entry.depth >= depth - 3
+                    && (entry.flag == TTFlag::Exact || entry.flag == TTFlag::LowerBound)
+                {
+                    let margin = self.config.singular_extension_margin;
+                    let singular_beta = entry.score - margin;
+
+                    // Search with reduced depth to see if any OTHER move can beat (score - margin)
+                    // If all other moves fail low (return < singular_beta), then the TT move is singular.
+                    // We exclude the TT move from this search.
+                    let val = self.alpha_beta(
+                        board,
+                        singular_beta - 1,
+                        singular_beta,
+                        (depth - 1) / 2,
+                        turn,
+                        best_move_tt,
+                    );
+
+                    if let Some(score) = val {
+                        if score < singular_beta {
+                            singular_extension = 1;
+                        }
+                    }
+                }
             }
         }
 
@@ -326,6 +372,12 @@ impl AlphaBetaEngine {
                 continue;
             }
 
+            if let Some(ex_mv) = excluded_move {
+                if mv == ex_mv {
+                    continue;
+                }
+            }
+
             // Futility Pruning
             // Prune quiet moves at low depth if static eval is far below alpha
             if !in_check
@@ -384,13 +436,19 @@ impl AlphaBetaEngine {
                 reduction = self.lmr_table[d][m];
             }
 
-            let extension = if in_check { 1 } else { 0 };
+            let extension = if in_check { 1 } else { 0 } + singular_extension;
 
             // PVS (Principal Variation Search)
             if moves_searched == 0 {
                 // Full window for the first move (PV-node)
-                let val =
-                    self.alpha_beta(board, -beta, -alpha, depth - 1 + extension, turn.opposite());
+                let val = self.alpha_beta(
+                    board,
+                    -beta,
+                    -alpha,
+                    depth - 1 + extension,
+                    turn.opposite(),
+                    None,
+                );
 
                 match val {
                     None => {
@@ -405,8 +463,14 @@ impl AlphaBetaEngine {
                 // Try to prove that this move is NOT better than alpha
                 let search_depth = depth - 1 - reduction + extension;
 
-                let mut val =
-                    self.alpha_beta(board, -alpha - 1, -alpha, search_depth, turn.opposite());
+                let mut val = self.alpha_beta(
+                    board,
+                    -alpha - 1,
+                    -alpha,
+                    search_depth,
+                    turn.opposite(),
+                    None,
+                );
 
                 if let Some(v) = val {
                     let s = -v;
@@ -419,6 +483,7 @@ impl AlphaBetaEngine {
                                 -alpha,
                                 depth - 1 + extension,
                                 turn.opposite(),
+                                None,
                             );
                         }
 
@@ -431,6 +496,7 @@ impl AlphaBetaEngine {
                                     -alpha,
                                     depth - 1 + extension,
                                     turn.opposite(),
+                                    None,
                                 );
                             }
                         }
@@ -1187,6 +1253,18 @@ impl Searcher for AlphaBetaEngine {
                     });
                 }
 
+                // Filter for legal moves immediately to handle single-move exception
+                moves.retain(|mv| {
+                    let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+                    board.apply_move(mv, turn);
+                    let legal = !crate::logic::rules::is_in_check(board, turn)
+                        && !crate::logic::rules::is_flying_general(board);
+                    board.undo_move(mv, captured, turn);
+                    legal
+                });
+
+                let is_single_move = moves.len() == 1;
+
                 if self.check_time() {
                     break;
                 }
@@ -1198,11 +1276,20 @@ impl Searcher for AlphaBetaEngine {
                     let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
                     board.apply_move(&mv, turn);
 
-                    if crate::logic::rules::is_in_check(board, turn)
-                        || crate::logic::rules::is_flying_general(board)
-                    {
-                        board.undo_move(&mv, captured, turn);
-                        continue;
+                    if !is_single_move {
+                        // 3-Fold Repetition Check at Root
+                        // Check if this position has occurred 2 times before (so this is the 3rd)
+                        let mut rep_count = 0;
+                        for &h in &self.history_stack {
+                            if h == board.zobrist_hash {
+                                rep_count += 1;
+                            }
+                        }
+
+                        if rep_count >= 2 {
+                            board.undo_move(&mv, captured, turn);
+                            continue;
+                        }
                     }
 
                     // Absolute Checkmate Detection at Root - REMOVED for performance
@@ -1210,15 +1297,29 @@ impl Searcher for AlphaBetaEngine {
 
                     let score_opt;
                     if moves_searched == 0 {
-                        score_opt = self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite());
+                        score_opt =
+                            self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), None);
                     } else {
                         // Root PVS
-                        let mut val =
-                            self.alpha_beta(board, -alpha - 1, -alpha, d - 1, turn.opposite());
+                        let mut val = self.alpha_beta(
+                            board,
+                            -alpha - 1,
+                            -alpha,
+                            d - 1,
+                            turn.opposite(),
+                            None,
+                        );
                         if let Some(v) = val {
                             let s = -v;
                             if s > alpha && s < beta {
-                                val = self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite());
+                                val = self.alpha_beta(
+                                    board,
+                                    -beta,
+                                    -alpha,
+                                    d - 1,
+                                    turn.opposite(),
+                                    None,
+                                );
                             }
                         }
                         score_opt = val;
