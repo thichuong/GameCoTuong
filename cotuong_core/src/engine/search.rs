@@ -59,7 +59,7 @@ impl AlphaBetaEngine {
                         let r = 1.0
                             + (f64::from(depth as u32).ln()
                                 * f64::from(moves_searched as u32).ln())
-                                / 2.0;
+                                / 1.5; // Increased aggression from 2.0
                         *val = (r as u8).min((depth - 1) as u8);
                     }
                 } else {
@@ -226,9 +226,9 @@ impl AlphaBetaEngine {
 
         // Null Move Pruning
         if depth >= 3 && beta.abs() < 15000 && !crate::logic::rules::is_in_check(board, turn) {
-            let r = 2;
-            // Null move: switch turn, update hash.
-            // Board::apply_null_move toggles side key.
+            let r = if depth > 6 { 3 } else { 2 }; // Adaptive reduction
+                                                   // Null move: switch turn, update hash.
+                                                   // Board::apply_null_move toggles side key.
             board.apply_null_move();
 
             if let Some(score) =
@@ -1116,7 +1116,7 @@ impl Searcher for AlphaBetaEngine {
         let (max_depth, time_limit) = match limit {
             SearchLimit::Depth(d) => (d.min(63), None),
             #[allow(clippy::cast_precision_loss)]
-            SearchLimit::Time(t) => (20, Some(t as f64)), // Max depth 20 for time limit
+            SearchLimit::Time(t) => (64, Some(t as f64)), // Max depth 64 (was 20)
         };
         self.time_limit = time_limit;
         let soft_limit = time_limit.map(|t| t * 0.6);

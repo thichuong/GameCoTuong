@@ -243,24 +243,24 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2);
-}
-
-function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___wasm_bindgen_fc29594c9a3d2786___JsValue_____(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___wasm_bindgen_fc29594c9a3d2786___JsValue_____(arg0, arg1, arg2);
+function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_MessageEvent__MessageEvent_____(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_MessageEvent__MessageEvent_____(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke______(arg0, arg1) {
     wasm.wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke______(arg0, arg1);
 }
 
-function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_MessageEvent__MessageEvent_____(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_MessageEvent__MessageEvent_____(arg0, arg1, arg2);
-}
-
 function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_CloseEvent__CloseEvent_____(arg0, arg1, arg2) {
     wasm.wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_CloseEvent__CloseEvent_____(arg0, arg1, arg2);
+}
+
+function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___web_sys_2344aaf4872d5f4a___features__gen_MouseEvent__MouseEvent_____(arg0, arg1, arg2);
+}
+
+function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___wasm_bindgen_fc29594c9a3d2786___JsValue_____(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___wasm_bindgen_fc29594c9a3d2786___JsValue_____(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_fc29594c9a3d2786___convert__closures_____invoke___wasm_bindgen_fc29594c9a3d2786___JsValue__wasm_bindgen_fc29594c9a3d2786___JsValue_____(arg0, arg1, arg2, arg3) {
