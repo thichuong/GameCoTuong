@@ -100,7 +100,10 @@ impl GameState {
 
         // If we already have 2 occurrences (so this would be the 3rd), forbid it.
         if count >= 2 {
-            return Err(MoveError::ThreeFoldRepetition);
+            // Exception: If this is the ONLY legal move, allow it.
+            if self.has_more_than_one_valid_move(self.turn) {
+                return Err(MoveError::ThreeFoldRepetition);
+            }
         }
 
         self.board = next_board;
@@ -149,6 +152,29 @@ impl GameState {
                             for tc in 0..9 {
                                 if is_valid_move(&self.board, r, c, tr, tc, color).is_ok() {
                                     return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn has_more_than_one_valid_move(&self, color: Color) -> bool {
+        let mut count = 0;
+        for r in 0..10 {
+            for c in 0..9 {
+                if let Some(p) = self.board.get_piece(r, c) {
+                    if p.color == color {
+                        for tr in 0..10 {
+                            for tc in 0..9 {
+                                if is_valid_move(&self.board, r, c, tr, tc, color).is_ok() {
+                                    count += 1;
+                                    if count > 1 {
+                                        return true;
+                                    }
                                 }
                             }
                         }
