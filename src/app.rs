@@ -25,7 +25,7 @@ enum Difficulty {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GameMode {
+pub enum GameMode {
     HumanVsComputer,
     ComputerVsComputer,
     HumanVsHuman,
@@ -577,28 +577,107 @@ pub fn App() -> impl IntoView {
                     font-family: monospace;
                 }
 
+                /* New Controls Design */
                 .controls-area {
-                    display: flex;
-                    gap: 10px;
-                    align-items: center;
-                    margin-bottom: 20px;
-                    flex-wrap: wrap;
-                    justify-content: center;
+                    display: grid;
+                    grid-template-columns: 1fr 1fr; /* Force 2 columns everywhere like mobile */
+                    gap: 15px;
+                    width: 100%;
+                    max-width: 500px; /* Slightly tighter max-width for better desktop aesthetics */
+                    margin: 20px auto;
+                    padding: 20px;
+                    background: #2a2a2a;
+                    border-radius: 12px;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+                    border: 1px solid #444;
                 }
-                
-                select, button {
-                    padding: 8px 12px;
-                    border-radius: 4px;
+
+                .control-group {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 5px;
+                }
+
+                .control-label {
+                    font-size: 0.85em;
+                    color: #aaa;
+                    margin-left: 2px;
+                }
+
+                select, button.control-btn {
+                    width: 100%;
+                    padding: 10px 14px;
+                    border-radius: 8px;
                     border: 1px solid #555;
-                    background: #444;
+                    background: #3a3a3a;
                     color: #eee;
                     font-size: 14px;
                     cursor: pointer;
+                    transition: all 0.2s ease;
+                    outline: none;
+                    font-family: inherit;
+                    box-sizing: border-box; /* Ensure padding doesn't affect width */
+                }
+
+                select:hover, button.control-btn:hover {
+                    background: #4a4a4a;
+                    border-color: #777;
+                    transform: translateY(-1px);
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                 }
                 
-                select:hover, button:hover {
-                    background: #555;
+                select:focus, button.control-btn:focus {
+                    border-color: #a8e6cf;
+                    box-shadow: 0 0 0 2px rgba(168, 230, 207, 0.2);
                 }
+
+                button.btn-primary {
+                    background: #4CAF50;
+                    color: white;
+                    border: none;
+                }
+                button.btn-primary:hover {
+                    background: #45a049;
+                }
+
+                button.btn-warning {
+                    background: #FF9800;
+                    color: black;
+                    border: none;
+                    font-weight: 500;
+                }
+                button.btn-warning:hover {
+                    background: #f57c00;
+                }
+                
+                button.btn-danger {
+                    background: #f44336;
+                    color: white;
+                    border: none;
+                }
+                 button.btn-danger:hover {
+                    background: #d32f2f;
+                }
+
+                button.btn-info {
+                    background: #2196F3;
+                    color: white;
+                    border: none;
+                }
+                button.btn-info:hover {
+                    background: #1976D2;
+                }
+
+                @media (max-width: 480px) {
+                    .controls-area {
+                        grid-template-columns: 1fr 1fr; /* 2 columns on mobile */
+                        padding: 10px;
+                        gap: 10px;
+                    }
+                    /* Make the mode and difficulty full width on very small screens if needed, 
+                       but 2 columns is usually good. */
+                }
+
 
                 .thinking-indicator {
                     display: flex;
@@ -730,8 +809,8 @@ pub fn App() -> impl IntoView {
             <h1 style="margin: 20px 0; color: #f0d9b5; text-shadow: 0 2px 4px rgba(0,0,0,0.5); text-align: center;">"Cờ Tướng"</h1>
 
             <div class="controls-area">
-                <div>
-                    <label style="margin-right: 10px; color: #ccc;">"Chế độ: "</label>
+                <div class="control-group">
+                    <span class="control-label">"Chế độ"</span>
                     <select
                         on:change=move |ev| {
                             let val = event_target_value(&ev);
@@ -757,8 +836,9 @@ pub fn App() -> impl IntoView {
                         <option value="HumanVsHuman">"Người vs Người"</option>
                     </select>
                 </div>
-                <div>
-                    <label style="margin-right: 10px; color: #ccc;">"Độ khó: "</label>
+
+                <div class="control-group">
+                    <span class="control-label">"Độ khó"</span>
                     <select
                         on:change=move |ev| {
                             let val = event_target_value(&ev);
@@ -783,16 +863,16 @@ pub fn App() -> impl IntoView {
                 {move || {
                     if game_mode.get() == GameMode::ComputerVsComputer {
                         if is_paused.get() {
-                            view! { <button style="background: #4CAF50; color: white;" on:click=move |_| set_is_paused.set(false)>"▶ Bắt đầu"</button> }.into_view()
+                            view! { <button class="control-btn btn-primary" on:click=move |_| set_is_paused.set(false)>"▶ Bắt đầu"</button> }.into_view()
                         } else {
-                            view! { <button style="background: #f44336; color: white;" on:click=move |_| set_is_paused.set(true)>"⏸ Tạm dừng"</button> }.into_view()
+                            view! { <button class="control-btn btn-danger" on:click=move |_| set_is_paused.set(true)>"⏸ Tạm dừng"</button> }.into_view()
                         }
                     } else {
                         view! {}.into_view()
                     }
                 }}
 
-                <button style="background: #2196F3; color: white;" on:click=move |_| {
+                <button class="control-btn btn-info" on:click=move |_| {
                     set_game_state.set(GameState::new());
                     set_is_thinking.set(false);
                     // If CvC, maybe pause? User preference. Let's keep current pause state or reset.
@@ -802,7 +882,7 @@ pub fn App() -> impl IntoView {
                     }
                 }>"Chơi mới"</button>
 
-                <button style="background: #FF9800; color: white;" on:click=move |_| {
+                <button class="control-btn btn-warning" on:click=move |_| {
                     if is_thinking.get() {
                         return;
                     }
@@ -823,7 +903,7 @@ pub fn App() -> impl IntoView {
                     set_game_state.set(state);
                 }>"Đi lại"</button>
 
-                <button on:click=export_csv>"Xuất CSV"</button>
+                <button class="control-btn" on:click=export_csv>"Xuất CSV"</button>
             </div>
 
             {move || {
@@ -894,7 +974,8 @@ pub fn App() -> impl IntoView {
                 </div>
 
                 // Board View (Order 2 in HTML)
-                <BoardView game_state=game_state set_game_state=set_game_state />
+                // Board View (Order 2 in HTML)
+                <BoardView game_state=game_state set_game_state=set_game_state game_mode=game_mode />
 
                 // Spacer for centering (Order 3)
                 <div class="side-column right">

@@ -1,3 +1,4 @@
+use crate::app::GameMode;
 use cotuong_core::logic::board::{Color, Piece, PieceType};
 use cotuong_core::logic::game::GameState;
 use leptos::{
@@ -137,6 +138,7 @@ fn draw_piece(
 pub fn BoardView(
     game_state: ReadSignal<GameState>,
     set_game_state: WriteSignal<GameState>,
+    game_mode: ReadSignal<GameMode>,
 ) -> impl IntoView {
     let (selected, set_selected) = create_signal(Option::<(usize, usize)>::None);
     let (valid_moves, set_valid_moves) = create_signal(Vec::<(usize, usize)>::new());
@@ -361,6 +363,13 @@ pub fn BoardView(
 
             // Handle move logic (same as before)
             let state = game_state.get();
+
+            // Restriction for HumanVsComputer:
+            // Assuming Human plays Red. If it's Computer's turn (Black), ignore clicks.
+            if game_mode.get() == GameMode::HumanVsComputer && state.turn == Color::Black {
+                return;
+            }
+
             let current_turn = state.turn;
             let clicked_piece = state.board.get_piece(r, c);
 
