@@ -494,7 +494,7 @@ pub fn App() -> impl IntoView {
                 }
 
                 .log-panel {
-                    width: 100%;
+                    width: 90%;
                     max-width: 500px; /* Wider on mobile */
                     height: 60vh; /* Dynamic height */
                     max-height: 600px;
@@ -579,23 +579,38 @@ pub fn App() -> impl IntoView {
 
                 /* New Controls Design */
                 .controls-area {
-                    display: grid;
-                    grid-template-columns: 1fr 1fr; /* Force 2 columns everywhere like mobile */
+                    display: flex;
+                    flex-direction: column;
                     gap: 15px;
-                    width: 100%;
-                    max-width: 500px; /* Slightly tighter max-width for better desktop aesthetics */
+                    width: 90%;
+                    /* Removed max-width to let it fit the screen naturally */
                     margin: 20px auto;
                     padding: 20px;
                     background: #2a2a2a;
                     border-radius: 12px;
                     box-shadow: 0 4px 6px rgba(0,0,0,0.2);
                     border: 1px solid #444;
+                    box-sizing: border-box;
+                }
+
+                .controls-config {
+                    display: flex;
+                    gap: 15px;
+                    width: 100%;
+                }
+
+                .controls-actions {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 15px;
+                    width: 100%;
                 }
 
                 .control-group {
                     display: flex;
                     flex-direction: column;
                     gap: 5px;
+                    flex: 1; /* Config items take equal width */
                 }
 
                 .control-label {
@@ -670,12 +685,9 @@ pub fn App() -> impl IntoView {
 
                 @media (max-width: 480px) {
                     .controls-area {
-                        grid-template-columns: 1fr 1fr; /* 2 columns on mobile */
-                        padding: 10px;
-                        gap: 10px;
+                         /* Mobile tweaks if needed, but flex/grid generally handle it */
+                         padding: 15px;
                     }
-                    /* Make the mode and difficulty full width on very small screens if needed, 
-                       but 2 columns is usually good. */
                 }
 
 
@@ -809,101 +821,100 @@ pub fn App() -> impl IntoView {
             <h1 style="margin: 20px 0; color: #f0d9b5; text-shadow: 0 2px 4px rgba(0,0,0,0.5); text-align: center;">"Cờ Tướng"</h1>
 
             <div class="controls-area">
-                <div class="control-group">
-                    <span class="control-label">"Chế độ"</span>
-                    <select
-                        on:change=move |ev| {
-                            let val = event_target_value(&ev);
-                            match val.as_str() {
-                                "HumanVsComputer" => {
-                                    set_game_mode.set(GameMode::HumanVsComputer);
-                                    set_is_paused.set(false);
-                                },
-                                "ComputerVsComputer" => {
-                                    set_game_mode.set(GameMode::ComputerVsComputer);
-                                    set_is_paused.set(true); // Auto-pause on switch to CvC
-                                },
-                                "HumanVsHuman" => {
-                                    set_game_mode.set(GameMode::HumanVsHuman);
-                                    set_is_paused.set(false);
-                                },
-                                _ => {},
+                <div class="controls-config">
+                    <div class="control-group">
+                        <span class="control-label">"Chế độ"</span>
+                        <select
+                            on:change=move |ev| {
+                                let val = event_target_value(&ev);
+                                match val.as_str() {
+                                    "HumanVsComputer" => {
+                                        set_game_mode.set(GameMode::HumanVsComputer);
+                                        set_is_paused.set(false);
+                                    },
+                                    "ComputerVsComputer" => {
+                                        set_game_mode.set(GameMode::ComputerVsComputer);
+                                        set_is_paused.set(true); // Auto-pause on switch to CvC
+                                    },
+                                    "HumanVsHuman" => {
+                                        set_game_mode.set(GameMode::HumanVsHuman);
+                                        set_is_paused.set(false);
+                                    },
+                                    _ => {},
+                                }
                             }
-                        }
-                    >
-                        <option value="HumanVsComputer">"Người vs Máy"</option>
-                        <option value="ComputerVsComputer">"Máy vs Máy"</option>
-                        <option value="HumanVsHuman">"Người vs Người"</option>
-                    </select>
+                        >
+                            <option value="HumanVsComputer">"Người vs Máy"</option>
+                            <option value="ComputerVsComputer">"Máy vs Máy"</option>
+                            <option value="HumanVsHuman">"Người vs Người"</option>
+                        </select>
+                    </div>
+
+                    <div class="control-group">
+                        <span class="control-label">"Độ khó"</span>
+                        <select
+                            on:change=move |ev| {
+                                let val = event_target_value(&ev);
+                                match val.as_str() {
+                                    "Level1" => set_difficulty.set(Difficulty::Level1),
+                                    "Level2" => set_difficulty.set(Difficulty::Level2),
+                                    "Level3" => set_difficulty.set(Difficulty::Level3),
+                                    "Level4" => set_difficulty.set(Difficulty::Level4),
+                                    "Level5" => set_difficulty.set(Difficulty::Level5),
+                                    _ => {},
+                                }
+                            }
+                        >
+                            <option value="Level1">"Mức 1 (1s)"</option>
+                            <option value="Level2">"Mức 2 (2s)"</option>
+                            <option value="Level3">"Mức 3 (5s)"</option>
+                            <option value="Level4">"Mức 4 (10s)"</option>
+                            <option value="Level5">"Mức 5 (20s)"</option>
+                        </select>
+                    </div>
                 </div>
 
-                <div class="control-group">
-                    <span class="control-label">"Độ khó"</span>
-                    <select
-                        on:change=move |ev| {
-                            let val = event_target_value(&ev);
-                            match val.as_str() {
-                                "Level1" => set_difficulty.set(Difficulty::Level1),
-                                "Level2" => set_difficulty.set(Difficulty::Level2),
-                                "Level3" => set_difficulty.set(Difficulty::Level3),
-                                "Level4" => set_difficulty.set(Difficulty::Level4),
-                                "Level5" => set_difficulty.set(Difficulty::Level5),
-                                _ => {},
+                <div class="controls-actions">
+                    {move || {
+                        if game_mode.get() == GameMode::ComputerVsComputer {
+                            if is_paused.get() {
+                                view! { <button class="control-btn btn-primary" on:click=move |_| set_is_paused.set(false)>"▶ Bắt đầu"</button> }.into_view()
+                            } else {
+                                view! { <button class="control-btn btn-danger" on:click=move |_| set_is_paused.set(true)>"⏸ Tạm dừng"</button> }.into_view()
                             }
-                        }
-                    >
-                        <option value="Level1">"Mức 1 (1s)"</option>
-                        <option value="Level2">"Mức 2 (2s)"</option>
-                        <option value="Level3">"Mức 3 (5s)"</option>
-                        <option value="Level4">"Mức 4 (10s)"</option>
-                        <option value="Level5">"Mức 5 (20s)"</option>
-                    </select>
-                </div>
-
-                {move || {
-                    if game_mode.get() == GameMode::ComputerVsComputer {
-                        if is_paused.get() {
-                            view! { <button class="control-btn btn-primary" on:click=move |_| set_is_paused.set(false)>"▶ Bắt đầu"</button> }.into_view()
                         } else {
-                            view! { <button class="control-btn btn-danger" on:click=move |_| set_is_paused.set(true)>"⏸ Tạm dừng"</button> }.into_view()
+                            view! {}.into_view()
                         }
-                    } else {
-                        view! {}.into_view()
-                    }
-                }}
+                    }}
 
-                <button class="control-btn btn-info" on:click=move |_| {
-                    set_game_state.set(GameState::new());
-                    set_is_thinking.set(false);
-                    // If CvC, maybe pause? User preference. Let's keep current pause state or reset.
-                    // Let's reset pause to true for CvC to avoid instant chaos.
-                    if game_mode.get() == GameMode::ComputerVsComputer {
-                        set_is_paused.set(true);
-                    }
-                }>"Chơi mới"</button>
+                    <button class="control-btn btn-info" on:click=move |_| {
+                        set_game_state.set(GameState::new());
+                        set_is_thinking.set(false);
+                        if game_mode.get() == GameMode::ComputerVsComputer {
+                            set_is_paused.set(true);
+                        }
+                    }>"Chơi mới"</button>
 
-                <button class="control-btn btn-warning" on:click=move |_| {
-                    if is_thinking.get() {
-                        return;
-                    }
-                    let mut state = game_state.get();
-                    let mode = game_mode.get();
+                    <button class="control-btn btn-warning" on:click=move |_| {
+                        if is_thinking.get() {
+                            return;
+                        }
+                        let mut state = game_state.get();
+                        let mode = game_mode.get();
 
-                    if mode == GameMode::HumanVsComputer {
-                        // If it's human's turn (meaning computer just moved), undo 2 moves to get back to human's turn.
-                        if state.turn == Color::Red { // Assuming Human is Red
-                            // Undo twice if possible (Computer + Human)
-                            if state.history.len() >= 2 {
-                                state.undo_move(); // Undo Computer's move
+                        if mode == GameMode::HumanVsComputer {
+                            if state.turn == Color::Red {
+                                if state.history.len() >= 2 {
+                                    state.undo_move();
+                                }
                             }
                         }
-                    }
-                    // Always undo at least one move (Human's move, or the single move in other modes)
-                    state.undo_move();
-                    set_game_state.set(state);
-                }>"Đi lại"</button>
+                        state.undo_move();
+                        set_game_state.set(state);
+                    }>"Đi lại"</button>
 
-                <button class="control-btn" on:click=export_csv>"Xuất CSV"</button>
+                    <button class="control-btn" on:click=export_csv>"Xuất CSV"</button>
+                </div>
             </div>
 
             {move || {
