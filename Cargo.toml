@@ -15,7 +15,7 @@ leptos = { version = "0.6", features = ["csr"] }
 console_error_panic_hook = "0.1"
 log = "0.4"
 console_log = "1"
-web-sys = { version = "0.3", features = ["Performance", "Window", "Blob", "Url", "Document", "Element", "HtmlElement", "HtmlAnchorElement", "HtmlInputElement", "FileList", "File", "FileReader", "Event", "EventTarget", "HtmlCanvasElement", "CanvasRenderingContext2d", "DomRect"] }
+web-sys = { version = "0.3", features = ["Performance", "Window", "Blob", "Url", "Document", "Element", "HtmlElement", "HtmlAnchorElement", "HtmlInputElement", "FileList", "File", "FileReader", "Event", "EventTarget", "HtmlCanvasElement", "CanvasRenderingContext2d", "DomRect", "HtmlAudioElement"] }
 js-sys = "0.3"
 rand = "0.8"
 getrandom = { version = "0.2", features = ["js"] }

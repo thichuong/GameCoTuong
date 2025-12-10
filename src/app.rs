@@ -6,9 +6,9 @@ use cotuong_core::logic::game::{GameState, GameStatus};
 use cotuong_core::worker::{GameWorker, Input, Output};
 use gloo_worker::{Spawnable, WorkerBridge};
 use leptos::{
-    component, create_effect, create_signal, document, event_target_value, set_timeout, view,
-    wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet, SignalUpdate, SignalWithUntracked,
-    WriteSignal,
+    component, create_effect, create_signal, document, event_target_value, set_timeout,
+    store_value, view, wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet, SignalUpdate,
+    SignalWithUntracked, WriteSignal,
 };
 use std::fmt::Write;
 use std::time::Duration;
@@ -273,6 +273,36 @@ pub fn App() -> impl IntoView {
                 Duration::from_millis(100),
             );
         }
+    });
+
+    // Sound Effects
+    let move_sound = web_sys::HtmlAudioElement::new_with_src("sounds/move.mp3").ok();
+    let capture_sound = web_sys::HtmlAudioElement::new_with_src("sounds/capture.mp3").ok();
+    let last_len = store_value(0usize);
+
+    create_effect(move |_| {
+        let state = game_state.get();
+        let current_len = state.history.len();
+
+        last_len.update_value(|prev| {
+            // Only play if history length increased and it's not the initial state (or empty)
+            // We also want to skip if we just loaded a game?
+            // For now, simple logic: if current > prev, play.
+            // Exception: if prev is 0 and current is large (loaded game), maybe skip?
+            // But we can't distinguish load vs fast moves easily without more state.
+            // Let's just play sound.
+            if current_len > *prev {
+                if let Some(last_move) = state.history.last() {
+                    let sound = if last_move.captured.is_some() {
+                        &capture_sound
+                    } else {
+                        &move_sound
+                    };
+                    let _ = sound.as_ref().map(|a| a.play());
+                }
+            }
+            *prev = current_len;
+        });
     });
 
     let export_csv = move |_| {
