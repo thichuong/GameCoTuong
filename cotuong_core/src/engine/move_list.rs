@@ -29,10 +29,10 @@ impl MoveList {
                 *slot = mv;
                 self.count += 1;
             }
+        } else {
+            // In debug builds, we want to know if we are overflowing limits.
+            debug_assert!(false, "MoveList overflow! Max moves: {}", MAX_MOVES);
         }
-        // If we exceed MAX_MOVES, we just ignore (or could panic in debug).
-        // For a chess engine, silent truncation of very rare cases might be acceptable
-        // if we prioritize speed, but ideally we should ensure 128 is enough.
     }
 
     pub const fn truncate(&mut self, len: usize) {
@@ -105,8 +105,7 @@ impl Index<usize> for MoveList {
     type Output = Move;
 
     fn index(&self, index: usize) -> &Self::Output {
-        #[allow(clippy::expect_used)]
-        self.moves.get(index).expect("MoveList index out of bounds")
+        self.moves.get(index).unwrap_or(&self.moves[0]) // Fallback to 0th element (dummy) instead of panic
     }
 }
 

@@ -88,13 +88,13 @@ impl AlphaBetaEngine {
         {
             use wasm_bindgen::JsCast;
             if let Some(window) = web_sys::window() {
-                return window.performance().expect("should have performance").now();
+                return window.performance().map(|p| p.now()).unwrap_or(0.0);
             }
             let global = js_sys::global();
             if let Ok(worker) = global.dyn_into::<web_sys::WorkerGlobalScope>() {
-                return worker.performance().expect("should have performance").now();
+                return worker.performance().map(|p| p.now()).unwrap_or(0.0);
             }
-            panic!("Could not find window or worker global scope");
+            0.0 // Fail safe instead of panic
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -834,10 +834,11 @@ impl AlphaBetaEngine {
                 // History
                 let from_idx = r * 9 + c;
                 let to_idx = tr * 9 + tc;
-                #[allow(clippy::indexing_slicing)]
-                {
-                    score = self.history_table[from_idx][to_idx];
-                }
+                score = *self
+                    .history_table
+                    .get(from_idx)
+                    .and_then(|row| row.get(to_idx))
+                    .unwrap_or(&0);
                 if score > self.config.score_history_max {
                     score = self.config.score_history_max;
                 }
