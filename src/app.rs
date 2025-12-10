@@ -985,7 +985,11 @@ pub fn App() -> impl IntoView {
 
             <div style="margin-top: 20px; text-align: center;">
                 <button
-                    style=move || if show_config.get() { "background: #555; color: white;" } else { "background: #444; color: #eee;" }
+                    style=move || if show_config.get() {
+                        "background: #555; color: white; padding: 15px 30px; font-size: 1.2em; font-weight: bold; border-radius: 8px; border: 1px solid #666; cursor: pointer; transition: all 0.2s ease;"
+                    } else {
+                        "background: #444; color: #eee; padding: 15px 30px; font-size: 1.2em; font-weight: bold; border-radius: 8px; border: 1px solid #555; cursor: pointer; transition: all 0.2s ease;"
+                    }
                     on:click=move |_| set_show_config.update(|v| *v = !*v)
                 >
                     "Cấu hình engine"
