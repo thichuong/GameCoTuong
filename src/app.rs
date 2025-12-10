@@ -902,12 +902,8 @@ pub fn App() -> impl IntoView {
                         let mut state = game_state.get();
                         let mode = game_mode.get();
 
-                        if mode == GameMode::HumanVsComputer {
-                            if state.turn == Color::Red {
-                                if state.history.len() >= 2 {
-                                    state.undo_move();
-                                }
-                            }
+                        if mode == GameMode::HumanVsComputer && state.turn == Color::Red && state.history.len() >= 2 {
+                            state.undo_move();
                         }
                         state.undo_move();
                         set_game_state.set(state);
