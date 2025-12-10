@@ -17,6 +17,7 @@ pub struct EngineConfig {
 
     // Penalties
     pub hanging_piece_penalty: i32,
+    pub king_exposed_cannon_penalty: i32,
 
     // Search Parameters
     pub score_hash_move: i32,
@@ -55,6 +56,7 @@ impl Default for EngineConfig {
             val_king: VAL_KING,
 
             hanging_piece_penalty: 10,
+            king_exposed_cannon_penalty: 20,
 
             score_hash_move: 200_000,
             score_capture_base: 200_000, // Aggressive capturing
@@ -90,6 +92,7 @@ struct EngineConfigJson {
     val_king: Option<f32>,
 
     hanging_piece_penalty: Option<i32>,
+    king_exposed_cannon_penalty: Option<i32>,
 
     score_hash_move: Option<f32>,
     score_capture_base: Option<f32>,
@@ -129,6 +132,9 @@ impl EngineConfig {
             hanging_piece_penalty: json_config
                 .hanging_piece_penalty
                 .unwrap_or(default.hanging_piece_penalty),
+            king_exposed_cannon_penalty: json_config
+                .king_exposed_cannon_penalty
+                .unwrap_or(default.king_exposed_cannon_penalty),
 
             score_hash_move: apply_scale(default.score_hash_move, json_config.score_hash_move),
             score_capture_base: apply_scale(
@@ -234,7 +240,8 @@ mod tests {
             "pruning_multiplier": 2.5,
             "probcut_depth": 6,
             "probcut_margin": 250,
-            "probcut_reduction": 3
+            "probcut_reduction": 3,
+            "king_exposed_cannon_penalty": 30
         }"#;
         let config = EngineConfig::load_from_json(json).unwrap();
 
@@ -245,6 +252,7 @@ mod tests {
         assert_eq!(config.probcut_depth, 6);
         assert_eq!(config.probcut_margin, 250);
         assert_eq!(config.probcut_reduction, 3);
+        assert_eq!(config.king_exposed_cannon_penalty, 30);
     }
 
     #[test]

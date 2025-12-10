@@ -103,10 +103,191 @@ impl Evaluator for SimpleEvaluator {
         // Let's say 3 points per square.
         score += (red_mobility - black_mobility) * 3;
 
+        // 3. King Exposed to Cannon Penalty
+        // "Pháo đầu" or "Pháo giác" threats where the King faces a Cannon with 0 or 1 shield.
+
+        let penalty = self.config.king_exposed_cannon_penalty;
+        if penalty > 0 {
+            // Check Red King vs Black Cannons
+            if let Some(red_king_sq) = BitboardIterator::new(board.bitboards[0]).next() {
+                let (kr, kc) = Board::index_to_coord(red_king_sq);
+                for cannon_sq in BitboardIterator::new(board.bitboards[12]) {
+                    let (cr, cc) = Board::index_to_coord(cannon_sq);
+
+                    let mut exposed = false;
+                    if kr == cr {
+                        // Same Rank
+                        let min_c = kc.min(cc);
+                        let max_c = kc.max(cc);
+                        if max_c > min_c + 1 {
+                            // Mask for bits between min_c and max_c (exclusive)
+                            let mask = ((1u16 << max_c) - 1) ^ ((1u16 << (min_c + 1)) - 1);
+                            // Count pieces strictly between
+                            let count = (board.occupied_rows[kr] & mask).count_ones();
+                            if count <= 1 {
+                                exposed = true;
+                            }
+                        } else {
+                            // Adjacent - technically 0 pieces between
+                            exposed = true;
+                        }
+                    } else if kc == cc {
+                        // Same File
+                        let min_r = kr.min(cr);
+                        let max_r = kr.max(cr);
+                        if max_r > min_r + 1 {
+                            // Mask for bits between min_r and max_r (exclusive)
+                            let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
+                            // Count pieces strictly between
+                            let count = (board.occupied_cols[kc] & mask).count_ones();
+                            if count <= 1 {
+                                exposed = true;
+                            }
+                        } else {
+                            exposed = true;
+                        }
+                    }
+
+                    if exposed {
+                        score -= penalty;
+                    }
+                }
+            }
+
+            // Check Black King vs Red Cannons
+            if let Some(black_king_sq) = BitboardIterator::new(board.bitboards[7]).next() {
+                let (kr, kc) = Board::index_to_coord(black_king_sq);
+                for cannon_sq in BitboardIterator::new(board.bitboards[5]) {
+                    let (cr, cc) = Board::index_to_coord(cannon_sq);
+
+                    let mut exposed = false;
+                    if kr == cr {
+                        // Same Rank
+                        let min_c = kc.min(cc);
+                        let max_c = kc.max(cc);
+                        if max_c > min_c + 1 {
+                            let mask = ((1u16 << max_c) - 1) ^ ((1u16 << (min_c + 1)) - 1);
+                            let count = (board.occupied_rows[kr] & mask).count_ones();
+                            if count <= 1 {
+                                exposed = true;
+                            }
+                        } else {
+                            exposed = true;
+                        }
+                    } else if kc == cc {
+                        // Same File
+                        let min_r = kr.min(cr);
+                        let max_r = kr.max(cr);
+                        if max_r > min_r + 1 {
+                            let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
+                            let count = (board.occupied_cols[kc] & mask).count_ones();
+                            if count <= 1 {
+                                exposed = true;
+                            }
+                        } else {
+                            exposed = true;
+                        }
+                    }
+
+                    if exposed {
+                        score += penalty;
+                    }
+                }
+            }
+        }
+
         // Apply Config Penalties
         // Example: If we had detected hanging pieces, we'd subtract self.config.hanging_piece_penalty
         // score -= (red_hanging - black_hanging) * self.config.hanging_piece_penalty;
 
         score
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logic::board::{Board, Color, PieceType};
+
+    #[test]
+    fn test_king_exposed_penalty() {
+        let mut config = EngineConfig::default();
+        config.king_exposed_cannon_penalty = 100; // Use a large penalty for clarity
+        let evaluator = SimpleEvaluator::new(Arc::new(config));
+
+        // 1. Setup Red King exposed to Black Cannon (1 piece between) - Check
+        let mut board = Board::new();
+        board.clear();
+
+        // Red King at (0, 4)
+        board.add_piece(0, 4, PieceType::General, Color::Red);
+
+        // Black King at (9, 4) (Safe for now)
+        board.add_piece(9, 4, PieceType::General, Color::Black);
+
+        // Black Cannon at (5, 4) - Same File
+        board.add_piece(5, 4, PieceType::Cannon, Color::Black);
+
+        // Intervening piece (Red Advisor at (1, 4))
+        board.add_piece(1, 4, PieceType::Advisor, Color::Red);
+
+        // Calculate score
+        let _score_exposed_1 = evaluator.evaluate(&board);
+
+        // Test 0 pieces (Empty cannon)
+        board.set_piece(1, 4, None);
+        // Now 0 pieces between King (0,4) and Cannon (5,4).
+
+        let score_exposed_0 = evaluator.evaluate(&board);
+
+        // Let's check non-exposed (Cannon on different file)
+        board.set_piece(5, 4, None);
+        board.add_piece(5, 3, PieceType::Cannon, Color::Black);
+        let score_safe_file = evaluator.evaluate(&board);
+
+        assert!(
+            score_safe_file > score_exposed_0 + 50,
+            "Penalty should be applied for 0 pieces (Empty Cannon)"
+        );
+
+        // Check 1 piece (Check)
+        board.clear();
+        board.add_piece(0, 4, PieceType::General, Color::Red);
+        board.add_piece(9, 4, PieceType::General, Color::Black);
+
+        // Case A: Exposed (Cannon at 5,4, 1 blocker at 2,4)
+        board.add_piece(5, 4, PieceType::Cannon, Color::Black);
+        board.add_piece(2, 4, PieceType::Advisor, Color::Red);
+        let score_exposed_1 = evaluator.evaluate(&board);
+
+        // Case B: Safe (Cannon at 5,3, 1 blocker at 2,4) -> Blocker irrelevant for 5,3
+        board.set_piece(5, 4, None);
+        board.add_piece(5, 3, PieceType::Cannon, Color::Black);
+        let score_safe_1 = evaluator.evaluate(&board);
+
+        assert!(
+            score_safe_1 > score_exposed_1 + 50,
+            "Penalty should be applied for 1 piece (Check)"
+        );
+
+        // Check 2 pieces (Safe)
+        // Cannon back to 5,4
+        board.set_piece(5, 3, None);
+        board.add_piece(5, 4, PieceType::Cannon, Color::Black);
+        // Add 2nd blocker - Elephant at 0,2 (Rank 0 occupied: King 0,4. Elephant 0,2. Advisor 0,1?)
+        // Wait, simply add piece at 3,4.
+        // Current blocker at 2,4. Add at 3,4.
+        board.add_piece(3, 4, PieceType::Elephant, Color::Red);
+        let score_blocked_2 = evaluator.evaluate(&board);
+
+        // Compare with Cannon side 5,3
+        board.set_piece(5, 4, None);
+        board.add_piece(5, 3, PieceType::Cannon, Color::Black);
+        let score_blocked_side = evaluator.evaluate(&board);
+
+        assert!(
+            (score_blocked_2 - score_blocked_side).abs() < 50,
+            "Penalty should NOT be applied for 2 pieces"
+        );
     }
 }

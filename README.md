@@ -138,6 +138,7 @@ Tinh chỉnh sức mạnh và phong cách chơi của máy thông qua **Config P
 | Tham số | Mô tả | Mặc định |
 |---------|-------|----------|
 | `hanging_piece_penalty` | Phạt quân bị tấn công mà không được bảo vệ | 10 |
+| `king_exposed_cannon_penalty` | Phạt tướng bị lộ mặt trước pháo (0 hoặc 1 quân chắn) | 20 |
 | `tt_size_mb` | Kích thước Transposition Table (MB) | 256 |
 
 ---
@@ -180,6 +181,9 @@ cargo test -p cotuong_core engine::mate_test
 
 # Test repetition (lặp nước đi)
 cargo test -p cotuong_core logic::repetition_test
+
+# Test phạt tướng lộ pháo
+cargo test -p cotuong_core test_king_exposed_penalty
 ```
 
 ### Chạy Test Cụ thể
@@ -224,6 +228,7 @@ Engine hỗ trợ tải cấu hình từ file JSON. Sử dụng nút **Import/Ex
   "val_king": 1.0,
 
   "hanging_piece_penalty": 10,
+  "king_exposed_cannon_penalty": 20,
 
   "score_hash_move": 1.0,
   "score_capture_base": 1.0,
