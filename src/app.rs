@@ -3,6 +3,7 @@ use cotuong_core::engine::config::EngineConfig;
 use cotuong_core::engine::SearchLimit;
 use cotuong_core::logic::board::{Color, PieceType};
 use cotuong_core::logic::game::{GameState, GameStatus};
+use cotuong_core::logic::rules::is_in_check;
 use cotuong_core::worker::{GameWorker, Input, Output};
 use gloo_worker::{Spawnable, WorkerBridge};
 use leptos::{
@@ -278,6 +279,8 @@ pub fn App() -> impl IntoView {
     // Sound Effects
     let move_sound = web_sys::HtmlAudioElement::new_with_src("sounds/move.mp3").ok();
     let capture_sound = web_sys::HtmlAudioElement::new_with_src("sounds/capture.mp3").ok();
+    let check_sound = web_sys::HtmlAudioElement::new_with_src("sounds/check.mp3").ok();
+    let checkmate_sound = web_sys::HtmlAudioElement::new_with_src("sounds/checkmate.mp3").ok();
     let last_len = store_value(0usize);
 
     create_effect(move |_| {
@@ -293,11 +296,17 @@ pub fn App() -> impl IntoView {
             // Let's just play sound.
             if current_len > *prev {
                 if let Some(last_move) = state.history.last() {
-                    let sound = if last_move.captured.is_some() {
-                        &capture_sound
-                    } else {
-                        &move_sound
-                    };
+                    let mut sound = &move_sound;
+                    let is_capture = last_move.captured.is_some();
+
+                    if let GameStatus::Checkmate(_) = state.status {
+                        sound = &checkmate_sound;
+                    } else if is_in_check(&state.board, state.turn) {
+                        sound = &check_sound;
+                    } else if is_capture {
+                        sound = &capture_sound;
+                    }
+
                     let _ = sound.as_ref().map(|a| a.play());
                 }
             }
