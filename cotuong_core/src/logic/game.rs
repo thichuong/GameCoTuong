@@ -1,6 +1,6 @@
 use crate::engine::Move;
 use crate::logic::board::{Board, Color};
-use crate::logic::rules::{is_in_check, is_valid_move, MoveError};
+use crate::logic::rules::{is_valid_move, MoveError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,14 +130,11 @@ impl GameState {
 
         // Check if current player has any valid moves
         let has_moves = self.has_any_valid_move(current_turn);
-        let in_check = is_in_check(&self.board, current_turn);
 
         if !has_moves {
-            if in_check {
-                self.status = GameStatus::Checkmate(current_turn.opposite());
-            } else {
-                self.status = GameStatus::Stalemate;
-            }
+            // In Chinese Chess (and this variant), if you have no moves, you lose.
+            // This applies whether you are in check or not (Stalemate is a loss).
+            self.status = GameStatus::Checkmate(current_turn.opposite());
         }
     }
 
@@ -279,5 +276,46 @@ mod tests {
         let cap = game.board.get_piece(5, 4).unwrap();
         assert_eq!(cap.piece_type, PieceType::Soldier);
         assert_eq!(cap.color, Color::Black);
+    }
+
+    #[test]
+    fn test_stalemate_is_loss() {
+        let mut game = GameState::new();
+        game.board.clear();
+
+        // Setup Stalemate position
+        // Red General at (0,0)
+        game.board.add_piece(0, 0, PieceType::General, Color::Red);
+
+        // Black General at (9,4) (Safe)
+        game.board.add_piece(9, 4, PieceType::General, Color::Black);
+
+        // Black Chariot at (9,1).
+        // We will move it to (1,1) to trap Red.
+        game.board.add_piece(9, 1, PieceType::Chariot, Color::Black);
+
+        // It's Black's turn to make the trapping move
+        game.turn = Color::Black;
+
+        // Move Black Chariot (9,1) -> (1,1)
+        // This covers row 1 and col 1.
+        // Red General at (0,0) has moves: (0,1) and (1,0).
+        // (0,1) is attacked by Chariot (vertical).
+        // (1,0) is attacked by Chariot (horizontal).
+        // (0,0) is NOT attacked (Chariot is at (1,1)).
+        // So Red is NOT in check, but has NO moves. -> Stalemate.
+
+        let result = game.make_move(9, 1, 1, 1);
+        assert!(result.is_ok());
+
+        // Expect Checkmate (Black Wins) because Stalemate is Loss
+        match game.status {
+            GameStatus::Checkmate(winner) => {
+                assert_eq!(winner, Color::Black);
+            }
+            status => {
+                panic!("Expected Checkmate(Black), got {:?}", status);
+            }
+        }
     }
 }
