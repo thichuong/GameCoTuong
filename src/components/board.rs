@@ -265,9 +265,19 @@ pub fn BoardView(
         let _ = ctx.fill_text("楚 河", 112.5 + PADDING, 250.0 + 8.0);
         let _ = ctx.fill_text("漢 界", 337.5 - PADDING, 250.0 + 8.0);
 
+        let state = game_state.get();
+
+        // Draw Pieces
+        for r in 0..10 {
+            for c in 0..9 {
+                if let Some(piece) = state.board.get_piece(r, c) {
+                    draw_piece(&ctx, r, c, piece, selected.get() == Some((r, c)));
+                }
+            }
+        }
+
         // Draw Valid Move Highlights
         let moves = valid_moves.get();
-        let state = game_state.get(); // Get state here for checking captures
         for (r, c) in moves {
             #[allow(clippy::cast_possible_truncation)]
             let x = f64::from(c as u32).mul_add(CELL_SIZE, PADDING);
@@ -284,16 +294,6 @@ pub fn BoardView(
                 ctx.set_fill_style(&"rgba(0, 255, 0, 0.5)".into()); // Green for move
             }
             ctx.fill();
-        }
-
-        // Draw Pieces
-        // state is already retrieved above
-        for r in 0..10 {
-            for c in 0..9 {
-                if let Some(piece) = state.board.get_piece(r, c) {
-                    draw_piece(&ctx, r, c, piece, selected.get() == Some((r, c)));
-                }
-            }
         }
 
         // Draw Last Move
