@@ -38,6 +38,7 @@ pub fn App() -> impl IntoView {
     let (game_state, set_game_state) = create_signal(GameState::new());
     let (difficulty, set_difficulty) = create_signal(Difficulty::Level1);
     let (game_mode, set_game_mode) = create_signal(GameMode::HumanVsComputer);
+    let (player_side, set_player_side) = create_signal(Color::Red);
     let (is_thinking, set_is_thinking) = create_signal(false);
     let (is_paused, set_is_paused) = create_signal(false);
     let (show_config, set_show_config) = create_signal(false);
@@ -188,7 +189,7 @@ pub fn App() -> impl IntoView {
         }
 
         let should_play = match mode {
-            GameMode::HumanVsComputer => state.turn == Color::Black,
+            GameMode::HumanVsComputer => state.turn != player_side.get(),
             GameMode::ComputerVsComputer => true,
             GameMode::HumanVsHuman => false,
         };
@@ -213,7 +214,7 @@ pub fn App() -> impl IntoView {
                     }
 
                     let should_play_now = match current_mode {
-                        GameMode::HumanVsComputer => current_state.turn == Color::Black,
+                        GameMode::HumanVsComputer => current_state.turn != player_side.get(),
                         GameMode::ComputerVsComputer => true,
                         GameMode::HumanVsHuman => false,
                     };
@@ -890,6 +891,23 @@ pub fn App() -> impl IntoView {
                     </div>
 
                     <div class="control-group">
+                        <span class="control-label">"Chọn bên"</span>
+                        <select
+                            on:change=move |ev| {
+                                let val = event_target_value(&ev);
+                                match val.as_str() {
+                                    "Red" => set_player_side.set(Color::Red),
+                                    "Black" => set_player_side.set(Color::Black),
+                                    _ => {},
+                                }
+                            }
+                        >
+                            <option value="Red">"Đỏ (Đi trước)"</option>
+                            <option value="Black">"Đen (Đi sau)"</option>
+                        </select>
+                    </div>
+
+                    <div class="control-group">
                         <span class="control-label">"Độ khó"</span>
                         <select
                             on:change=move |ev| {
@@ -1021,7 +1039,7 @@ pub fn App() -> impl IntoView {
 
                 // Board View (Order 2 in HTML)
                 // Board View (Order 2 in HTML)
-                <BoardView game_state=game_state set_game_state=set_game_state game_mode=game_mode />
+                <BoardView game_state=game_state set_game_state=set_game_state game_mode=game_mode player_side=player_side />
 
                 // Spacer for centering (Order 3)
                 <div class="side-column right">

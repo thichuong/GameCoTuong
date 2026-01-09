@@ -70,19 +70,23 @@ fn get_piece_symbol(p: PieceType, c: Color) -> &'static str {
     }
 }
 
+// Helper to get visual coordinates
+fn get_visual_coords(row: usize, col: usize, side: Color) -> (f64, f64) {
+    let (vis_c, vis_r) = if side == Color::Black {
+        (8 - col, row) // Black at Bottom (Logic Row 9 -> Vis Row 9)
+    } else {
+        (col, 9 - row) // Red at Bottom (Logic Row 0 -> Vis Row 9)
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    let x = f64::from(vis_c as u32).mul_add(CELL_SIZE, PADDING);
+    #[allow(clippy::cast_possible_truncation)]
+    let y = f64::from(vis_r as u32).mul_add(CELL_SIZE, PADDING);
+    (x, y)
+}
+
 #[allow(deprecated)]
-fn draw_piece(
-    ctx: &CanvasRenderingContext2d,
-    row: usize,
-    col: usize,
-    piece: Piece,
-    is_selected: bool,
-) {
-    // Map logic row to visual y (row 0 is bottom)
-    #[allow(clippy::cast_possible_truncation)]
-    let x = f64::from(col as u32).mul_add(CELL_SIZE, PADDING);
-    #[allow(clippy::cast_possible_truncation)]
-    let y = f64::from((9 - row) as u32).mul_add(CELL_SIZE, PADDING);
+fn draw_piece(ctx: &CanvasRenderingContext2d, x: f64, y: f64, piece: Piece, is_selected: bool) {
+    // x, y are passed directly
 
     let radius = 23.0; // Increased from 20.0
 
@@ -139,6 +143,7 @@ pub fn BoardView(
     game_state: ReadSignal<GameState>,
     set_game_state: WriteSignal<GameState>,
     game_mode: ReadSignal<GameMode>,
+    player_side: ReadSignal<Color>,
 ) -> impl IntoView {
     let (selected, set_selected) = create_signal(Option::<(usize, usize)>::None);
     let (valid_moves, set_valid_moves) = create_signal(Vec::<(usize, usize)>::new());
@@ -271,7 +276,8 @@ pub fn BoardView(
         for r in 0..10 {
             for c in 0..9 {
                 if let Some(piece) = state.board.get_piece(r, c) {
-                    draw_piece(&ctx, r, c, piece, selected.get() == Some((r, c)));
+                    let (x, y) = get_visual_coords(r, c, player_side.get());
+                    draw_piece(&ctx, x, y, piece, selected.get() == Some((r, c)));
                 }
             }
         }
@@ -279,10 +285,7 @@ pub fn BoardView(
         // Draw Valid Move Highlights
         let moves = valid_moves.get();
         for (r, c) in moves {
-            #[allow(clippy::cast_possible_truncation)]
-            let x = f64::from(c as u32).mul_add(CELL_SIZE, PADDING);
-            #[allow(clippy::cast_possible_truncation)]
-            let y = f64::from((9 - r) as u32).mul_add(CELL_SIZE, PADDING);
+            let (x, y) = get_visual_coords(r, c, player_side.get());
 
             ctx.begin_path();
             let _ = ctx.arc(x, y, 8.0, 0.0, std::f64::consts::PI * 2.0);
@@ -298,14 +301,8 @@ pub fn BoardView(
 
         // Draw Last Move
         if let Some(((fr, fc), (tr, tc))) = state.last_move {
-            #[allow(clippy::cast_possible_truncation)]
-            let x1 = f64::from(fc as u32).mul_add(CELL_SIZE, PADDING);
-            #[allow(clippy::cast_possible_truncation)]
-            let y1 = f64::from((9 - fr) as u32).mul_add(CELL_SIZE, PADDING);
-            #[allow(clippy::cast_possible_truncation)]
-            let x2 = f64::from(tc as u32).mul_add(CELL_SIZE, PADDING);
-            #[allow(clippy::cast_possible_truncation)]
-            let y2 = f64::from((9 - tr) as u32).mul_add(CELL_SIZE, PADDING);
+            let (x1, y1) = get_visual_coords(fr, fc, player_side.get());
+            let (x2, y2) = get_visual_coords(tr, tc, player_side.get());
 
             ctx.set_stroke_style(&"rgba(255, 165, 0, 0.6)".into());
             ctx.set_line_width(6.0);
@@ -350,10 +347,15 @@ pub fn BoardView(
         // y = (9 - row) * CELL + PADDING => row = 9 - (y - PADDING) / CELL
 
         #[allow(clippy::cast_possible_truncation)]
-        let col = ((click_x - PADDING + CELL_SIZE / 2.0) / CELL_SIZE).floor() as isize;
+        let mut col = ((click_x - PADDING + CELL_SIZE / 2.0) / CELL_SIZE).floor() as isize;
         #[allow(clippy::cast_possible_truncation)]
         let row_visual = ((click_y - PADDING + CELL_SIZE / 2.0) / CELL_SIZE).floor() as isize;
-        let row = 9 - row_visual;
+        let mut row = 9 - row_visual;
+
+        if player_side.get() == Color::Black {
+            col = 8 - col;
+            row = 9 - row;
+        }
 
         if (0..9).contains(&col) && (0..10).contains(&row) {
             #[allow(clippy::cast_sign_loss)]
@@ -365,8 +367,8 @@ pub fn BoardView(
             let state = game_state.get();
 
             // Restriction for HumanVsComputer:
-            // Assuming Human plays Red. If it's Computer's turn (Black), ignore clicks.
-            if game_mode.get() == GameMode::HumanVsComputer && state.turn == Color::Black {
+            // Check against player_side
+            if game_mode.get() == GameMode::HumanVsComputer && state.turn != player_side.get() {
                 return;
             }
 
@@ -487,22 +489,27 @@ pub fn BoardView(
 
     view! {
         <div style="display: flex; flex-direction: column; align-items: center; padding: 5px; box-sizing: border-box;">
-            // Black's Lost Pieces (Top)
+            // Top Panel (Opponent's lost pieces if rotated, or standard)
+            // Standard (Red Player): Top is Black side. Show Black pieces lost (captured by Red).
+            // Rotated (Black Player): Top is Red side. Show Red pieces lost (captured by Black).
             <div style=captured_row_style>
                 {move || {
                     let state = game_state.get();
-                    let mut black_lost = Vec::new();
+                    let side = player_side.get();
+                    let target_color = if side == Color::Red { Color::Black } else { Color::Red };
+
+                    let mut lost = Vec::new();
                     for record in &state.history {
                         if let Some(p) = record.captured {
-                            if p.color == Color::Black {
-                                black_lost.push(p);
+                            if p.color == target_color {
+                                lost.push(p);
                             }
                         }
                     }
-                    black_lost.iter().map(|p| {
+                    lost.iter().map(|p| {
                         view! {
-                            <div style=captured_piece_style(Color::Black)>
-                                {get_piece_symbol(p.piece_type, Color::Black)}
+                            <div style=captured_piece_style(target_color)>
+                                {get_piece_symbol(p.piece_type, target_color)}
                             </div>
                         }
                     }).collect::<Vec<_>>()
@@ -517,22 +524,40 @@ pub fn BoardView(
                 on:click=on_click
             />
 
-            // Red's Lost Pieces (Bottom)
+            // Bottom Panel
             <div style=captured_row_style>
                 {move || {
                     let state = game_state.get();
-                    let mut red_lost = Vec::new();
+                    let side = player_side.get();
+                    // Show own lost pieces (or whatever logic was before?)
+                    // Before: Bottom was Red Lost. Standard view (Red Player).
+                    // So Bottom = Player's Lost pieces?
+                    // Let's check standard: Top = Black Lost, Bottom = Red Lost.
+                    // If Red Player: Top (Black Side) -> Black Lost. Bottom (Red Side) -> Red Lost.
+                    // If Black Player (Rotated): Top (Red Side) -> Red Lost. Bottom (Black Side) -> Black Lost.
+                    // So Top is always "Opposite Color of Player" and Bottom is "Player Color"?
+                    // Wait.
+                    // Standard: Top is Black pieces lost. i.e. Red captured them.
+                    // Bottom is Red pieces lost. i.e. Black captured them.
+
+                    // Logic update:
+                    // If side == Red: Top = Black, Bottom = Red.
+                    // If side == Black: Top = Red, Bottom = Black.
+
+                    let target_color = side; // Bottom = Player Side Color
+
+                    let mut lost = Vec::new();
                     for record in &state.history {
                         if let Some(p) = record.captured {
-                            if p.color == Color::Red {
-                                red_lost.push(p);
+                            if p.color == target_color {
+                                lost.push(p);
                             }
                         }
                     }
-                    red_lost.iter().map(|p| {
+                    lost.iter().map(|p| {
                         view! {
-                            <div style=captured_piece_style(Color::Red)>
-                                {get_piece_symbol(p.piece_type, Color::Red)}
+                            <div style=captured_piece_style(target_color)>
+                                {get_piece_symbol(p.piece_type, target_color)}
                             </div>
                         }
                     }).collect::<Vec<_>>()
