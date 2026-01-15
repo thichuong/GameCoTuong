@@ -22,7 +22,7 @@
 
 | Tính năng | Mô tả |
 |-----------|-------|
-| 🎮 **Đa chế độ chơi** | Người vs Máy, Máy vs Máy (CvC), Người vs Người |
+| 🎮 **Đa chế độ chơi** | Người vs Máy, Máy vs Máy (CvC), Người vs Người (Offline/Online) |
 | 🧠 **AI tùy biến** | Cấu hình riêng biệt cho quân Đỏ và quân Đen với hàng chục tham số |
 | 🎨 **Giao diện hiện đại** | Dark Mode, Responsive (Mobile/Desktop) |
 | 📱 **PWA** | Cài đặt như ứng dụng native, chạy offline |
@@ -105,10 +105,21 @@ GameCoTuong/
 │   │       ├── game.rs    # Game State
 │   │       └── rules.rs   # Luật di chuyển
 │   └── Cargo.toml
-├── src/                   # 🖥️ Web UI (Leptos Framework)
-│   ├── app.rs             # Main Application
-│   ├── components/        # UI Components
-│   └── main.rs            # Entry point
+├── client/                # 🖥️ Web UI (Leptos Framework)
+│   ├── src/
+│   │   ├── app.rs         # Main Application
+│   │   ├── components/    # UI Components
+│   │   ├── network.rs     # WebSocket Client
+│   │   └── main.rs        # Entry point
+│   └── Cargo.toml
+├── server/                # 🚀 WebSocket Server (Axum)
+│   └── src/
+│       ├── main.rs        # Server Entry point
+│       ├── ws.rs          # WebSocket Handler
+│       └── game_manager.rs # Game Logic & Matchmaking
+├── shared/                # 🔗 Shared Types & Messages
+│   └── src/
+│       └── lib.rs         # Common Enums/Structs
 └── Cargo.toml             # Workspace root
 ```
 
@@ -117,7 +128,9 @@ GameCoTuong/
 | Module | Mô tả |
 |--------|-------|
 | `cotuong_core` | Thư viện độc lập chứa toàn bộ logic game và AI. Có thể tái sử dụng cho CLI, GUI khác. |
-| `src/` | Giao diện web sử dụng **Leptos** framework, biên dịch sang WebAssembly. |
+| `client` | Giao diện web sử dụng **Leptos** framework, biên dịch sang WebAssembly. |
+| `server` | Backend server viết bằng **Axum**, xử lý WebSocket và ghép cặp người chơi. |
+| `shared` | Thư viện dùng chung giữa client và server (định nghĩa các Message, GameState). |
 
 ---
 
