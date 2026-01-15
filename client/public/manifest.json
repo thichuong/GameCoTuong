@@ -1,0 +1,26 @@
+{
+  "name": "Cờ Tướng",
+  "short_name": "Cờ Tướng",
+  "description": "Game Cờ Tướng PWA - Chơi cờ tướng offline và online",
+  "id": "/",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#222222",
+  "theme_color": "#222222",
+  "categories": [
+    "games",
+    "strategy"
+  ],
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

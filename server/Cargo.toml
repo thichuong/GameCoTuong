@@ -1,0 +1,18 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+shared = { path = "../shared" }
+cotuong_core = { path = "../cotuong_core" }
+uuid = { version = "1.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
+rand = "0.8"
+futures = "0.3"

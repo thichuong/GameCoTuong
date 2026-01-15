@@ -60,6 +60,31 @@ trunk serve --open
 trunk serve --release
 ```
 
+### 🌐 Chạy Multiplayer (Local)
+
+Để kiểm thử chế độ Online (2 người chơi trên 2 tab/máy):
+
+1. **Bước 1: Khởi động Server**
+   ```bash
+   cargo run -p server
+   ```
+
+2. **Bước 2: Khởi động Client 1**
+   ```bash
+   trunk serve
+   # Mở http://localhost:8080
+   ```
+
+3. **Bước 3: Khởi động Client 2 (Port khác)**
+   ```bash
+   trunk serve --port 8081
+   # Mở http://localhost:8081
+   ```
+
+4. **Bước 4: Bắt đầu game**
+   - Nhấn nút **Find Match** trên cả 2 trình duyệt.
+   - Server sẽ tự động ghép cặp và bắt đầu ván đấu.
+
 ---
 
 ## 🏗️ Kiến trúc

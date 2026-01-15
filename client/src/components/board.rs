@@ -1,4 +1,5 @@
 use crate::app::GameMode;
+use cotuong_core::engine::Move;
 use cotuong_core::logic::board::{Color, Piece, PieceType};
 use cotuong_core::logic::game::GameState;
 use leptos::{
@@ -6,6 +7,7 @@ use leptos::{
     NodeRef, ReadSignal, SignalGet, SignalSet, SignalWith, WriteSignal,
 };
 use std::ops::Deref;
+use std::rc::Rc;
 use wasm_bindgen::JsCast;
 use web_sys::CanvasRenderingContext2d;
 
@@ -144,6 +146,7 @@ pub fn BoardView(
     set_game_state: WriteSignal<GameState>,
     game_mode: ReadSignal<GameMode>,
     player_side: ReadSignal<Color>,
+    #[prop(optional)] on_move: Option<Rc<dyn Fn(Move)>>,
 ) -> impl IntoView {
     let (selected, set_selected) = create_signal(Option::<(usize, usize)>::None);
     let (valid_moves, set_valid_moves) = create_signal(Vec::<(usize, usize)>::new());
@@ -366,9 +369,11 @@ pub fn BoardView(
             // Handle move logic (same as before)
             let state = game_state.get();
 
-            // Restriction for HumanVsComputer:
+            // Restriction for HumanVsComputer and Online:
             // Check against player_side
-            if game_mode.get() == GameMode::HumanVsComputer && state.turn != player_side.get() {
+            if (game_mode.get() == GameMode::HumanVsComputer || game_mode.get() == GameMode::Online)
+                && state.turn != player_side.get()
+            {
                 return;
             }
 
@@ -406,6 +411,15 @@ pub fn BoardView(
                         match new_state.make_move(from_row, from_col, r, c) {
                             Ok(()) => {
                                 set_game_state.set(new_state);
+                                if let Some(cb) = on_move.as_ref() {
+                                    cb(Move {
+                                        from_row: from_row as u8,
+                                        from_col: from_col as u8,
+                                        to_row: r as u8,
+                                        to_col: c as u8,
+                                        score: 0,
+                                    });
+                                }
                                 set_selected.set(None);
                                 set_valid_moves.set(Vec::new());
                             }
@@ -419,6 +433,15 @@ pub fn BoardView(
                     match new_state.make_move(from_row, from_col, r, c) {
                         Ok(()) => {
                             set_game_state.set(new_state);
+                            if let Some(cb) = on_move.as_ref() {
+                                cb(Move {
+                                    from_row: from_row as u8,
+                                    from_col: from_col as u8,
+                                    to_row: r as u8,
+                                    to_col: c as u8,
+                                    score: 0,
+                                });
+                            }
                             set_selected.set(None);
                             set_valid_moves.set(Vec::new());
                         }

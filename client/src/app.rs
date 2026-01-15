@@ -1,5 +1,6 @@
 use crate::components::board::BoardView;
 use cotuong_core::engine::config::EngineConfig;
+use cotuong_core::engine::Move;
 use cotuong_core::engine::SearchLimit;
 use cotuong_core::logic::board::{Color, PieceType};
 use cotuong_core::logic::game::{GameState, GameStatus};
@@ -11,11 +12,12 @@ use leptos::{
     store_value, view, wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet, SignalUpdate,
     SignalWithUntracked, WriteSignal,
 };
-use std::fmt::Write;
+use std::rc::Rc;
 use std::time::Duration;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
+use std::fmt::Write;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Difficulty {
     Level1,
@@ -25,11 +27,15 @@ enum Difficulty {
     Level5,
 }
 
+use crate::network::NetworkClient;
+use shared::{GameMessage, ServerMessage};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
     HumanVsComputer,
     ComputerVsComputer,
     HumanVsHuman,
+    Online,
 }
 
 #[component]
@@ -42,6 +48,10 @@ pub fn App() -> impl IntoView {
     let (is_thinking, set_is_thinking) = create_signal(false);
     let (is_paused, set_is_paused) = create_signal(false);
     let (show_config, set_show_config) = create_signal(false);
+
+    // Network State
+    let (network_client, set_network_client) = create_signal(Option::<NetworkClient>::None);
+    let (server_msg, set_server_msg) = create_signal(Option::<ServerMessage>::None);
 
     // Dual Configs
     let (red_config, set_red_config) = create_signal(EngineConfig::default());
@@ -177,6 +187,72 @@ pub fn App() -> impl IntoView {
         set_worker_bridge.set(Some(bridge));
     });
 
+    // Initialize Network Client
+    create_effect(move |_| {
+        if let Ok(client) = NetworkClient::new(set_server_msg) {
+            set_network_client.set(Some(client));
+        }
+    });
+
+    // Handle Server Messages
+    create_effect(move |_| {
+        if let Some(msg) = server_msg.get() {
+            match msg {
+                ServerMessage::WaitingForMatch => {
+                    // Can add a toast/status notification here
+                    leptos::logging::log!("Waiting for match...");
+                }
+                ServerMessage::MatchFound {
+                    opponent_id: _,
+                    your_color,
+                    game_id: _,
+                } => {
+                    leptos::logging::log!("Match found! You are {:?}", your_color);
+                    set_game_mode.set(GameMode::Online);
+                    set_player_side.set(your_color);
+                    // Reset game
+                    let new_state = GameState::new();
+                    set_game_state.set(new_state);
+                }
+                ServerMessage::GameStart(board) => {
+                    set_game_mode.set(GameMode::Online);
+                    let mut new_state = GameState::new();
+                    new_state.board = board;
+                    set_game_state.set(new_state);
+                }
+                ServerMessage::OpponentMove(m) => {
+                    let mut state = game_state.get();
+                    if let Ok(()) = state.make_move(
+                        m.from_row as usize,
+                        m.from_col as usize,
+                        m.to_row as usize,
+                        m.to_col as usize,
+                    ) {
+                        set_game_state.set(state);
+                    }
+                }
+                ServerMessage::OpponentDisconnected => {
+                    leptos::logging::log!("Opponent disconnected!");
+                    // Maybe show modal
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // on_move handler for BoardView
+    let on_move = {
+        let network_client = network_client.clone();
+        let game_mode = game_mode.clone();
+        Rc::new(move |m: Move| {
+            if game_mode.get() == GameMode::Online {
+                if let Some(client) = network_client.get() {
+                    client.send(GameMessage::MakeMove(m));
+                }
+            }
+        }) as Rc<dyn Fn(Move)>
+    };
+
     // AI Move Effect
     create_effect(move |_| {
         let state = game_state.get();
@@ -191,7 +267,7 @@ pub fn App() -> impl IntoView {
         let should_play = match mode {
             GameMode::HumanVsComputer => state.turn != player_side.get(),
             GameMode::ComputerVsComputer => true,
-            GameMode::HumanVsHuman => false,
+            GameMode::HumanVsHuman | GameMode::Online => false,
         };
 
         if should_play && state.status == GameStatus::Playing {
@@ -216,7 +292,7 @@ pub fn App() -> impl IntoView {
                     let should_play_now = match current_mode {
                         GameMode::HumanVsComputer => current_state.turn != player_side.get(),
                         GameMode::ComputerVsComputer => true,
-                        GameMode::HumanVsHuman => false,
+                        GameMode::HumanVsHuman | GameMode::Online => false,
                     };
 
                     if should_play_now && current_state.status == GameStatus::Playing {
@@ -994,6 +1070,28 @@ pub fn App() -> impl IntoView {
                         </div>
 
 
+
+
+                        if game_mode.get() == GameMode::Online {
+                            view! {
+                                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                                    <button
+                                        class="btn-primary"
+                                        style="background: #4CAF50;"
+                                        on:click=move |_| {
+                                            if let Some(client) = network_client.get() {
+                                                client.send(GameMessage::FindMatch);
+                                            }
+                                        }
+                                    >
+                                        "Find Match"
+                                    </button>
+                                </div>
+                            }.into_view()
+                        } else {
+                            view! {}.into_view()
+                        }
+
                         <ul class="log-list">
                             {move || {
                                 game_state.get().history.iter().enumerate().rev().map(|(i, record)| {
@@ -1039,7 +1137,7 @@ pub fn App() -> impl IntoView {
 
                 // Board View (Order 2 in HTML)
                 // Board View (Order 2 in HTML)
-                <BoardView game_state=game_state set_game_state=set_game_state game_mode=game_mode player_side=player_side />
+                <BoardView game_state=game_state set_game_state=set_game_state game_mode=game_mode player_side=player_side on_move=on_move />
 
                 // Spacer for centering (Order 3)
                 <div class="side-column right">
