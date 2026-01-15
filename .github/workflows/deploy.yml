@@ -28,10 +28,10 @@ jobs:
           version: 'latest'
 
       - name: Build with Trunk
-        run: trunk build --release --public-url /GameCoTuong/
+        run: cd client && trunk build --release --public-url /GameCoTuong/
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+          publish_dir: ./client/dist
