@@ -7,7 +7,7 @@ use axum::{
     response::IntoResponse,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
-use shared::{GameMessage, ServerMessage};
+use shared::GameMessage;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
