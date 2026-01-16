@@ -310,7 +310,9 @@ impl AlphaBetaEngine {
             // If in check, filter for legal moves immediately.
             // We cannot prune because the only legal moves might be "bad" ones.
             moves.retain(|mv| {
-                let captured = board.get_piece(unsafe { BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize) });
+                let captured = board.get_piece(unsafe {
+                    BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
+                });
                 board.apply_move(mv, turn);
                 let legal = !is_in_check(board, turn) && !is_flying_general(board);
                 board.undo_move(mv, captured, turn);
@@ -587,7 +589,9 @@ impl AlphaBetaEngine {
         let captures = self.generate_captures(board, turn);
 
         for mv in captures {
-            let captured = board.get_piece(unsafe { BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize) });
+            let captured = board.get_piece(unsafe {
+                BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
+            });
 
             // Delta Pruning
             // If stand_pat + capture_value + margin < alpha, we can skip this capture.
@@ -1260,7 +1264,9 @@ impl Searcher for AlphaBetaEngine {
 
                 // Filter for legal moves immediately to handle single-move exception
                 moves.retain(|mv| {
-                    let captured = board.get_piece(unsafe { BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize) });
+                    let captured = board.get_piece(unsafe {
+                        BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
+                    });
                     board.apply_move(mv, turn);
                     let legal = !crate::logic::rules::is_in_check(board, turn)
                         && !crate::logic::rules::is_flying_general(board);
@@ -1278,7 +1284,9 @@ impl Searcher for AlphaBetaEngine {
                 let mut moves_searched = 0;
 
                 for mv in moves {
-                    let captured = board.get_piece(unsafe { BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize) });
+                    let captured = board.get_piece(unsafe {
+                        BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
+                    });
                     board.apply_move(&mv, turn);
 
                     if !is_single_move {

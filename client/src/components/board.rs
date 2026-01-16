@@ -278,9 +278,11 @@ pub fn BoardView(
         // Draw Pieces
         for r in 0..10 {
             for c in 0..9 {
-                if let Some(piece) = state.board.get_piece(BoardCoordinate::new(r, c).unwrap()) {
-                    let (x, y) = get_visual_coords(r, c, player_side.get());
-                    draw_piece(&ctx, x, y, piece, selected.get() == Some((r, c)));
+                if let Some(coord) = BoardCoordinate::new(r, c) {
+                    if let Some(piece) = state.board.get_piece(coord) {
+                        let (x, y) = get_visual_coords(r, c, player_side.get());
+                        draw_piece(&ctx, x, y, piece, selected.get() == Some((r, c)));
+                    }
                 }
             }
         }
@@ -293,10 +295,8 @@ pub fn BoardView(
             ctx.begin_path();
             let _ = ctx.arc(x, y, 8.0, 0.0, std::f64::consts::PI * 2.0);
 
-            // Check if it's a capture (enemy piece at target)
-            if state
-                .board
-                .get_piece(BoardCoordinate::new(r, c).unwrap())
+            if BoardCoordinate::new(r, c)
+                .and_then(|coord| state.board.get_piece(coord))
                 .is_some()
             {
                 ctx.set_fill_style(&"rgba(255, 0, 0, 0.5)".into()); // Red for capture
@@ -382,7 +382,8 @@ pub fn BoardView(
             }
 
             let current_turn = state.turn;
-            let clicked_piece = state.board.get_piece(BoardCoordinate::new(r, c).unwrap());
+            let clicked_piece =
+                BoardCoordinate::new(r, c).and_then(|coord| state.board.get_piece(coord));
 
             if let Some((from_row, from_col)) = selected.get() {
                 if from_row == r && from_col == c {
@@ -395,25 +396,58 @@ pub fn BoardView(
                         let mut moves = Vec::new();
                         for tr in 0..10 {
                             for tc in 0..9 {
-                                if cotuong_core::logic::rules::is_valid_move(
-                                    &state.board,
-                                    BoardCoordinate::new(r, c).unwrap(),
-                                    BoardCoordinate::new(tr, tc).unwrap(),
-                                    current_turn,
-                                )
-                                .is_ok()
+                                if let (Some(from), Some(to)) =
+                                    (BoardCoordinate::new(r, c), BoardCoordinate::new(tr, tc))
                                 {
-                                    moves.push((tr, tc));
+                                    if cotuong_core::logic::rules::is_valid_move(
+                                        &state.board,
+                                        from,
+                                        to,
+                                        current_turn,
+                                    )
+                                    .is_ok()
+                                    {
+                                        moves.push((tr, tc));
+                                    }
                                 }
                             }
                         }
                         set_valid_moves.set(moves);
                     } else {
                         let mut new_state = state;
-                        match new_state.make_move(
-                            BoardCoordinate::new(from_row, from_col).unwrap(),
-                            BoardCoordinate::new(r, c).unwrap(),
+                        if let (Some(from), Some(to)) = (
+                            BoardCoordinate::new(from_row, from_col),
+                            BoardCoordinate::new(r, c),
                         ) {
+                            match new_state.make_move(from, to) {
+                                Ok(()) => {
+                                    set_game_state.set(new_state);
+                                    if let Some(cb) = on_move.as_ref() {
+                                        #[allow(clippy::cast_possible_truncation)]
+                                        cb(Move {
+                                            from_row: from_row as u8,
+                                            from_col: from_col as u8,
+                                            to_row: r as u8,
+                                            to_col: c as u8,
+                                            score: 0,
+                                        });
+                                    }
+                                    set_selected.set(None);
+                                    set_valid_moves.set(Vec::new());
+                                }
+                                Err(e) => {
+                                    leptos::logging::log!("Invalid move: {:?}", e);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    let mut new_state = state;
+                    if let (Some(from), Some(to)) = (
+                        BoardCoordinate::new(from_row, from_col),
+                        BoardCoordinate::new(r, c),
+                    ) {
+                        match new_state.make_move(from, to) {
                             Ok(()) => {
                                 set_game_state.set(new_state);
                                 if let Some(cb) = on_move.as_ref() {
@@ -434,31 +468,6 @@ pub fn BoardView(
                             }
                         }
                     }
-                } else {
-                    let mut new_state = state;
-                    match new_state.make_move(
-                        BoardCoordinate::new(from_row, from_col).unwrap(),
-                        BoardCoordinate::new(r, c).unwrap(),
-                    ) {
-                        Ok(()) => {
-                            set_game_state.set(new_state);
-                            if let Some(cb) = on_move.as_ref() {
-                                #[allow(clippy::cast_possible_truncation)]
-                                cb(Move {
-                                    from_row: from_row as u8,
-                                    from_col: from_col as u8,
-                                    to_row: r as u8,
-                                    to_col: c as u8,
-                                    score: 0,
-                                });
-                            }
-                            set_selected.set(None);
-                            set_valid_moves.set(Vec::new());
-                        }
-                        Err(e) => {
-                            leptos::logging::log!("Invalid move: {:?}", e);
-                        }
-                    }
                 }
             } else if let Some(p) = clicked_piece {
                 if p.color == current_turn {
@@ -467,15 +476,19 @@ pub fn BoardView(
                     let mut moves = Vec::new();
                     for tr in 0..10 {
                         for tc in 0..9 {
-                            if cotuong_core::logic::rules::is_valid_move(
-                                &state.board,
-                                BoardCoordinate::new(r, c).unwrap(),
-                                BoardCoordinate::new(tr, tc).unwrap(),
-                                current_turn,
-                            )
-                            .is_ok()
+                            if let (Some(from), Some(to)) =
+                                (BoardCoordinate::new(r, c), BoardCoordinate::new(tr, tc))
                             {
-                                moves.push((tr, tc));
+                                if cotuong_core::logic::rules::is_valid_move(
+                                    &state.board,
+                                    from,
+                                    to,
+                                    current_turn,
+                                )
+                                .is_ok()
+                                {
+                                    moves.push((tr, tc));
+                                }
                             }
                         }
                     }

@@ -140,11 +140,11 @@ pub fn App() -> impl IntoView {
                 match output {
                     Output::MoveFound(mv, stats) => {
                         let mut current_state = game_state.get();
-                        match current_state.make_move(
-                            BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize)
-                                .unwrap(),
-                            BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize).unwrap(),
+                        if let (Some(from), Some(to)) = (
+                            BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize),
+                            BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize),
                         ) {
+                            match current_state.make_move(from, to) {
                             Ok(()) => {
                                 #[allow(clippy::cast_precision_loss)]
                                 let time_s = stats.time_ms as f64 / 1000.0;
@@ -196,6 +196,8 @@ pub fn App() -> impl IntoView {
                                     );
                                 }
                                 set_is_thinking.set(false);
+                                    set_is_thinking.set(false);
+                                }
                             }
                         }
                     }
@@ -242,12 +244,13 @@ pub fn App() -> impl IntoView {
                 }
                 ServerMessage::OpponentMove(m) => {
                     let mut state = game_state.get();
-                    if state.make_move(
-                        BoardCoordinate::new(m.from_row as usize, m.from_col as usize).unwrap(),
-                        BoardCoordinate::new(m.to_row as usize, m.to_col as usize).unwrap(),
-                    ) == Ok(())
-                    {
-                        set_game_state.set(state);
+                    if let (Some(from), Some(to)) = (
+                        BoardCoordinate::new(m.from_row as usize, m.from_col as usize),
+                        BoardCoordinate::new(m.to_row as usize, m.to_col as usize),
+                    ) {
+                        if state.make_move(from, to) == Ok(()) {
+                            set_game_state.set(state);
+                        }
                     }
                 }
                 ServerMessage::OpponentDisconnected => {

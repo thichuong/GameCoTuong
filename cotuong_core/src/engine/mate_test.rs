@@ -48,12 +48,24 @@ mod tests {
         board.clear();
 
         // Red General at Bottom (0, 4)
-        board.add_piece(BoardCoordinate::new(0, 4).unwrap(), crate::logic::board::PieceType::General, Color::Red);
+        board.add_piece(
+            BoardCoordinate::new(0, 4).unwrap(),
+            crate::logic::board::PieceType::General,
+            Color::Red,
+        );
         // Black General at Top (9, 4)
-        board.add_piece(BoardCoordinate::new(9, 4).unwrap(), crate::logic::board::PieceType::General, Color::Black);
+        board.add_piece(
+            BoardCoordinate::new(9, 4).unwrap(),
+            crate::logic::board::PieceType::General,
+            Color::Black,
+        );
 
         // Red Chariot at (8, 0)
-        board.add_piece(BoardCoordinate::new(8, 0).unwrap(), crate::logic::board::PieceType::Chariot, Color::Red);
+        board.add_piece(
+            BoardCoordinate::new(8, 0).unwrap(),
+            crate::logic::board::PieceType::Chariot,
+            Color::Red,
+        );
 
         // Block Black General from moving sideways?
         // Black General at (9,4).
@@ -67,7 +79,11 @@ mod tests {
         // So Black General can escape to (8,4).
         // We need to block (8,4).
         // Put a Black Soldier at (8,4).
-        board.add_piece(BoardCoordinate::new(8, 4).unwrap(), crate::logic::board::PieceType::Soldier, Color::Black);
+        board.add_piece(
+            BoardCoordinate::new(8, 4).unwrap(),
+            crate::logic::board::PieceType::Soldier,
+            Color::Black,
+        );
 
         let config = Arc::new(EngineConfig::default());
         let mut engine = AlphaBetaEngine::new(config);

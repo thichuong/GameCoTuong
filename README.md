@@ -27,6 +27,8 @@
 | 🎨 **Giao diện hiện đại** | Dark Mode, Responsive (Mobile/Desktop) |
 | 📱 **PWA** | Cài đặt như ứng dụng native, chạy offline |
 | ⚡ **Hiệu suất cao** | Thuật toán Alpha-Beta với nhiều kỹ thuật tối ưu |
+| 🔊 **Hiệu ứng âm thanh** | Di chuyển, Ăn quân, Chiếu tướng, Chiếu bí (Có âm thanh riêng biệt) |
+| 💾 **Xuất dữ liệu** | Xuất biên bản ván đấu ra file CSV để phân tích |
 
 ---
 
@@ -64,12 +66,13 @@ trunk serve --release
 
 Để kiểm thử chế độ Online (2 người chơi trên 2 tab/máy):
 
-1. **Bước 1: Khởi động Server**
+   server lắng nghe trên port 3000:
    ```bash
    cargo run -p server
    ```
 
 2. **Bước 2: Khởi động Client**
+   client chạy trên port 8080:
    ```bash
    cd client && trunk serve
    # Mở 2 tab tại http://localhost:8080
@@ -106,11 +109,15 @@ GameCoTuong/
 │   │   │   ├── config.rs  # Cấu hình Engine
 │   │   │   ├── search.rs  # Thuật toán tìm kiếm
 │   │   │   ├── eval.rs    # Hàm đánh giá
-│   │   │   └── tt.rs      # Transposition Table
+│   │   │   ├── tt.rs      # Transposition Table
+│   │   │   ├── zobrist.rs # Zobrist Hashing (nhận diện trạng thái bàn cờ)
+│   │   │   └── move_list.rs # Quản lý danh sách nước đi tối ưu
 │   │   └── logic/         # Luật chơi + Board
-│   │       ├── board.rs   # Bàn cờ
+│   │       ├── board.rs   # Bàn cờ (Sử dụng BoardCoordinate an toàn)
 │   │       ├── game.rs    # Game State
-│   │       └── rules.rs   # Luật di chuyển
+│   │       ├── rules.rs   # Luật di chuyển
+│   │       ├── opening.rs # Khai cuộc (Opening Book)
+│   │       └── lookup.rs  # Precomputed lookup tables
 │   └── Cargo.toml
 ├── client/                # 🖥️ Web UI (Leptos Framework)
 │   ├── src/
