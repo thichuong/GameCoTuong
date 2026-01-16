@@ -38,6 +38,16 @@ pub enum GameMode {
     Online,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnlineStatus {
+    None,                 // Chưa bắt đầu
+    Finding,              // Đang tìm trận
+    MatchFound,           // Đã tìm thấy đối thủ
+    Playing,              // Đang chơi
+    OpponentDisconnected, // Đối thủ ngắt kết nối
+    GameEnded,            // Trận đấu kết thúc
+}
+
 #[component]
 #[allow(clippy::too_many_lines)]
 pub fn App() -> impl IntoView {
@@ -52,6 +62,15 @@ pub fn App() -> impl IntoView {
     // Network State
     let (network_client, set_network_client) = create_signal(Option::<NetworkClient>::None);
     let (server_msg, set_server_msg) = create_signal(Option::<ServerMessage>::None);
+    let (online_status, set_online_status) = create_signal(OnlineStatus::None);
+
+    // Game End State
+    #[allow(unused_variables)]
+    let (game_end_winner, set_game_end_winner) = create_signal(Option::<Option<Color>>::None);
+    #[allow(unused_variables)]
+    let (game_end_reason, set_game_end_reason) = create_signal(String::new());
+    #[allow(unused_variables)]
+    let (is_ready_for_rematch, set_is_ready_for_rematch) = create_signal(false);
 
     // Dual Configs
     let (red_config, set_red_config) = create_signal(EngineConfig::default());
@@ -199,7 +218,7 @@ pub fn App() -> impl IntoView {
         if let Some(msg) = server_msg.get() {
             match msg {
                 ServerMessage::WaitingForMatch => {
-                    // Can add a toast/status notification here
+                    set_online_status.set(OnlineStatus::Finding);
                     leptos::logging::log!("Waiting for match...");
                 }
                 ServerMessage::MatchFound {
@@ -208,6 +227,7 @@ pub fn App() -> impl IntoView {
                     game_id: _,
                 } => {
                     leptos::logging::log!("Match found! You are {:?}", your_color);
+                    set_online_status.set(OnlineStatus::MatchFound);
                     set_game_mode.set(GameMode::Online);
                     set_player_side.set(your_color);
                     // Reset game
@@ -215,6 +235,7 @@ pub fn App() -> impl IntoView {
                     set_game_state.set(new_state);
                 }
                 ServerMessage::GameStart(board) => {
+                    set_online_status.set(OnlineStatus::Playing);
                     set_game_mode.set(GameMode::Online);
                     let mut new_state = GameState::new();
                     new_state.board = board;
@@ -232,8 +253,14 @@ pub fn App() -> impl IntoView {
                     }
                 }
                 ServerMessage::OpponentDisconnected => {
+                    set_online_status.set(OnlineStatus::OpponentDisconnected);
                     leptos::logging::log!("Opponent disconnected!");
-                    // Maybe show modal
+                }
+                ServerMessage::GameEnd { winner, reason } => {
+                    set_online_status.set(OnlineStatus::GameEnded);
+                    set_game_end_winner.set(Some(winner));
+                    set_game_end_reason.set(reason);
+                    set_is_ready_for_rematch.set(false);
                 }
                 _ => {}
             }
@@ -947,14 +974,22 @@ pub fn App() -> impl IntoView {
                                     "HumanVsComputer" => {
                                         set_game_mode.set(GameMode::HumanVsComputer);
                                         set_is_paused.set(false);
+                                        set_online_status.set(OnlineStatus::None);
                                     },
                                     "ComputerVsComputer" => {
                                         set_game_mode.set(GameMode::ComputerVsComputer);
                                         set_is_paused.set(true); // Auto-pause on switch to CvC
+                                        set_online_status.set(OnlineStatus::None);
                                     },
                                     "HumanVsHuman" => {
                                         set_game_mode.set(GameMode::HumanVsHuman);
                                         set_is_paused.set(false);
+                                        set_online_status.set(OnlineStatus::None);
+                                    },
+                                    "Online" => {
+                                        set_game_mode.set(GameMode::Online);
+                                        set_is_paused.set(false);
+                                        set_online_status.set(OnlineStatus::None);
                                     },
                                     _ => {},
                                 }
@@ -963,6 +998,7 @@ pub fn App() -> impl IntoView {
                             <option value="HumanVsComputer">"Người vs Máy"</option>
                             <option value="ComputerVsComputer">"Máy vs Máy"</option>
                             <option value="HumanVsHuman">"Người vs Người"</option>
+                            <option value="Online">"🌐 Chơi Online"</option>
                         </select>
                     </div>
 
@@ -1060,6 +1096,192 @@ pub fn App() -> impl IntoView {
                 }
             }}
 
+            // Online Status Panel
+            {move || {
+                let mode = game_mode.get();
+                let status = online_status.get();
+                let state = game_state.get();
+                let side = player_side.get();
+
+                if mode == GameMode::Online {
+                    let status_content = match status {
+                        OnlineStatus::None => view! {
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
+                                <div style="font-size: 1.2em; color: #a8e6cf;">
+                                    "🌐 Chế độ chơi Online"
+                                </div>
+                                <button
+                                    class="control-btn btn-primary"
+                                    style="padding: 15px 40px; font-size: 1.1em;"
+                                    on:click=move |_| {
+                                        if let Some(client) = network_client.get() {
+                                            client.send(GameMessage::FindMatch);
+                                        }
+                                    }
+                                >
+                                    "🎮 Tìm trận"
+                                </button>
+                            </div>
+                        }.into_view(),
+                        OnlineStatus::Finding => view! {
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
+                                <div class="thinking-indicator" style="visibility: visible;">
+                                    <span style="font-size: 1.2em;">"🔍 Đang tìm trận..."</span>
+                                </div>
+                                <button
+                                    class="control-btn btn-danger"
+                                    on:click=move |_| {
+                                        if let Some(client) = network_client.get() {
+                                            client.send(GameMessage::CancelFindMatch);
+                                        }
+                                        set_online_status.set(OnlineStatus::None);
+                                    }
+                                >
+                                    "❌ Huỷ tìm"
+                                </button>
+                            </div>
+                        }.into_view(),
+                        OnlineStatus::MatchFound => view! {
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px;">
+                                <div style="font-size: 1.5em; color: #4CAF50; animation: pulse 1s infinite;">
+                                    "✅ Đã tìm thấy đối thủ!"
+                                </div>
+                                <div style="font-size: 1.1em; color: #eee;">
+                                    {format!("Bạn là bên: {}", if side == Color::Red { "🔴 Đỏ (đi trước)" } else { "⚫ Đen (đi sau)" })}
+                                </div>
+                            </div>
+                        }.into_view(),
+                        OnlineStatus::Playing => {
+                            let is_my_turn = state.turn == side;
+                            let turn_style = if is_my_turn {
+                                "background: linear-gradient(135deg, #4CAF50, #45a049); color: white; padding: 15px 30px; border-radius: 12px; font-size: 1.2em; font-weight: bold; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); animation: pulse 1.5s infinite;"
+                            } else {
+                                "background: linear-gradient(135deg, #555, #444); color: #aaa; padding: 15px 30px; border-radius: 12px; font-size: 1.2em; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"
+                            };
+                            let turn_text = if is_my_turn {
+                                if side == Color::Red { "🔴 Lượt của bạn!" } else { "⚫ Lượt của bạn!" }
+                            } else {
+                                "⏳ Đang chờ đối thủ..."
+                            };
+                            view! {
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 15px;">
+                                    <div style=turn_style>
+                                        {turn_text}
+                                    </div>
+                                    <div style="display: flex; gap: 10px;">
+                                        <button
+                                            class="control-btn btn-danger"
+                                            style="padding: 10px 20px;"
+                                            on:click=move |_| {
+                                                if let Some(client) = network_client.get() {
+                                                    client.send(GameMessage::Surrender);
+                                                }
+                                            }
+                                        >
+                                            "🏳️ Đầu hàng"
+                                        </button>
+                                    </div>
+                                </div>
+                            }.into_view()
+                        },
+                        OnlineStatus::OpponentDisconnected => view! {
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
+                                <div style="font-size: 1.3em; color: #FF9800;">
+                                    "⚠️ Đối thủ đã mất kết nối!"
+                                </div>
+                                <button
+                                    class="control-btn btn-primary"
+                                    on:click=move |_| {
+                                        set_online_status.set(OnlineStatus::None);
+                                        set_game_state.set(GameState::new());
+                                    }
+                                >
+                                    "🔄 Tìm trận mới"
+                                </button>
+                            </div>
+                        }.into_view(),
+                        OnlineStatus::GameEnded => {
+                            let winner = game_end_winner.get();
+                            let reason = game_end_reason.get();
+                            let ready = is_ready_for_rematch.get();
+
+                            // Determine win/loss status
+                            let (result_icon, result_text, result_color) = match winner {
+                                Some(Some(w)) if w == side => ("🏆", "Bạn thắng!", "#4CAF50"),
+                                Some(Some(_)) => ("😔", "Bạn thua!", "#f44336"),
+                                Some(None) => ("🤝", "Hòa cờ!", "#FF9800"),
+                                None => ("🏁", "Kết thúc", "#aaa"),
+                            };
+
+                            // Translate reason
+                            let reason_text = match reason.as_str() {
+                                "Checkmate" => "Chiếu hết",
+                                "Surrender" => "Đầu hàng",
+                                "Draw" => "Hòa",
+                                "Disconnect" => "Mất kết nối",
+                                _ => reason.as_str(),
+                            };
+
+                            view! {
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
+                                    <div style=format!("font-size: 2em; color: {};", result_color)>
+                                        {format!("{} {}", result_icon, result_text)}
+                                    </div>
+                                    <div style="font-size: 1em; color: #aaa;">
+                                        {format!("Lý do: {}", reason_text)}
+                                    </div>
+
+                                    <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; align-items: center;">
+                                        {if ready {
+                                            view! {
+                                                <div style="background: #4CAF50; color: white; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
+                                                    "✅ Đã sẵn sàng - Đang chờ đối thủ..."
+                                                </div>
+                                            }.into_view()
+                                        } else {
+                                            view! {
+                                                <button
+                                                    class="control-btn btn-primary"
+                                                    style="padding: 15px 40px; font-size: 1.1em;"
+                                                    on:click=move |_| {
+                                                        if let Some(client) = network_client.get() {
+                                                            client.send(GameMessage::PlayAgain);
+                                                        }
+                                                        set_is_ready_for_rematch.set(true);
+                                                    }
+                                                >
+                                                    "🎮 Sẵn sàng (Chơi tiếp)"
+                                                </button>
+                                            }.into_view()
+                                        }}
+
+                                        <button
+                                            class="control-btn"
+                                            style="padding: 10px 20px;"
+                                            on:click=move |_| {
+                                                set_online_status.set(OnlineStatus::None);
+                                                set_game_state.set(GameState::new());
+                                                set_is_ready_for_rematch.set(false);
+                                            }
+                                        >
+                                            "🚪 Thoát"
+                                        </button>
+                                    </div>
+                                </div>
+                            }.into_view()
+                        },
+                    };
+
+                    view! {
+                        <div style="background: linear-gradient(180deg, #2a2a2a, #333); border: 1px solid #444; border-radius: 12px; margin: 15px auto; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+                            {status_content}
+                        </div>
+                    }.into_view()
+                } else {
+                    view! {}.into_view()
+                }
+            }}
+
             <div class="game-layout">
                 // Log Panel (Order 1 in HTML, but reversed on mobile to be bottom)
                 <div class="side-column left">
@@ -1068,29 +1290,6 @@ pub fn App() -> impl IntoView {
                             <span>"Lịch sử nước đi"</span>
                             <span style="font-size: 0.8em; opacity: 0.7;">{move || format!("{} moves", game_state.get().history.len())}</span>
                         </div>
-
-
-
-
-                        if game_mode.get() == GameMode::Online {
-                            view! {
-                                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                                    <button
-                                        class="btn-primary"
-                                        style="background: #4CAF50;"
-                                        on:click=move |_| {
-                                            if let Some(client) = network_client.get() {
-                                                client.send(GameMessage::FindMatch);
-                                            }
-                                        }
-                                    >
-                                        "Find Match"
-                                    </button>
-                                </div>
-                            }.into_view()
-                        } else {
-                            view! {}.into_view()
-                        }
 
                         <ul class="log-list">
                             {move || {

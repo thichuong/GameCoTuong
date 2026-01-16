@@ -587,13 +587,39 @@ pub fn BoardView(
                 }}
             </div>
 
-            <div class="status" style="margin-top: 10px; font-size: 1.2em; color: #eee;">
+            <div class="status" style="margin-top: 10px; font-size: 1.2em;">
                 {move || {
                     let state = game_state.get();
                     match state.status {
-                        cotuong_core::logic::game::GameStatus::Playing => format!("Turn: {:?}", state.turn),
-                        cotuong_core::logic::game::GameStatus::Checkmate(winner) => format!("Checkmate! {winner:?} Wins!"),
-                        cotuong_core::logic::game::GameStatus::Stalemate => "Stalemate!".to_string(),
+                        cotuong_core::logic::game::GameStatus::Playing => {
+                            let (icon, text, color) = if state.turn == Color::Red {
+                                ("🔴", "Lượt Đỏ", "#ff6b6b")
+                            } else {
+                                ("⚫", "Lượt Đen", "#888")
+                            };
+                            view! {
+                                <span style=format!("color: {}; font-weight: bold;", color)>
+                                    {format!("{} {}", icon, text)}
+                                </span>
+                            }.into_view()
+                        },
+                        cotuong_core::logic::game::GameStatus::Checkmate(winner) => {
+                            let (icon, text) = if winner == Color::Red {
+                                ("🏆🔴", "Đỏ thắng!")
+                            } else {
+                                ("🏆⚫", "Đen thắng!")
+                            };
+                            view! {
+                                <span style="color: #4CAF50; font-weight: bold; font-size: 1.3em;">
+                                    {format!("{} Chiếu hết! {}", icon, text)}
+                                </span>
+                            }.into_view()
+                        },
+                        cotuong_core::logic::game::GameStatus::Stalemate => view! {
+                            <span style="color: #FF9800; font-weight: bold;">
+                                "🤝 Hòa cờ!"
+                            </span>
+                        }.into_view(),
                     }
                 }}
             </div>

@@ -53,9 +53,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     GameMessage::FindMatch => gm.find_match(player_id.clone()),
                     GameMessage::MakeMove(mv) => gm.handle_move(player_id.clone(), mv),
                     GameMessage::CancelFindMatch => {
-                        // TODO
+                        gm.matchmaking_queue.remove(&player_id);
                     }
-                    // Other messages...
+                    GameMessage::Surrender => gm.handle_surrender(player_id.clone()),
+                    GameMessage::PlayAgain => gm.handle_play_again(player_id.clone()),
                     _ => {}
                 }
             }

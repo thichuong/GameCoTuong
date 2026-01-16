@@ -1,6 +1,7 @@
 use cotuong_core::{
     engine::Move,
     logic::board::{Board, Color},
+    logic::rules::is_valid_move,
 };
 use shared::ServerMessage;
 use std::collections::{HashMap, HashSet};
@@ -8,6 +9,26 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 type Tx = mpsc::UnboundedSender<ServerMessage>;
+
+// Helper function to check if a player has any valid moves
+fn has_any_valid_move(board: &Board, color: Color) -> bool {
+    for r in 0..10 {
+        for c in 0..9 {
+            if let Some(p) = board.get_piece(r, c) {
+                if p.color == color {
+                    for tr in 0..10 {
+                        for tc in 0..9 {
+                            if is_valid_move(board, r, c, tr, tc, color).is_ok() {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
 
 pub struct Player {
     pub id: String,
@@ -20,6 +41,9 @@ pub struct GameSession {
     pub black_player: String,
     pub board: Board,
     pub turn: Color,
+    pub game_ended: bool,
+    pub red_ready_for_rematch: bool,
+    pub black_ready_for_rematch: bool,
 }
 
 pub struct GameManager {
@@ -111,6 +135,9 @@ impl GameManager {
             black_player: black_id.clone(),
             board: Board::new(),
             turn: Color::Red,
+            game_ended: false,
+            red_ready_for_rematch: false,
+            black_ready_for_rematch: false,
         };
 
         self.games.insert(game_id.clone(), game);
@@ -138,8 +165,12 @@ impl GameManager {
     }
 
     pub fn handle_move(&mut self, player_id: String, mv: Move) {
-        if let Some(game_id) = self.player_to_game.get(&player_id) {
-            if let Some(game) = self.games.get_mut(game_id) {
+        if let Some(game_id) = self.player_to_game.get(&player_id).cloned() {
+            if let Some(game) = self.games.get_mut(&game_id) {
+                if game.game_ended {
+                    return;
+                }
+
                 // Check valid turn
                 let is_red = game.red_player == player_id;
                 let player_color = if is_red { Color::Red } else { Color::Black };
@@ -149,11 +180,7 @@ impl GameManager {
                     return;
                 }
 
-                // Apply move (Check validity logic should be here or in Board)
-                // For now assume valid or client checks
-                // Ideally server checks. Board::new() has apply_move logic.
-
-                // Using core logic to apply move
+                // Apply move
                 game.board.apply_move(&mv, game.turn);
                 game.turn = game.turn.opposite();
 
@@ -163,9 +190,104 @@ impl GameManager {
                     game.red_player.clone()
                 };
 
-                // Notify opponent
+                // Notify opponent of move
                 if let Some(p) = self.players.get(&opponent_id) {
                     let _ = p.tx.send(ServerMessage::OpponentMove(mv));
+                }
+
+                // Check for checkmate/stalemate after move
+                if !has_any_valid_move(&game.board, game.turn) {
+                    // The player whose turn it is has no valid moves = they lose
+                    let winner = player_color; // The player who just moved wins
+                    game.game_ended = true;
+
+                    // Notify both players of game end
+                    if let Some(p) = self.players.get(&game.red_player) {
+                        let _ = p.tx.send(ServerMessage::GameEnd {
+                            winner: Some(winner),
+                            reason: "Checkmate".to_string(),
+                        });
+                    }
+                    if let Some(p) = self.players.get(&game.black_player) {
+                        let _ = p.tx.send(ServerMessage::GameEnd {
+                            winner: Some(winner),
+                            reason: "Checkmate".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn handle_surrender(&mut self, player_id: String) {
+        if let Some(game_id) = self.player_to_game.get(&player_id).cloned() {
+            if let Some(game) = self.games.get_mut(&game_id) {
+                if game.game_ended {
+                    return;
+                }
+
+                game.game_ended = true;
+                let is_red = game.red_player == player_id;
+                let winner = if is_red { Color::Black } else { Color::Red };
+
+                // Notify both players
+                if let Some(p) = self.players.get(&game.red_player) {
+                    let _ = p.tx.send(ServerMessage::GameEnd {
+                        winner: Some(winner),
+                        reason: "Surrender".to_string(),
+                    });
+                }
+                if let Some(p) = self.players.get(&game.black_player) {
+                    let _ = p.tx.send(ServerMessage::GameEnd {
+                        winner: Some(winner),
+                        reason: "Surrender".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    pub fn handle_play_again(&mut self, player_id: String) {
+        if let Some(game_id) = self.player_to_game.get(&player_id).cloned() {
+            if let Some(game) = self.games.get_mut(&game_id) {
+                // Set ready flag for this player
+                let is_red = game.red_player == player_id;
+                if is_red {
+                    game.red_ready_for_rematch = true;
+                } else {
+                    game.black_ready_for_rematch = true;
+                }
+
+                // Check if both are ready
+                if game.red_ready_for_rematch && game.black_ready_for_rematch {
+                    // Start new game with same players
+                    let red_id = game.red_player.clone();
+                    let black_id = game.black_player.clone();
+
+                    // Reset game state
+                    game.board = Board::new();
+                    game.turn = Color::Red;
+                    game.game_ended = false;
+                    game.red_ready_for_rematch = false;
+                    game.black_ready_for_rematch = false;
+
+                    // Notify both players of new game
+                    if let Some(p) = self.players.get(&red_id) {
+                        let _ = p.tx.send(ServerMessage::MatchFound {
+                            opponent_id: black_id.clone(),
+                            your_color: Color::Red,
+                            game_id: game_id.clone(),
+                        });
+                        let _ = p.tx.send(ServerMessage::GameStart(Board::new()));
+                    }
+                    if let Some(p) = self.players.get(&black_id) {
+                        let _ = p.tx.send(ServerMessage::MatchFound {
+                            opponent_id: red_id.clone(),
+                            your_color: Color::Black,
+                            game_id: game_id.clone(),
+                        });
+                        let _ = p.tx.send(ServerMessage::GameStart(Board::new()));
+                    }
                 }
             }
         }
