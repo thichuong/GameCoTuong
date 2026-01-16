@@ -296,4 +296,27 @@ impl GameManager {
             }
         }
     }
+
+    pub fn handle_player_left(&mut self, player_id: String) {
+        if let Some(game_id) = self.player_to_game.remove(&player_id) {
+            if let Some(game) = self.games.remove(&game_id) {
+                let opponent_id = if game.red_player == player_id {
+                    game.black_player.clone()
+                } else {
+                    game.red_player.clone()
+                };
+
+                // Remove opponent mapping as well since game is gone
+                self.player_to_game.remove(&opponent_id);
+
+                // Notify opponent
+                if let Some(player) = self.players.get(&opponent_id) {
+                    let _ = player.tx.send(ServerMessage::OpponentDisconnected);
+                }
+            }
+        } else {
+            // Player might be in matchmaking queue
+            self.matchmaking_queue.remove(&player_id);
+        }
+    }
 }

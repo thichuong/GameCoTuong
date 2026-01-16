@@ -13,6 +13,7 @@ pub enum GameMessage {
     RequestDraw,
     AcceptDraw,
     PlayAgain,
+    PlayerLeft,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

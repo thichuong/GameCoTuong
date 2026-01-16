@@ -1258,6 +1258,9 @@ pub fn App() -> impl IntoView {
                                             class="control-btn"
                                             style="padding: 10px 20px;"
                                             on:click=move |_| {
+                                                if let Some(client) = network_client.get() {
+                                                    client.send(&GameMessage::PlayerLeft);
+                                                }
                                                 set_online_status.set(OnlineStatus::None);
                                                 set_game_state.set(GameState::new());
                                                 set_is_ready_for_rematch.set(false);

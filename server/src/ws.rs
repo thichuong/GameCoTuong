@@ -57,6 +57,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     }
                     GameMessage::Surrender => gm.handle_surrender(player_id.clone()),
                     GameMessage::PlayAgain => gm.handle_play_again(player_id.clone()),
+                    GameMessage::PlayerLeft => gm.handle_player_left(player_id.clone()),
                     _ => {}
                 }
             }
