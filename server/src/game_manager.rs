@@ -1,7 +1,6 @@
 use cotuong_core::{
     engine::Move,
-    logic::board::{Board, BoardCoordinate, Color},
-    logic::rules::is_valid_move,
+    logic::board::{Board, Color},
 };
 use shared::ServerMessage;
 use std::collections::{HashMap, HashSet};
@@ -12,29 +11,10 @@ type Tx = mpsc::UnboundedSender<ServerMessage>;
 
 // Helper function to check if a player has any valid moves
 fn has_any_valid_move(board: &Board, color: Color) -> bool {
-    for r in 0..10 {
-        for c in 0..9 {
-            if let Some(p) = board.get_piece(BoardCoordinate::new(r, c).unwrap()) {
-                if p.color == color {
-                    for tr in 0..10 {
-                        for tc in 0..9 {
-                            if is_valid_move(
-                                board,
-                                BoardCoordinate::new(r, c).unwrap(),
-                                BoardCoordinate::new(tr, tc).unwrap(),
-                                color,
-                            )
-                            .is_ok()
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
+    use cotuong_core::logic::generator::MoveGenerator;
+    let generator = MoveGenerator::new();
+    let moves = generator.generate_moves(board, color);
+    !moves.is_empty()
 }
 
 pub struct Player {

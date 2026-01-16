@@ -208,6 +208,9 @@ cargo test -p cotuong_core
 
 # Chạy test với output chi tiết
 cargo test -p cotuong_core -- --nocapture
+
+# Sử dụng script chạy toàn bộ
+./test_all.sh
 ```
 
 ### Chạy Tests theo Module
@@ -236,6 +239,9 @@ cargo test -p cotuong_core logic::repetition_test
 
 # Test phạt tướng lộ pháo
 cargo test -p cotuong_core test_king_exposed_penalty
+
+# Test bộ sinh nước đi (Move Generator)
+cargo test -p cotuong_core logic::generator
 ```
 
 ### Chạy Test Cụ thể
