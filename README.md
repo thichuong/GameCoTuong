@@ -69,21 +69,28 @@ trunk serve --release
    cargo run -p server
    ```
 
-2. **Bước 2: Khởi động Client 1**
+2. **Bước 2: Khởi động Client**
    ```bash
-   trunk serve
-   # Mở http://localhost:8080
+   cd client && trunk serve
+   # Mở 2 tab tại http://localhost:8080
    ```
 
-3. **Bước 3: Khởi động Client 2 (Port khác)**
-   ```bash
-   trunk serve --port 8081
-   # Mở http://localhost:8081
-   ```
+3. **Bước 3: Bắt đầu game**
+   - Chọn **"🌐 Chơi Online"** trong dropdown chế độ
+   - Nhấn **"🎮 Tìm trận"** trên cả 2 tab
+   - Server tự động ghép cặp và bắt đầu ván đấu
 
-4. **Bước 4: Bắt đầu game**
-   - Nhấn nút **Find Match** trên cả 2 trình duyệt.
-   - Server sẽ tự động ghép cặp và bắt đầu ván đấu.
+#### Tính năng Online Mode
+
+| Tính năng | Mô tả |
+|-----------|-------|
+| 🔍 **Tìm trận** | Tự động ghép cặp 2 người chơi |
+| ⏳ **Huỷ tìm** | Huỷ tìm trận khi đang chờ |
+| 🔴⚫ **Lượt chơi** | Hiển thị rõ "Lượt của bạn" / "Đang chờ đối thủ" |
+| 🏳️ **Đầu hàng** | Gửi thông báo đầu hàng, đối thủ thắng |
+| 🏆 **Chiếu hết** | Server tự động phát hiện, thông báo kết quả |
+| ⚠️ **Mất kết nối** | Thông báo khi đối thủ disconnect |
+| 🎮 **Sẵn sàng** | Sau khi kết thúc, cả 2 nhấn "Sẵn sàng" để chơi tiếp |
 
 ---
 

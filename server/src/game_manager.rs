@@ -31,12 +31,10 @@ fn has_any_valid_move(board: &Board, color: Color) -> bool {
 }
 
 pub struct Player {
-    pub id: String,
     pub tx: Tx,
 }
 
 pub struct GameSession {
-    pub game_id: String,
     pub red_player: String,
     pub black_player: String,
     pub board: Board,
@@ -64,7 +62,7 @@ impl GameManager {
     }
 
     pub fn add_player(&mut self, id: String, tx: Tx) {
-        self.players.insert(id.clone(), Player { id, tx });
+        self.players.insert(id, Player { tx });
     }
 
     pub fn remove_player(&mut self, id: &str) {
@@ -130,7 +128,6 @@ impl GameManager {
         };
 
         let game = GameSession {
-            game_id: game_id.clone(),
             red_player: red_id.clone(),
             black_player: black_id.clone(),
             board: Board::new(),
