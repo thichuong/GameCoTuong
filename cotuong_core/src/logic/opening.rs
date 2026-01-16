@@ -1,14 +1,14 @@
-use crate::logic::board::{Board, Color};
+use crate::logic::board::{Board, BoardCoordinate, Color};
 use rand::seq::SliceRandom;
 
-pub fn get_book_move(board: &Board, turn: Color) -> Option<((usize, usize), (usize, usize))> {
+pub fn get_book_move(board: &Board, turn: Color) -> Option<(BoardCoordinate, BoardCoordinate)> {
     let fen = board.to_fen_string(turn);
     // Only match the piece placement and turn, ignore move counts if any
     // Our to_fen_string returns "pieces turn" e.g. "rnbakabnr/9/... w"
 
     let mut rng = rand::thread_rng();
 
-    match fen.as_str() {
+    let raw_move = match fen.as_str() {
         // Starting Position (Red to move)
         "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w" => {
             let moves = [
@@ -75,5 +75,13 @@ pub fn get_book_move(board: &Board, turn: Color) -> Option<((usize, usize), (usi
         // Actually, I can just print the FEN in the game log to debug and add more later.
         // For now, I'll implement the structure and the starting position.
         _ => None,
+    };
+
+    if let Some(((f_r, f_c), (t_r, t_c))) = raw_move {
+        let from = BoardCoordinate::new(f_r, f_c)?;
+        let to = BoardCoordinate::new(t_r, t_c)?;
+        Some((from, to))
+    } else {
+        None
     }
 }

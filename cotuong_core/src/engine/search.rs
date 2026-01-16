@@ -3,7 +3,7 @@ use crate::engine::eval::SimpleEvaluator;
 use crate::engine::move_list::MoveList;
 use crate::engine::tt::{TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
-use crate::logic::board::{Board, Color, PieceType};
+use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
 use crate::logic::game::GameState;
 use crate::logic::rules::{is_flying_general, is_in_check};
 use std::sync::Arc;
@@ -310,7 +310,7 @@ impl AlphaBetaEngine {
             // If in check, filter for legal moves immediately.
             // We cannot prune because the only legal moves might be "bad" ones.
             moves.retain(|mv| {
-                let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+                let captured = board.get_piece(unsafe { BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize) });
                 board.apply_move(mv, turn);
                 let legal = !is_in_check(board, turn) && !is_flying_general(board);
                 board.undo_move(mv, captured, turn);
@@ -360,7 +360,9 @@ impl AlphaBetaEngine {
 
         for (moves_searched, mv) in moves.into_iter().enumerate() {
             let is_capture = board
-                .get_piece(mv.to_row as usize, mv.to_col as usize)
+                .get_piece(unsafe {
+                    BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
+                })
                 .is_some();
 
             // Safe Dynamic Limiting:
@@ -391,7 +393,9 @@ impl AlphaBetaEngine {
                 }
             }
 
-            let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+            let captured = board.get_piece(unsafe {
+                BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
+            });
             board.apply_move(&mv, turn);
 
             // Deferred Legality Check
@@ -583,7 +587,7 @@ impl AlphaBetaEngine {
         let captures = self.generate_captures(board, turn);
 
         for mv in captures {
-            let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+            let captured = board.get_piece(unsafe { BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize) });
 
             // Delta Pruning
             // If stand_pat + capture_value + margin < alpha, we can skip this capture.
@@ -791,7 +795,7 @@ impl AlphaBetaEngine {
         }
 
         let target = if is_occupied {
-            board.get_piece(tr, tc)
+            board.get_piece(unsafe { BoardCoordinate::new_unchecked(tr, tc) })
         } else {
             None
         };
@@ -815,7 +819,7 @@ impl AlphaBetaEngine {
             // MVV-LVA
             let victim_val = self.get_piece_value(t.piece_type);
             let attacker_val = board
-                .get_piece(r, c)
+                .get_piece(unsafe { BoardCoordinate::new_unchecked(r, c) })
                 .map_or(0, |p| self.get_piece_value(p.piece_type));
             score = self.config.score_capture_base + victim_val - (attacker_val / 10);
         } else {
@@ -1256,7 +1260,7 @@ impl Searcher for AlphaBetaEngine {
 
                 // Filter for legal moves immediately to handle single-move exception
                 moves.retain(|mv| {
-                    let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+                    let captured = board.get_piece(unsafe { BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize) });
                     board.apply_move(mv, turn);
                     let legal = !crate::logic::rules::is_in_check(board, turn)
                         && !crate::logic::rules::is_flying_general(board);
@@ -1274,7 +1278,7 @@ impl Searcher for AlphaBetaEngine {
                 let mut moves_searched = 0;
 
                 for mv in moves {
-                    let captured = board.get_piece(mv.to_row as usize, mv.to_col as usize);
+                    let captured = board.get_piece(unsafe { BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize) });
                     board.apply_move(&mv, turn);
 
                     if !is_single_move {

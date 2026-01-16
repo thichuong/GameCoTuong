@@ -2,7 +2,7 @@ use crate::components::board::BoardView;
 use cotuong_core::engine::config::EngineConfig;
 use cotuong_core::engine::Move;
 use cotuong_core::engine::SearchLimit;
-use cotuong_core::logic::board::{Color, PieceType};
+use cotuong_core::logic::board::{BoardCoordinate, Color, PieceType};
 use cotuong_core::logic::game::{GameState, GameStatus};
 use cotuong_core::logic::rules::is_in_check;
 use cotuong_core::worker::{GameWorker, Input, Output};
@@ -141,10 +141,9 @@ pub fn App() -> impl IntoView {
                     Output::MoveFound(mv, stats) => {
                         let mut current_state = game_state.get();
                         match current_state.make_move(
-                            mv.from_row as usize,
-                            mv.from_col as usize,
-                            mv.to_row as usize,
-                            mv.to_col as usize,
+                            BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize)
+                                .unwrap(),
+                            BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize).unwrap(),
                         ) {
                             Ok(()) => {
                                 #[allow(clippy::cast_precision_loss)]
@@ -244,10 +243,8 @@ pub fn App() -> impl IntoView {
                 ServerMessage::OpponentMove(m) => {
                     let mut state = game_state.get();
                     if state.make_move(
-                        m.from_row as usize,
-                        m.from_col as usize,
-                        m.to_row as usize,
-                        m.to_col as usize,
+                        BoardCoordinate::new(m.from_row as usize, m.from_col as usize).unwrap(),
+                        BoardCoordinate::new(m.to_row as usize, m.to_col as usize).unwrap(),
                     ) == Ok(())
                     {
                         set_game_state.set(state);
@@ -343,7 +340,7 @@ pub fn App() -> impl IntoView {
                                 opening::get_book_move(&current_state.board, current_state.turn);
 
                             if let Some((from, to)) = book_move {
-                                if current_state.make_move(from.0, from.1, to.0, to.1).is_ok() {
+                                if current_state.make_move(from, to).is_ok() {
                                     if let Some(last) = current_state.history.last_mut() {
                                         last.note = Some("📖 Book Move".to_string());
                                     }
@@ -422,8 +419,8 @@ pub fn App() -> impl IntoView {
         let mut csv = String::from("Turn,From,To,Piece,Captured,Note\n");
         for (i, record) in state.history.iter().enumerate() {
             let turn = if i % 2 == 0 { "Red" } else { "Black" };
-            let from = format!("({},{})", record.from.0, record.from.1);
-            let to = format!("({},{})", record.to.0, record.to.1);
+            let from = format!("({},{})", record.from.row, record.from.col);
+            let to = format!("({},{})", record.to.row, record.to.col);
             let piece = format!("{:?}", record.piece.piece_type);
             let captured = record
                 .captured
@@ -1301,8 +1298,8 @@ pub fn App() -> impl IntoView {
                                     // Here we stick to (row, col) but maybe 1-based for user friendliness?
                                     // Let's keep 0-8, 0-9 for now but make it clear.
                                     // Actually, Xiangqi notation is complex. Let's stick to coordinates but make them clear.
-                                    let from_str = format!("({}, {})", record.from.0, record.from.1);
-                                    let to_str = format!("({}, {})", record.to.0, record.to.1);
+                                    let from_str = format!("({}, {})", record.from.row, record.from.col);
+                                    let to_str = format!("({}, {})", record.to.row, record.to.col);
 
                                     view! {
                                         <li class="log-item">

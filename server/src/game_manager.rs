@@ -1,6 +1,6 @@
 use cotuong_core::{
     engine::Move,
-    logic::board::{Board, Color},
+    logic::board::{Board, BoardCoordinate, Color},
     logic::rules::is_valid_move,
 };
 use shared::ServerMessage;
@@ -14,11 +14,18 @@ type Tx = mpsc::UnboundedSender<ServerMessage>;
 fn has_any_valid_move(board: &Board, color: Color) -> bool {
     for r in 0..10 {
         for c in 0..9 {
-            if let Some(p) = board.get_piece(r, c) {
+            if let Some(p) = board.get_piece(BoardCoordinate::new(r, c).unwrap()) {
                 if p.color == color {
                     for tr in 0..10 {
                         for tc in 0..9 {
-                            if is_valid_move(board, r, c, tr, tc, color).is_ok() {
+                            if is_valid_move(
+                                board,
+                                BoardCoordinate::new(r, c).unwrap(),
+                                BoardCoordinate::new(tr, tc).unwrap(),
+                                color,
+                            )
+                            .is_ok()
+                            {
                                 return true;
                             }
                         }

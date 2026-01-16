@@ -1,6 +1,6 @@
 use crate::app::GameMode;
 use cotuong_core::engine::Move;
-use cotuong_core::logic::board::{Color, Piece, PieceType};
+use cotuong_core::logic::board::{BoardCoordinate, Color, Piece, PieceType};
 use cotuong_core::logic::game::GameState;
 use leptos::{
     component, create_effect, create_node_ref, create_signal, html::Canvas, view, IntoView,
@@ -278,7 +278,7 @@ pub fn BoardView(
         // Draw Pieces
         for r in 0..10 {
             for c in 0..9 {
-                if let Some(piece) = state.board.get_piece(r, c) {
+                if let Some(piece) = state.board.get_piece(BoardCoordinate::new(r, c).unwrap()) {
                     let (x, y) = get_visual_coords(r, c, player_side.get());
                     draw_piece(&ctx, x, y, piece, selected.get() == Some((r, c)));
                 }
@@ -294,7 +294,11 @@ pub fn BoardView(
             let _ = ctx.arc(x, y, 8.0, 0.0, std::f64::consts::PI * 2.0);
 
             // Check if it's a capture (enemy piece at target)
-            if state.board.get_piece(r, c).is_some() {
+            if state
+                .board
+                .get_piece(BoardCoordinate::new(r, c).unwrap())
+                .is_some()
+            {
                 ctx.set_fill_style(&"rgba(255, 0, 0, 0.5)".into()); // Red for capture
             } else {
                 ctx.set_fill_style(&"rgba(0, 255, 0, 0.5)".into()); // Green for move
@@ -303,9 +307,9 @@ pub fn BoardView(
         }
 
         // Draw Last Move
-        if let Some(((fr, fc), (tr, tc))) = state.last_move {
-            let (x1, y1) = get_visual_coords(fr, fc, player_side.get());
-            let (x2, y2) = get_visual_coords(tr, tc, player_side.get());
+        if let Some((from, to)) = state.last_move {
+            let (x1, y1) = get_visual_coords(from.row, from.col, player_side.get());
+            let (x2, y2) = get_visual_coords(to.row, to.col, player_side.get());
 
             ctx.set_stroke_style(&"rgba(255, 165, 0, 0.6)".into());
             ctx.set_line_width(6.0);
@@ -378,7 +382,7 @@ pub fn BoardView(
             }
 
             let current_turn = state.turn;
-            let clicked_piece = state.board.get_piece(r, c);
+            let clicked_piece = state.board.get_piece(BoardCoordinate::new(r, c).unwrap());
 
             if let Some((from_row, from_col)) = selected.get() {
                 if from_row == r && from_col == c {
@@ -393,10 +397,8 @@ pub fn BoardView(
                             for tc in 0..9 {
                                 if cotuong_core::logic::rules::is_valid_move(
                                     &state.board,
-                                    r,
-                                    c,
-                                    tr,
-                                    tc,
+                                    BoardCoordinate::new(r, c).unwrap(),
+                                    BoardCoordinate::new(tr, tc).unwrap(),
                                     current_turn,
                                 )
                                 .is_ok()
@@ -408,7 +410,10 @@ pub fn BoardView(
                         set_valid_moves.set(moves);
                     } else {
                         let mut new_state = state;
-                        match new_state.make_move(from_row, from_col, r, c) {
+                        match new_state.make_move(
+                            BoardCoordinate::new(from_row, from_col).unwrap(),
+                            BoardCoordinate::new(r, c).unwrap(),
+                        ) {
                             Ok(()) => {
                                 set_game_state.set(new_state);
                                 if let Some(cb) = on_move.as_ref() {
@@ -431,7 +436,10 @@ pub fn BoardView(
                     }
                 } else {
                     let mut new_state = state;
-                    match new_state.make_move(from_row, from_col, r, c) {
+                    match new_state.make_move(
+                        BoardCoordinate::new(from_row, from_col).unwrap(),
+                        BoardCoordinate::new(r, c).unwrap(),
+                    ) {
                         Ok(()) => {
                             set_game_state.set(new_state);
                             if let Some(cb) = on_move.as_ref() {
@@ -461,10 +469,8 @@ pub fn BoardView(
                         for tc in 0..9 {
                             if cotuong_core::logic::rules::is_valid_move(
                                 &state.board,
-                                r,
-                                c,
-                                tr,
-                                tc,
+                                BoardCoordinate::new(r, c).unwrap(),
+                                BoardCoordinate::new(tr, tc).unwrap(),
                                 current_turn,
                             )
                             .is_ok()

@@ -3,11 +3,9 @@ mod tests {
     use crate::engine::config::EngineConfig;
     use crate::engine::search::AlphaBetaEngine;
     use crate::engine::{SearchLimit, Searcher};
-    use crate::logic::board::Board;
+    use crate::logic::board::{Board, BoardCoordinate, Color, Piece, PieceType};
     use crate::logic::game::GameState;
     use std::sync::Arc;
-
-    use crate::logic::board::{Color, Piece, PieceType};
 
     #[test]
     fn bench_opening() {
@@ -45,9 +43,6 @@ mod tests {
         let mut engine = AlphaBetaEngine::new(config);
 
         // Setup Endgame Position
-        // Red: King(0,4), Rook(0,0), Horse(2,2), Pawn(6,4)
-        // Red: King(0,4), Rook(0,0), Horse(2,2), Pawn(6,4)
-        // Black: King(9,4), Advisor(9,3), Advisor(9,5), Cannon(7,4), Rook(9,8)
         let mut board = Board {
             bitboards: [0; 14],
             occupied: 0,
@@ -61,81 +56,29 @@ mod tests {
             black_pst: 0,
         };
 
+        // Helper
+        let mut set = |r, c, pt, color| {
+            board.set_piece(
+                BoardCoordinate::new(r, c).unwrap(),
+                Some(Piece {
+                    piece_type: pt,
+                    color,
+                }),
+            );
+        };
+
         // Red Pieces
-        board.set_piece(
-            0,
-            4,
-            Some(Piece {
-                piece_type: PieceType::General,
-                color: Color::Red,
-            }),
-        );
-        board.set_piece(
-            0,
-            0,
-            Some(Piece {
-                piece_type: PieceType::Chariot,
-                color: Color::Red,
-            }),
-        );
-        board.set_piece(
-            2,
-            2,
-            Some(Piece {
-                piece_type: PieceType::Horse,
-                color: Color::Red,
-            }),
-        );
-        board.set_piece(
-            6,
-            4,
-            Some(Piece {
-                piece_type: PieceType::Soldier,
-                color: Color::Red,
-            }),
-        );
+        set(0, 4, PieceType::General, Color::Red);
+        set(0, 0, PieceType::Chariot, Color::Red);
+        set(2, 2, PieceType::Horse, Color::Red);
+        set(6, 4, PieceType::Soldier, Color::Red);
 
         // Black Pieces
-        board.set_piece(
-            9,
-            4,
-            Some(Piece {
-                piece_type: PieceType::General,
-                color: Color::Black,
-            }),
-        );
-        board.set_piece(
-            9,
-            3,
-            Some(Piece {
-                piece_type: PieceType::Advisor,
-                color: Color::Black,
-            }),
-        );
-        board.set_piece(
-            9,
-            5,
-            Some(Piece {
-                piece_type: PieceType::Advisor,
-                color: Color::Black,
-            }),
-        );
-        board.set_piece(
-            7,
-            4,
-            Some(Piece {
-                piece_type: PieceType::Cannon,
-                color: Color::Black,
-            }),
-        );
-        board.set_piece(
-            9,
-            8,
-            Some(Piece {
-                piece_type: PieceType::Chariot,
-                color: Color::Black,
-            }),
-        );
+        set(9, 4, PieceType::General, Color::Black);
+        set(9, 3, PieceType::Advisor, Color::Black);
+        set(9, 5, PieceType::Advisor, Color::Black);
+        set(7, 4, PieceType::Cannon, Color::Black);
+        set(9, 8, PieceType::Chariot, Color::Black);
 
         board.zobrist_hash = board.calculate_initial_hash();
         board.calculate_initial_score();

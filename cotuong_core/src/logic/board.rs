@@ -6,6 +6,33 @@ use serde::{Deserialize, Serialize};
 pub type Bitboard = u128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoardCoordinate {
+    pub row: usize,
+    pub col: usize,
+}
+
+impl BoardCoordinate {
+    pub fn new(row: usize, col: usize) -> Option<Self> {
+        if row < 10 && col < 9 {
+            Some(Self { row, col })
+        } else {
+            None
+        }
+    }
+
+    /// Creates a coordinate without checking bounds.
+    /// # Safety
+    /// Caller must ensure row < 10 and col < 9.
+    pub unsafe fn new_unchecked(row: usize, col: usize) -> Self {
+        Self { row, col }
+    }
+
+    pub fn index(self) -> usize {
+        self.row * 9 + self.col
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Color {
     Red,
     Black,
@@ -80,7 +107,9 @@ impl Board {
         for r in (0..10).rev() {
             let mut empty_count = 0;
             for c in 0..9 {
-                if let Some(piece) = self.get_piece(r, c) {
+                // Buffer bound check is handled by loop range
+                let coord = unsafe { BoardCoordinate::new_unchecked(r, c) };
+                if let Some(piece) = self.get_piece(coord) {
                     if empty_count > 0 {
                         fen.push_str(&empty_count.to_string());
                         empty_count = 0;
@@ -162,6 +191,7 @@ impl Board {
         cannon_row: usize,
         soldier_row: usize,
     ) {
+        let make_coord = |r, c| BoardCoordinate::new(r, c).expect("Invalid init coord");
         let pieces = [
             PieceType::Chariot,
             PieceType::Horse,
@@ -176,62 +206,58 @@ impl Board {
 
         // Back row
         for (col, &pt) in pieces.iter().enumerate() {
-            self.add_piece(back_row, col, pt, color);
+            self.add_piece(make_coord(back_row, col), pt, color);
         }
 
         // Cannons
-        self.add_piece(cannon_row, 1, PieceType::Cannon, color);
-        self.add_piece(cannon_row, 7, PieceType::Cannon, color);
+        self.add_piece(make_coord(cannon_row, 1), PieceType::Cannon, color);
+        self.add_piece(make_coord(cannon_row, 7), PieceType::Cannon, color);
 
         // Soldiers
         for col in (0..9).step_by(2) {
-            self.add_piece(soldier_row, col, PieceType::Soldier, color);
+            self.add_piece(make_coord(soldier_row, col), PieceType::Soldier, color);
         }
     }
 
     pub fn move_piece_quiet(
         &mut self,
-        from_row: usize,
-        from_col: usize,
-        to_row: usize,
-        to_col: usize,
+        from: BoardCoordinate,
+        to: BoardCoordinate,
     ) -> Option<Piece> {
-        let piece = self.get_piece(from_row, from_col)?;
-        self.remove_piece(from_row, from_col, piece.piece_type, piece.color);
-        let captured = self.get_piece(to_row, to_col);
+        let piece = self.get_piece(from)?;
+        self.remove_piece(from, piece.piece_type, piece.color);
+        let captured = self.get_piece(to);
         if let Some(cap) = captured {
-            self.remove_piece(to_row, to_col, cap.piece_type, cap.color);
+            self.remove_piece(to, cap.piece_type, cap.color);
         }
-        self.add_piece(to_row, to_col, piece.piece_type, piece.color);
+        self.add_piece(to, piece.piece_type, piece.color);
         captured
     }
 
     pub fn undo_move_quiet(
         &mut self,
-        from_row: usize,
-        from_col: usize,
-        to_row: usize,
-        to_col: usize,
+        from: BoardCoordinate,
+        to: BoardCoordinate,
         captured: Option<Piece>,
     ) {
         let piece = self
-            .get_piece(to_row, to_col)
+            .get_piece(to)
             .expect("No piece at destination in undo_move_quiet");
-        self.remove_piece(to_row, to_col, piece.piece_type, piece.color);
-        self.add_piece(from_row, from_col, piece.piece_type, piece.color);
+        self.remove_piece(to, piece.piece_type, piece.color);
+        self.add_piece(from, piece.piece_type, piece.color);
         if let Some(cap) = captured {
-            self.add_piece(to_row, to_col, cap.piece_type, cap.color);
+            self.add_piece(to, cap.piece_type, cap.color);
         }
     }
 
-    pub fn set_piece(&mut self, row: usize, col: usize, piece: Option<Piece>) {
+    pub fn set_piece(&mut self, pos: BoardCoordinate, piece: Option<Piece>) {
         // Remove existing
-        if let Some(p) = self.get_piece(row, col) {
-            self.remove_piece(row, col, p.piece_type, p.color);
+        if let Some(p) = self.get_piece(pos) {
+            self.remove_piece(pos, p.piece_type, p.color);
         }
         // Add new
         if let Some(p) = piece {
-            self.add_piece(row, col, p.piece_type, p.color);
+            self.add_piece(pos, p.piece_type, p.color);
         }
     }
 
@@ -249,29 +275,29 @@ impl Board {
     }
 
     // Helper to add a piece
-    pub fn add_piece(&mut self, row: usize, col: usize, piece_type: PieceType, color: Color) {
-        let sq = Self::square_index(row, col);
+    pub fn add_piece(&mut self, pos: BoardCoordinate, piece_type: PieceType, color: Color) {
+        let sq = pos.index();
         let bit = 1u128 << sq;
         let idx = color.index() * 7 + piece_type.index();
         self.bitboards[idx] |= bit;
         self.occupied |= bit;
         self.grid[sq] = Some(Piece { piece_type, color });
 
-        self.occupied_rows[row] |= 1 << col;
-        self.occupied_cols[col] |= 1 << row;
+        self.occupied_rows[pos.row] |= 1 << pos.col;
+        self.occupied_cols[pos.col] |= 1 << pos.row;
     }
 
     // Helper to remove a piece
-    fn remove_piece(&mut self, row: usize, col: usize, piece_type: PieceType, color: Color) {
-        let sq = Self::square_index(row, col);
+    fn remove_piece(&mut self, pos: BoardCoordinate, piece_type: PieceType, color: Color) {
+        let sq = pos.index();
         let bit = 1u128 << sq;
         let idx = color.index() * 7 + piece_type.index();
         self.bitboards[idx] &= !bit;
         self.occupied &= !bit;
         self.grid[sq] = None;
 
-        self.occupied_rows[row] &= !(1 << col);
-        self.occupied_cols[col] &= !(1 << row);
+        self.occupied_rows[pos.row] &= !(1 << pos.col);
+        self.occupied_cols[pos.col] &= !(1 << pos.row);
     }
 
     #[must_use]
@@ -285,9 +311,8 @@ impl Board {
     }
 
     #[must_use]
-    pub fn get_piece(&self, row: usize, col: usize) -> Option<Piece> {
-        let sq = Self::square_index(row, col);
-        self.grid[sq]
+    pub fn get_piece(&self, pos: BoardCoordinate) -> Option<Piece> {
+        self.grid[pos.index()]
     }
 
     pub fn get_color_bb(&self, color: Color) -> u128 {
@@ -304,7 +329,9 @@ impl Board {
         let mut hash = 0;
         for r in 0..10 {
             for c in 0..9 {
-                if let Some(piece) = self.get_piece(r, c) {
+                // Safety: Loop bounds are correct
+                let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
+                if let Some(piece) = self.get_piece(pos) {
                     hash ^= keys.get_piece_key(piece.piece_type, piece.color, r, c);
                 }
             }
@@ -320,7 +347,8 @@ impl Board {
 
         for r in 0..10 {
             for c in 0..9 {
-                if let Some(piece) = self.get_piece(r, c) {
+                let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
+                if let Some(piece) = self.get_piece(pos) {
                     let val = get_piece_value(piece.piece_type);
                     let pst = get_pst_value(piece.piece_type, piece.color, r, c);
 
@@ -348,13 +376,17 @@ impl Board {
         let to_row = mv.to_row as usize;
         let to_col = mv.to_col as usize;
 
+        // Safety: Engine moves should be valid.
+        let from = BoardCoordinate::new(from_row, from_col).expect("Invalid move from engine");
+        let to = BoardCoordinate::new(to_row, to_col).expect("Invalid move from engine");
+
         // 1. Get piece at source
         let piece = self
-            .get_piece(from_row, from_col)
+            .get_piece(from)
             .expect("No piece at source in apply_move");
 
         // Remove from source
-        self.remove_piece(from_row, from_col, piece.piece_type, piece.color);
+        self.remove_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
 
         // Update Score (Remove from source)
@@ -366,8 +398,8 @@ impl Board {
         }
 
         // 2. Remove captured piece (if any)
-        if let Some(captured) = self.get_piece(to_row, to_col) {
-            self.remove_piece(to_row, to_col, captured.piece_type, captured.color);
+        if let Some(captured) = self.get_piece(to) {
+            self.remove_piece(to, captured.piece_type, captured.color);
             self.zobrist_hash ^=
                 keys.get_piece_key(captured.piece_type, captured.color, to_row, to_col);
 
@@ -385,7 +417,7 @@ impl Board {
         }
 
         // 3. Place piece at destination
-        self.add_piece(to_row, to_col, piece.piece_type, piece.color);
+        self.add_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
 
         // Update Score (Add to dest)
@@ -407,16 +439,19 @@ impl Board {
         let to_row = mv.to_row as usize;
         let to_col = mv.to_col as usize;
 
+        let from = BoardCoordinate::new(from_row, from_col).expect("Invalid move from engine");
+        let to = BoardCoordinate::new(to_row, to_col).expect("Invalid move from engine");
+
         // 4. Switch turn hash (back)
         self.zobrist_hash ^= keys.side_key;
 
         // 3. Move piece back from destination to source
         let piece = self
-            .get_piece(to_row, to_col)
+            .get_piece(to)
             .expect("No piece at destination in undo_move");
 
         // Remove from destination
-        self.remove_piece(to_row, to_col, piece.piece_type, piece.color);
+        self.remove_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
 
         // Update Score (Remove from dest)
@@ -428,7 +463,7 @@ impl Board {
         }
 
         // Place back at source
-        self.add_piece(from_row, from_col, piece.piece_type, piece.color);
+        self.add_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
 
         // Update Score (Add to source)
@@ -441,7 +476,7 @@ impl Board {
 
         // 2. Restore captured piece (if any)
         if let Some(cap) = captured {
-            self.add_piece(to_row, to_col, cap.piece_type, cap.color);
+            self.add_piece(to, cap.piece_type, cap.color);
             self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
 
             // Update Score (Restore captured)
@@ -467,12 +502,16 @@ mod tests {
     fn test_initial_setup() {
         let board = Board::new();
         // Check Red General
-        let piece = board.get_piece(0, 4).unwrap();
+        let piece = board
+            .get_piece(BoardCoordinate::new(0, 4).unwrap())
+            .unwrap();
         assert_eq!(piece.piece_type, PieceType::General);
         assert_eq!(piece.color, Color::Red);
 
         // Check Black General
-        let piece = board.get_piece(9, 4).unwrap();
+        let piece = board
+            .get_piece(BoardCoordinate::new(9, 4).unwrap())
+            .unwrap();
         assert_eq!(piece.piece_type, PieceType::General);
         assert_eq!(piece.color, Color::Black);
     }
@@ -501,8 +540,12 @@ mod tests {
         };
         board.apply_move(&mv, Color::Red);
 
-        assert!(board.get_piece(3, 4).is_none());
-        let piece = board.get_piece(4, 4).unwrap();
+        assert!(board
+            .get_piece(BoardCoordinate::new(3, 4).unwrap())
+            .is_none());
+        let piece = board
+            .get_piece(BoardCoordinate::new(4, 4).unwrap())
+            .unwrap();
         assert_eq!(piece.piece_type, PieceType::Soldier);
         assert_eq!(piece.color, Color::Red);
     }

@@ -1,5 +1,5 @@
 use crate::engine::Move;
-use crate::logic::board::{Board, Color};
+use crate::logic::board::{Board, BoardCoordinate, Color};
 use crate::logic::rules::{is_valid_move, MoveError};
 use serde::{Deserialize, Serialize};
 
@@ -13,8 +13,8 @@ pub enum GameStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct MoveRecord {
-    pub from: (usize, usize),
-    pub to: (usize, usize),
+    pub from: BoardCoordinate,
+    pub to: BoardCoordinate,
     pub piece: crate::logic::board::Piece,
     pub captured: Option<crate::logic::board::Piece>,
     pub color: Color,
@@ -27,7 +27,7 @@ pub struct GameState {
     pub board: Board,
     pub turn: Color,
     pub status: GameStatus,
-    pub last_move: Option<((usize, usize), (usize, usize))>,
+    pub last_move: Option<(BoardCoordinate, BoardCoordinate)>,
     pub history: Vec<MoveRecord>,
 }
 
@@ -51,34 +51,32 @@ impl GameState {
 
     pub fn make_move(
         &mut self,
-        from_row: usize,
-        from_col: usize,
-        to_row: usize,
-        to_col: usize,
+        from: BoardCoordinate,
+        to: BoardCoordinate,
     ) -> Result<(), MoveError> {
         if self.status != GameStatus::Playing {
             return Err(MoveError::NotYourTurn);
         }
 
-        is_valid_move(&self.board, from_row, from_col, to_row, to_col, self.turn)?;
+        is_valid_move(&self.board, from, to, self.turn)?;
 
         // Execute move
         let mut next_board = self.board.clone();
 
         // Construct Move for apply_move
         let mv = Move {
-            from_row: from_row as u8,
-            from_col: from_col as u8,
-            to_row: to_row as u8,
-            to_col: to_col as u8,
+            from_row: from.row as u8,
+            from_col: from.col as u8,
+            to_row: to.row as u8,
+            to_col: to.col as u8,
             score: 0,
         };
 
         // Capture piece info before apply_move
         let piece = next_board
-            .get_piece(from_row, from_col)
+            .get_piece(from)
             .ok_or(MoveError::NoPieceAtSource)?;
-        let captured = next_board.get_piece(to_row, to_col);
+        let captured = next_board.get_piece(to);
 
         next_board.apply_move(&mv, self.turn);
 
@@ -108,8 +106,8 @@ impl GameState {
 
         self.board = next_board;
         self.history.push(MoveRecord {
-            from: (from_row, from_col),
-            to: (to_row, to_col),
+            from,
+            to,
             piece,
             captured,
             color: self.turn,
@@ -118,7 +116,7 @@ impl GameState {
         });
 
         self.turn = self.turn.opposite();
-        self.last_move = Some(((from_row, from_col), (to_row, to_col)));
+        self.last_move = Some((from, to));
 
         self.update_status();
 
@@ -141,13 +139,15 @@ impl GameState {
     fn has_any_valid_move(&self, color: Color) -> bool {
         for r in 0..10 {
             for c in 0..9 {
-                if let Some(p) = self.board.get_piece(r, c) {
+                let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
+                if let Some(p) = self.board.get_piece(pos) {
                     if p.color == color {
                         // Try all possible moves for this piece
                         // Optimization: We can be smarter, but brute force is fine for 90 squares
                         for tr in 0..10 {
                             for tc in 0..9 {
-                                if is_valid_move(&self.board, r, c, tr, tc, color).is_ok() {
+                                let target = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+                                if is_valid_move(&self.board, pos, target, color).is_ok() {
                                     return true;
                                 }
                             }
@@ -163,11 +163,13 @@ impl GameState {
         let mut count = 0;
         for r in 0..10 {
             for c in 0..9 {
-                if let Some(p) = self.board.get_piece(r, c) {
+                let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
+                if let Some(p) = self.board.get_piece(pos) {
                     if p.color == color {
                         for tr in 0..10 {
                             for tc in 0..9 {
-                                if is_valid_move(&self.board, r, c, tr, tc, color).is_ok() {
+                                let target = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+                                if is_valid_move(&self.board, pos, target, color).is_ok() {
                                     count += 1;
                                     if count > 1 {
                                         return true;
@@ -185,10 +187,10 @@ impl GameState {
     pub fn undo_move(&mut self) -> bool {
         if let Some(record) = self.history.pop() {
             let mv = Move {
-                from_row: record.from.0 as u8,
-                from_col: record.from.1 as u8,
-                to_row: record.to.0 as u8,
-                to_col: record.to.1 as u8,
+                from_row: record.from.row as u8,
+                from_col: record.from.col as u8,
+                to_row: record.to.row as u8,
+                to_col: record.to.col as u8,
                 score: 0,
             };
 
@@ -225,12 +227,22 @@ mod tests {
 
         // Make a move: Red Central Soldier forward
         // From (3, 4) to (4, 4)
-        game.make_move(3, 4, 4, 4).unwrap();
+        game.make_move(
+            BoardCoordinate::new(3, 4).unwrap(),
+            BoardCoordinate::new(4, 4).unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(game.history.len(), 1);
         assert_eq!(game.turn, Color::Black);
-        assert!(game.board.get_piece(3, 4).is_none());
-        assert!(game.board.get_piece(4, 4).is_some());
+        assert!(game
+            .board
+            .get_piece(BoardCoordinate::new(3, 4).unwrap())
+            .is_none());
+        assert!(game
+            .board
+            .get_piece(BoardCoordinate::new(4, 4).unwrap())
+            .is_some());
 
         // Undo
         let success = game.undo_move();
@@ -238,8 +250,14 @@ mod tests {
 
         assert_eq!(game.history.len(), 0);
         assert_eq!(game.turn, Color::Red);
-        assert!(game.board.get_piece(3, 4).is_some());
-        assert!(game.board.get_piece(4, 4).is_none());
+        assert!(game
+            .board
+            .get_piece(BoardCoordinate::new(3, 4).unwrap())
+            .is_some());
+        assert!(game
+            .board
+            .get_piece(BoardCoordinate::new(4, 4).unwrap())
+            .is_none());
 
         let restored_fen = game.board.to_fen_string(game.turn);
         assert_eq!(initial_fen, restored_fen);
@@ -250,11 +268,23 @@ mod tests {
         let mut game = GameState::new();
 
         // 1. Red Soldier (3,4) -> (4,4)
-        game.make_move(3, 4, 4, 4).unwrap();
+        game.make_move(
+            BoardCoordinate::new(3, 4).unwrap(),
+            BoardCoordinate::new(4, 4).unwrap(),
+        )
+        .unwrap();
         // 2. Black Soldier (6,4) -> (5,4)
-        game.make_move(6, 4, 5, 4).unwrap();
+        game.make_move(
+            BoardCoordinate::new(6, 4).unwrap(),
+            BoardCoordinate::new(5, 4).unwrap(),
+        )
+        .unwrap();
         // 3. Red Soldier (4,4) -> (5,4) Capture!
-        game.make_move(4, 4, 5, 4).unwrap();
+        game.make_move(
+            BoardCoordinate::new(4, 4).unwrap(),
+            BoardCoordinate::new(5, 4).unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(game.history.len(), 3);
         let last_record = game.history.last().unwrap();
@@ -268,12 +298,18 @@ mod tests {
         assert_eq!(game.history.len(), 2);
         assert_eq!(game.turn, Color::Red);
         // Check Red Soldier back at (4,4)
-        let p = game.board.get_piece(4, 4).unwrap();
+        let p = game
+            .board
+            .get_piece(BoardCoordinate::new(4, 4).unwrap())
+            .unwrap();
         assert_eq!(p.piece_type, PieceType::Soldier);
         assert_eq!(p.color, Color::Red);
 
         // Check Black Soldier restored at (5,4)
-        let cap = game.board.get_piece(5, 4).unwrap();
+        let cap = game
+            .board
+            .get_piece(BoardCoordinate::new(5, 4).unwrap())
+            .unwrap();
         assert_eq!(cap.piece_type, PieceType::Soldier);
         assert_eq!(cap.color, Color::Black);
     }
@@ -285,14 +321,26 @@ mod tests {
 
         // Setup Stalemate position
         // Red General at (0,0)
-        game.board.add_piece(0, 0, PieceType::General, Color::Red);
+        game.board.add_piece(
+            BoardCoordinate::new(0, 0).unwrap(),
+            PieceType::General,
+            Color::Red,
+        );
 
         // Black General at (9,4) (Safe)
-        game.board.add_piece(9, 4, PieceType::General, Color::Black);
+        game.board.add_piece(
+            BoardCoordinate::new(9, 4).unwrap(),
+            PieceType::General,
+            Color::Black,
+        );
 
         // Black Chariot at (9,1).
         // We will move it to (1,1) to trap Red.
-        game.board.add_piece(9, 1, PieceType::Chariot, Color::Black);
+        game.board.add_piece(
+            BoardCoordinate::new(9, 1).unwrap(),
+            PieceType::Chariot,
+            Color::Black,
+        );
 
         // It's Black's turn to make the trapping move
         game.turn = Color::Black;
@@ -305,7 +353,10 @@ mod tests {
         // (0,0) is NOT attacked (Chariot is at (1,1)).
         // So Red is NOT in check, but has NO moves. -> Stalemate.
 
-        let result = game.make_move(9, 1, 1, 1);
+        let result = game.make_move(
+            BoardCoordinate::new(9, 1).unwrap(),
+            BoardCoordinate::new(1, 1).unwrap(),
+        );
         assert!(result.is_ok());
 
         // Expect Checkmate (Black Wins) because Stalemate is Loss
