@@ -412,6 +412,7 @@ pub fn BoardView(
                             Ok(()) => {
                                 set_game_state.set(new_state);
                                 if let Some(cb) = on_move.as_ref() {
+                                    #[allow(clippy::cast_possible_truncation)]
                                     cb(Move {
                                         from_row: from_row as u8,
                                         from_col: from_col as u8,
@@ -434,6 +435,7 @@ pub fn BoardView(
                         Ok(()) => {
                             set_game_state.set(new_state);
                             if let Some(cb) = on_move.as_ref() {
+                                #[allow(clippy::cast_possible_truncation)]
                                 cb(Move {
                                     from_row: from_row as u8,
                                     from_col: from_col as u8,
@@ -599,7 +601,7 @@ pub fn BoardView(
                             };
                             view! {
                                 <span style=format!("color: {}; font-weight: bold;", color)>
-                                    {format!("{} {}", icon, text)}
+                                    {format!("{icon} {text}")}
                                 </span>
                             }.into_view()
                         },
@@ -611,7 +613,7 @@ pub fn BoardView(
                             };
                             view! {
                                 <span style="color: #4CAF50; font-weight: bold; font-size: 1.3em;">
-                                    {format!("{} Chiếu hết! {}", icon, text)}
+                                    {format!("{icon} Chiếu hết! {text}")}
                                 </span>
                             }.into_view()
                         },

@@ -101,7 +101,7 @@ impl GameManager {
         }
 
         // Check if there is someone in the queue
-        if let Some(opponent_id) = self.matchmaking_queue.iter().cloned().next() {
+        if let Some(opponent_id) = self.matchmaking_queue.iter().next().cloned() {
             // Remove opponent from queue
             self.matchmaking_queue.remove(&opponent_id);
 
@@ -148,7 +148,7 @@ impl GameManager {
                 your_color: Color::Red,
                 game_id: game_id.clone(),
             });
-            let _ = p.tx.send(ServerMessage::GameStart(Board::new()));
+            let _ = p.tx.send(ServerMessage::GameStart(Box::new(Board::new())));
         }
 
         if let Some(p) = self.players.get(&black_id) {
@@ -157,7 +157,7 @@ impl GameManager {
                 your_color: Color::Black,
                 game_id: game_id.clone(),
             });
-            let _ = p.tx.send(ServerMessage::GameStart(Board::new()));
+            let _ = p.tx.send(ServerMessage::GameStart(Box::new(Board::new())));
         }
     }
 
@@ -275,7 +275,7 @@ impl GameManager {
                             your_color: Color::Red,
                             game_id: game_id.clone(),
                         });
-                        let _ = p.tx.send(ServerMessage::GameStart(Board::new()));
+                        let _ = p.tx.send(ServerMessage::GameStart(Box::new(Board::new())));
                     }
                     if let Some(p) = self.players.get(&black_id) {
                         let _ = p.tx.send(ServerMessage::MatchFound {
@@ -283,7 +283,7 @@ impl GameManager {
                             your_color: Color::Black,
                             game_id: game_id.clone(),
                         });
-                        let _ = p.tx.send(ServerMessage::GameStart(Board::new()));
+                        let _ = p.tx.send(ServerMessage::GameStart(Box::new(Board::new())));
                     }
                 }
             }

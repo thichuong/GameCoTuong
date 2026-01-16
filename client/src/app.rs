@@ -238,17 +238,18 @@ pub fn App() -> impl IntoView {
                     set_online_status.set(OnlineStatus::Playing);
                     set_game_mode.set(GameMode::Online);
                     let mut new_state = GameState::new();
-                    new_state.board = board;
+                    new_state.board = *board;
                     set_game_state.set(new_state);
                 }
                 ServerMessage::OpponentMove(m) => {
                     let mut state = game_state.get();
-                    if let Ok(()) = state.make_move(
+                    if state.make_move(
                         m.from_row as usize,
                         m.from_col as usize,
                         m.to_row as usize,
                         m.to_col as usize,
-                    ) {
+                    ) == Ok(())
+                    {
                         set_game_state.set(state);
                     }
                 }
@@ -262,19 +263,17 @@ pub fn App() -> impl IntoView {
                     set_game_end_reason.set(reason);
                     set_is_ready_for_rematch.set(false);
                 }
-                _ => {}
+                ServerMessage::Error(_) => {}
             }
         }
     });
 
     // on_move handler for BoardView
     let on_move = {
-        let network_client = network_client.clone();
-        let game_mode = game_mode.clone();
         Rc::new(move |m: Move| {
             if game_mode.get() == GameMode::Online {
                 if let Some(client) = network_client.get() {
-                    client.send(GameMessage::MakeMove(m));
+                    client.send(&GameMessage::MakeMove(m));
                 }
             }
         }) as Rc<dyn Fn(Move)>
@@ -1115,7 +1114,7 @@ pub fn App() -> impl IntoView {
                                     style="padding: 15px 40px; font-size: 1.1em;"
                                     on:click=move |_| {
                                         if let Some(client) = network_client.get() {
-                                            client.send(GameMessage::FindMatch);
+                                            client.send(&GameMessage::FindMatch);
                                         }
                                     }
                                 >
@@ -1132,7 +1131,7 @@ pub fn App() -> impl IntoView {
                                     class="control-btn btn-danger"
                                     on:click=move |_| {
                                         if let Some(client) = network_client.get() {
-                                            client.send(GameMessage::CancelFindMatch);
+                                            client.send(&GameMessage::CancelFindMatch);
                                         }
                                         set_online_status.set(OnlineStatus::None);
                                     }
@@ -1174,7 +1173,7 @@ pub fn App() -> impl IntoView {
                                             style="padding: 10px 20px;"
                                             on:click=move |_| {
                                                 if let Some(client) = network_client.get() {
-                                                    client.send(GameMessage::Surrender);
+                                                    client.send(&GameMessage::Surrender);
                                                 }
                                             }
                                         >
@@ -1225,10 +1224,10 @@ pub fn App() -> impl IntoView {
                             view! {
                                 <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
                                     <div style=format!("font-size: 2em; color: {};", result_color)>
-                                        {format!("{} {}", result_icon, result_text)}
+                                        {format!("{result_icon} {result_text}")}
                                     </div>
                                     <div style="font-size: 1em; color: #aaa;">
-                                        {format!("Lý do: {}", reason_text)}
+                                        {format!("Lý do: {reason_text}")}
                                     </div>
 
                                     <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; align-items: center;">
@@ -1245,7 +1244,7 @@ pub fn App() -> impl IntoView {
                                                     style="padding: 15px 40px; font-size: 1.1em;"
                                                     on:click=move |_| {
                                                         if let Some(client) = network_client.get() {
-                                                            client.send(GameMessage::PlayAgain);
+                                                            client.send(&GameMessage::PlayAgain);
                                                         }
                                                         set_is_ready_for_rematch.set(true);
                                                     }

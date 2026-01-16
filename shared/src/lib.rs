@@ -22,7 +22,7 @@ pub enum ServerMessage {
         your_color: Color,
         game_id: String,
     },
-    GameStart(Board),
+    GameStart(Box<Board>),
     OpponentMove(Move),
     GameEnd {
         winner: Option<Color>,

@@ -25,8 +25,8 @@ impl NetworkClient {
         Ok(Self { ws })
     }
 
-    pub fn send(&self, msg: GameMessage) {
-        if let Ok(json) = serde_json::to_string(&msg) {
+    pub fn send(&self, msg: &GameMessage) {
+        if let Ok(json) = serde_json::to_string(msg) {
             let _ = self.ws.send_with_str(&json);
         }
     }
