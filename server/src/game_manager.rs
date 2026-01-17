@@ -517,7 +517,7 @@ mod tests {
 
         // Generate valid move (Red)
         let board = Board::new();
-        let mut gen = cotuong_core::logic::generator::MoveGenerator::new();
+        let gen = cotuong_core::logic::generator::MoveGenerator::new();
         let moves = gen.generate_moves(&board, Color::Red);
         let valid_move = moves.first().expect("Should have moves").clone();
 
@@ -603,7 +603,7 @@ mod tests {
 
         // Valid Move
         let board = Board::new();
-        let mut gen = cotuong_core::logic::generator::MoveGenerator::new();
+        let gen = cotuong_core::logic::generator::MoveGenerator::new();
         let moves = gen.generate_moves(&board, Color::Red);
         let valid_move = moves.first().unwrap().clone();
 
