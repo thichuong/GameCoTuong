@@ -146,6 +146,15 @@ GameCoTuong/
 | `server` | Backend server viết bằng **Axum**, xử lý WebSocket và ghép cặp người chơi. |
 | `shared` | Thư viện dùng chung giữa client và server (định nghĩa các Message, GameState). |
 
+### Chiến lược Đồng bộ (Optimization Strategy)
+
+Dự án sử dụng mô hình **Optimistic Relay with Distributed Validation** để đảm bảo trải nghiệm mượt mà (lateng thấp) nhưng vẫn an toàn:
+1. **Optimistic Relay**: Khi Player A đi một nước, Server lập tức chuyển tiếp nước đi đó cho Player B (không chờ validate server-side ngay lập tức) để giảm độ trễ UI.
+2. **Distributed Validation**: Player B (Client) nhận nước đi, tự kiểm tra tính hợp lệ bằng logic core (WASM).
+   - Nếu hợp lệ: Cập nhật bàn cờ ngay lập tức.
+   - Nếu không hợp lệ: Gửi báo cáo Conflict về Server.
+3. **Conflict Resolution**: Khi có Conflict, Server sẽ đóng vai trò "trọng tài", tính toán lại trạng thái đúng từ `cotuong_core` và gửi `GameStateCorrection` ép buộc cả 2 Client đồng bộ theo Server.
+
 ---
 
 ## 🧠 Cấu hình AI (Engine Parameters)
