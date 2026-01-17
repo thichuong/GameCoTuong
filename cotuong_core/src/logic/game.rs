@@ -137,22 +137,15 @@ impl GameState {
     }
 
     fn has_any_valid_move(&self, color: Color) -> bool {
-        for r in 0..10 {
-            for c in 0..9 {
-                let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
-                if let Some(p) = self.board.get_piece(pos) {
-                    if p.color == color {
-                        // Try all possible moves for this piece
-                        // Optimization: We can be smarter, but brute force is fine for 90 squares
-                        for tr in 0..10 {
-                            for tc in 0..9 {
-                                let target = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
-                                if is_valid_move(&self.board, pos, target, color).is_ok() {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
+        let bb = self.board.get_color_bb(color);
+        for sq in crate::logic::board::BitboardIterator::new(bb) {
+            let (r, c) = Board::index_to_coord(sq);
+            // Safety: Bitboard indices are always valid
+            let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
+            if let Some(piece) = self.board.get_piece(pos) {
+                // Should match color, but bitboard guarantees it
+                if self.can_piece_move(pos, piece.piece_type, color) {
+                    return true;
                 }
             }
         }
@@ -161,27 +154,262 @@ impl GameState {
 
     fn has_more_than_one_valid_move(&self, color: Color) -> bool {
         let mut count = 0;
-        for r in 0..10 {
-            for c in 0..9 {
-                let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
-                if let Some(p) = self.board.get_piece(pos) {
-                    if p.color == color {
-                        for tr in 0..10 {
-                            for tc in 0..9 {
-                                let target = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
-                                if is_valid_move(&self.board, pos, target, color).is_ok() {
-                                    count += 1;
-                                    if count > 1 {
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                    }
+        let bb = self.board.get_color_bb(color);
+
+        for sq in crate::logic::board::BitboardIterator::new(bb) {
+            let (r, c) = Board::index_to_coord(sq);
+            let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
+            if let Some(piece) = self.board.get_piece(pos) {
+                count += self.count_valid_moves_capped(pos, piece.piece_type, color, 2 - count);
+                if count > 1 {
+                    return true;
                 }
             }
         }
         false
+    }
+
+    fn can_piece_move(
+        &self,
+        from: BoardCoordinate,
+        piece_type: crate::logic::board::PieceType,
+        color: Color,
+    ) -> bool {
+        use crate::logic::board::PieceType;
+        match piece_type {
+            PieceType::General => {
+                self.check_offsets(from, color, &[(0, 1), (0, -1), (1, 0), (-1, 0)])
+            }
+            PieceType::Advisor => {
+                self.check_offsets(from, color, &[(1, 1), (1, -1), (-1, 1), (-1, -1)])
+            }
+            PieceType::Elephant => {
+                self.check_offsets(from, color, &[(2, 2), (2, -2), (-2, 2), (-2, -2)])
+            }
+            PieceType::Horse => self.check_offsets(
+                from,
+                color,
+                &[
+                    (2, 1),
+                    (2, -1),
+                    (-2, 1),
+                    (-2, -1),
+                    (1, 2),
+                    (1, -2),
+                    (-1, 2),
+                    (-1, -2),
+                ],
+            ),
+            PieceType::Chariot => {
+                self.check_linear(from, color, &[(0, 1), (0, -1), (1, 0), (-1, 0)])
+            }
+            PieceType::Cannon => {
+                self.check_linear_cannon(from, color, &[(0, 1), (0, -1), (1, 0), (-1, 0)])
+            }
+            PieceType::Soldier => {
+                let forward = match color {
+                    Color::Red => 1,
+                    Color::Black => -1,
+                };
+                self.check_offsets(from, color, &[(forward, 0), (0, 1), (0, -1)])
+            }
+        }
+    }
+
+    fn count_valid_moves_capped(
+        &self,
+        from: BoardCoordinate,
+        piece_type: crate::logic::board::PieceType,
+        color: Color,
+        cap: i32,
+    ) -> i32 {
+        use crate::logic::board::PieceType;
+        if cap <= 0 {
+            return 0;
+        }
+
+        match piece_type {
+            PieceType::General => {
+                self.count_offsets_capped(from, color, &[(0, 1), (0, -1), (1, 0), (-1, 0)], cap)
+            }
+            PieceType::Advisor => {
+                self.count_offsets_capped(from, color, &[(1, 1), (1, -1), (-1, 1), (-1, -1)], cap)
+            }
+            PieceType::Elephant => {
+                self.count_offsets_capped(from, color, &[(2, 2), (2, -2), (-2, 2), (-2, -2)], cap)
+            }
+            PieceType::Horse => self.count_offsets_capped(
+                from,
+                color,
+                &[
+                    (2, 1),
+                    (2, -1),
+                    (-2, 1),
+                    (-2, -1),
+                    (1, 2),
+                    (1, -2),
+                    (-1, 2),
+                    (-1, -2),
+                ],
+                cap,
+            ),
+            PieceType::Chariot => {
+                self.count_linear_capped(from, color, &[(0, 1), (0, -1), (1, 0), (-1, 0)], cap)
+            }
+            PieceType::Cannon => self.count_linear_cannon_capped(
+                from,
+                color,
+                &[(0, 1), (0, -1), (1, 0), (-1, 0)],
+                cap,
+            ),
+            PieceType::Soldier => {
+                let forward = match color {
+                    Color::Red => 1,
+                    Color::Black => -1,
+                };
+                self.count_offsets_capped(from, color, &[(forward, 0), (0, 1), (0, -1)], cap)
+            }
+        }
+    }
+
+    fn check_offsets(
+        &self,
+        from: BoardCoordinate,
+        color: Color,
+        offsets: &[(isize, isize)],
+    ) -> bool {
+        for &(dr, dc) in offsets {
+            let r = from.row as isize + dr;
+            let c = from.col as isize + dc;
+            if r >= 0 && r < 10 && c >= 0 && c < 9 {
+                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
+                if is_valid_move(&self.board, from, to, color).is_ok() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn check_linear(&self, from: BoardCoordinate, color: Color, dirs: &[(isize, isize)]) -> bool {
+        for &(dr, dc) in dirs {
+            let mut r = from.row as isize + dr;
+            let mut c = from.col as isize + dc;
+            while r >= 0 && r < 10 && c >= 0 && c < 9 {
+                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
+                if is_valid_move(&self.board, from, to, color).is_ok() {
+                    return true;
+                }
+                // If blocked, stop in this direction (optimization: is_valid_move checks blocking,
+                // but for Chariot we know it cannot jump)
+                if self.board.get_piece(to).is_some() {
+                    break;
+                }
+                r += dr;
+                c += dc;
+            }
+        }
+        false
+    }
+
+    fn check_linear_cannon(
+        &self,
+        from: BoardCoordinate,
+        color: Color,
+        dirs: &[(isize, isize)],
+    ) -> bool {
+        for &(dr, dc) in dirs {
+            let mut r = from.row as isize + dr;
+            let mut c = from.col as isize + dc;
+            while r >= 0 && r < 10 && c >= 0 && c < 9 {
+                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
+                if is_valid_move(&self.board, from, to, color).is_ok() {
+                    return true;
+                }
+                r += dr;
+                c += dc;
+            }
+        }
+        false
+    }
+
+    fn count_offsets_capped(
+        &self,
+        from: BoardCoordinate,
+        color: Color,
+        offsets: &[(isize, isize)],
+        cap: i32,
+    ) -> i32 {
+        let mut count = 0;
+        for &(dr, dc) in offsets {
+            let r = from.row as isize + dr;
+            let c = from.col as isize + dc;
+            if r >= 0 && r < 10 && c >= 0 && c < 9 {
+                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
+                if is_valid_move(&self.board, from, to, color).is_ok() {
+                    count += 1;
+                    if count >= cap {
+                        return count;
+                    }
+                }
+            }
+        }
+        count
+    }
+
+    fn count_linear_capped(
+        &self,
+        from: BoardCoordinate,
+        color: Color,
+        dirs: &[(isize, isize)],
+        cap: i32,
+    ) -> i32 {
+        let mut count = 0;
+        for &(dr, dc) in dirs {
+            let mut r = from.row as isize + dr;
+            let mut c = from.col as isize + dc;
+            while r >= 0 && r < 10 && c >= 0 && c < 9 {
+                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
+                if is_valid_move(&self.board, from, to, color).is_ok() {
+                    count += 1;
+                    if count >= cap {
+                        return count;
+                    }
+                }
+                if self.board.get_piece(to).is_some() {
+                    break;
+                }
+                r += dr;
+                c += dc;
+            }
+        }
+        count
+    }
+
+    fn count_linear_cannon_capped(
+        &self,
+        from: BoardCoordinate,
+        color: Color,
+        dirs: &[(isize, isize)],
+        cap: i32,
+    ) -> i32 {
+        let mut count = 0;
+        for &(dr, dc) in dirs {
+            let mut r = from.row as isize + dr;
+            let mut c = from.col as isize + dc;
+            while r >= 0 && r < 10 && c >= 0 && c < 9 {
+                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
+                if is_valid_move(&self.board, from, to, color).is_ok() {
+                    count += 1;
+                    if count >= cap {
+                        return count;
+                    }
+                }
+                r += dr;
+                c += dc;
+            }
+        }
+        count
     }
 
     pub fn undo_move(&mut self) -> bool {
