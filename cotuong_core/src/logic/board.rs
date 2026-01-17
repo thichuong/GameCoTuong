@@ -261,7 +261,9 @@ impl Board {
         cannon_row: usize,
         soldier_row: usize,
     ) {
-        let make_coord = |r, c| BoardCoordinate::new(r, c).expect("Invalid init coord");
+        // Safe wrapper to avoid panic
+        let make_coord = |r, c| BoardCoordinate::new(r, c);
+
         let pieces = [
             PieceType::Chariot,
             PieceType::Horse,
@@ -276,16 +278,24 @@ impl Board {
 
         // Back row
         for (col, &pt) in pieces.iter().enumerate() {
-            self.add_piece(make_coord(back_row, col), pt, color);
+            if let Some(pos) = make_coord(back_row, col) {
+                self.add_piece(pos, pt, color);
+            }
         }
 
         // Cannons
-        self.add_piece(make_coord(cannon_row, 1), PieceType::Cannon, color);
-        self.add_piece(make_coord(cannon_row, 7), PieceType::Cannon, color);
+        if let Some(pos) = make_coord(cannon_row, 1) {
+            self.add_piece(pos, PieceType::Cannon, color);
+        }
+        if let Some(pos) = make_coord(cannon_row, 7) {
+            self.add_piece(pos, PieceType::Cannon, color);
+        }
 
         // Soldiers
         for col in (0..9).step_by(2) {
-            self.add_piece(make_coord(soldier_row, col), PieceType::Soldier, color);
+            if let Some(pos) = make_coord(soldier_row, col) {
+                self.add_piece(pos, PieceType::Soldier, color);
+            }
         }
     }
 
@@ -310,13 +320,17 @@ impl Board {
         to: BoardCoordinate,
         captured: Option<Piece>,
     ) {
-        let piece = self
-            .get_piece(to)
-            .expect("No piece at destination in undo_move_quiet");
-        self.remove_piece(to, piece.piece_type, piece.color);
-        self.add_piece(from, piece.piece_type, piece.color);
-        if let Some(cap) = captured {
-            self.add_piece(to, cap.piece_type, cap.color);
+        if let Some(piece) = self.get_piece(to) {
+            self.remove_piece(to, piece.piece_type, piece.color);
+            self.add_piece(from, piece.piece_type, piece.color);
+            if let Some(cap) = captured {
+                self.add_piece(to, cap.piece_type, cap.color);
+            }
+        } else {
+            // Logic error: Tried to undo move but piece not at 'to'
+            // For production safety, we just log or ignore rather than panic.
+            // In severe cases, we could return a Result, but method signature is void.
+            // We'll proceed safely by doing nothing if piece is missing.
         }
     }
 
@@ -447,13 +461,23 @@ impl Board {
         let to_col = mv.to_col as usize;
 
         // Safety: Engine moves should be valid.
-        let from = BoardCoordinate::new(from_row, from_col).expect("Invalid move from engine");
-        let to = BoardCoordinate::new(to_row, to_col).expect("Invalid move from engine");
+        let from = if let Some(pos) = BoardCoordinate::new(from_row, from_col) {
+            pos
+        } else {
+            return;
+        };
+        let to = if let Some(pos) = BoardCoordinate::new(to_row, to_col) {
+            pos
+        } else {
+            return;
+        };
 
         // 1. Get piece at source
-        let piece = self
-            .get_piece(from)
-            .expect("No piece at source in apply_move");
+        let piece = if let Some(p) = self.get_piece(from) {
+            p
+        } else {
+            return;
+        };
 
         // Remove from source
         self.remove_piece(from, piece.piece_type, piece.color);
@@ -509,16 +533,26 @@ impl Board {
         let to_row = mv.to_row as usize;
         let to_col = mv.to_col as usize;
 
-        let from = BoardCoordinate::new(from_row, from_col).expect("Invalid move from engine");
-        let to = BoardCoordinate::new(to_row, to_col).expect("Invalid move from engine");
+        let from = if let Some(pos) = BoardCoordinate::new(from_row, from_col) {
+            pos
+        } else {
+            return;
+        };
+        let to = if let Some(pos) = BoardCoordinate::new(to_row, to_col) {
+            pos
+        } else {
+            return;
+        };
 
         // 4. Switch turn hash (back)
         self.zobrist_hash ^= keys.side_key;
 
         // 3. Move piece back from destination to source
-        let piece = self
-            .get_piece(to)
-            .expect("No piece at destination in undo_move");
+        let piece = if let Some(p) = self.get_piece(to) {
+            p
+        } else {
+            return;
+        };
 
         // Remove from destination
         self.remove_piece(to, piece.piece_type, piece.color);

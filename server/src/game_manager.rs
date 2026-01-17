@@ -219,21 +219,25 @@ impl GameManager {
                 // 1. Happy Path: Verification Success
                 if let Ok((new_board, new_turn)) = Board::from_fen(&claimed_fen) {
                     let (game_ended, winner) = {
-                        let game = self.games.get_mut(&game_id).unwrap();
-                        game.board = new_board;
-                        game.turn = new_turn;
-                        game.pending_move = None;
+                        if let Some(game) = self.games.get_mut(&game_id) {
+                            game.board = new_board;
+                            game.turn = new_turn;
+                            game.pending_move = None;
 
-                        // Check Checkmate/Stalemate
-                        if !has_any_valid_move(&game.board, game.turn) {
-                            let winner = if game.turn == Color::Red {
-                                Color::Black
+                            // Check Checkmate/Stalemate
+                            if !has_any_valid_move(&game.board, game.turn) {
+                                let winner = if game.turn == Color::Red {
+                                    Color::Black
+                                } else {
+                                    Color::Red
+                                };
+                                game.game_ended = true;
+                                (true, Some(winner))
                             } else {
-                                Color::Red
-                            };
-                            game.game_ended = true;
-                            (true, Some(winner))
+                                (false, None)
+                            }
                         } else {
+                            // Should not happen as we checked existence before, but safe fallback
                             (false, None)
                         }
                     };
