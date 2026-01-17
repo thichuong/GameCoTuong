@@ -22,6 +22,15 @@ pub struct AlphaBetaEngine {
     lmr_table: [[u8; 64]; 64],
 }
 
+struct MoveGenContext<'a> {
+    board: &'a Board,
+    turn: Color,
+    moves: &'a mut MoveList,
+    best_move: Option<Move>,
+    killers: &'a [Option<Move>; 2],
+    only_captures: bool,
+}
+
 impl AlphaBetaEngine {
     pub fn new(config: Arc<EngineConfig>) -> Self {
         let dynamic_limits = Self::precompute_limits(&config);
@@ -110,7 +119,6 @@ impl AlphaBetaEngine {
         }
     }
 
-    #[allow(clippy::manual_is_multiple_of)]
     fn check_time(&self) -> bool {
         if let Some(limit) = self.time_limit {
             if self.nodes_searched % 1024 == 0 {
@@ -123,7 +131,112 @@ impl AlphaBetaEngine {
         false
     }
 
-    #[allow(clippy::too_many_lines)]
+    fn is_repetition(&self, hash: u64) -> bool {
+        self.history_stack.iter().filter(|&&h| h == hash).count() >= 2
+    }
+
+    fn probcut(
+        &mut self,
+        board: &mut Board,
+        beta: i32,
+        depth: u8,
+        turn: Color,
+    ) -> Option<Option<i32>> {
+        if depth >= self.config.probcut_depth && beta.abs() < 15000 {
+            let margin = self.config.probcut_margin;
+            let reduction = self.config.probcut_reduction;
+
+            if depth > reduction {
+                if let Some(score) = self.alpha_beta(
+                    board,
+                    -beta - margin,
+                    -beta - margin + 1,
+                    depth - reduction,
+                    turn.opposite(),
+                    None,
+                ) {
+                    if -score >= beta + margin {
+                        return Some(Some(beta));
+                    }
+                } else {
+                    return Some(None);
+                }
+            }
+        }
+        None
+    }
+
+    fn null_move_pruning(
+        &mut self,
+        board: &mut Board,
+        beta: i32,
+        depth: u8,
+        turn: Color,
+    ) -> Option<Option<i32>> {
+        if depth >= 3 && beta.abs() < 15000 && !is_in_check(board, turn) {
+            let r = if depth > 6 { 3 } else { 2 };
+            board.apply_null_move();
+
+            let result = self.alpha_beta(
+                board,
+                -beta,
+                -beta + 1,
+                depth - 1 - r,
+                turn.opposite(),
+                None,
+            );
+
+            board.apply_null_move();
+
+            if let Some(score) = result {
+                if -score >= beta {
+                    return Some(Some(beta));
+                }
+            } else {
+                return Some(None);
+            }
+        }
+        None
+    }
+
+    fn singular_extension(
+        &mut self,
+        board: &mut Board,
+        tt_entry: Option<crate::engine::tt::TTEntry>,
+        depth: u8,
+        turn: Color,
+        best_move_tt: Option<Move>,
+        excluded_move: Option<Move>,
+    ) -> u8 {
+        if depth >= self.config.singular_extension_min_depth
+            && excluded_move.is_none()
+            && best_move_tt.is_some()
+        {
+            if let Some(entry) = tt_entry {
+                if entry.depth >= depth - 3
+                    && (entry.flag == TTFlag::Exact || entry.flag == TTFlag::LowerBound)
+                {
+                    let margin = self.config.singular_extension_margin;
+                    let singular_beta = entry.score - margin;
+
+                    if let Some(score) = self.alpha_beta(
+                        board,
+                        singular_beta - 1,
+                        singular_beta,
+                        (depth - 1) / 2,
+                        turn,
+                        best_move_tt,
+                    ) {
+                        if score < singular_beta {
+                            return 1;
+                        }
+                    }
+                }
+            }
+        }
+        0
+    }
+
     fn alpha_beta(
         &mut self,
         board: &mut Board,
@@ -139,13 +252,11 @@ impl AlphaBetaEngine {
             return None;
         }
 
-        // Repetition Check
-        // Repetition Check (3-fold)
         let hash = board.zobrist_hash;
-        let rep_count = self.history_stack.iter().filter(|&&h| h == hash).count();
-        if rep_count >= 2 {
+        if self.is_repetition(hash) {
             return Some(0);
         }
+
         self.history_stack.push(hash);
 
         // TT Probe
@@ -185,29 +296,9 @@ impl AlphaBetaEngine {
             return Some(score);
         }
 
-        // ProbCut
-        if depth >= self.config.probcut_depth && beta.abs() < 15000 {
-            let margin = self.config.probcut_margin;
-            let reduction = self.config.probcut_reduction;
-
-            if depth > reduction {
-                if let Some(score) = self.alpha_beta(
-                    board,
-                    -beta - margin,
-                    -beta - margin + 1,
-                    depth - reduction,
-                    turn.opposite(),
-                    None,
-                ) {
-                    if -score >= beta + margin {
-                        self.history_stack.pop();
-                        return Some(beta);
-                    }
-                } else {
-                    self.history_stack.pop();
-                    return None;
-                }
-            }
+        if let Some(res) = self.probcut(board, beta, depth, turn) {
+            self.history_stack.pop();
+            return res;
         }
 
         let in_check = is_in_check(board, turn);
@@ -226,83 +317,23 @@ impl AlphaBetaEngine {
             }
         }
 
-        // Null Move Pruning
-        if depth >= 3 && beta.abs() < 15000 && !crate::logic::rules::is_in_check(board, turn) {
-            let r = if depth > 6 { 3 } else { 2 }; // Adaptive reduction
-                                                   // Null move: switch turn, update hash.
-                                                   // Board::apply_null_move toggles side key.
-            board.apply_null_move();
-
-            if let Some(score) = self.alpha_beta(
-                board,
-                -beta,
-                -beta + 1,
-                depth - 1 - r,
-                turn.opposite(),
-                None,
-            ) {
-                board.apply_null_move(); // Undo null move (toggle back)
-                if -score >= beta {
-                    self.history_stack.pop();
-                    return Some(beta);
-                }
-            } else {
-                board.apply_null_move(); // Undo null move
-                self.history_stack.pop();
-                return None;
-            }
+        if let Some(res) = self.null_move_pruning(board, beta, depth, turn) {
+            self.history_stack.pop();
+            return res;
         }
 
         let mut best_move_tt = tt_entry.and_then(|e| e.best_move);
 
         // Internal Iterative Deepening (IID)
         if best_move_tt.is_none() && depth >= 4 {
-            // Search with reduced depth to populate TT
             let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn, None);
-            // We don't use the score, just hope TT is populated
             if let Some(entry) = self.tt.probe(hash) {
                 best_move_tt = entry.best_move;
             }
         }
 
-        // Singular Extension
-        let mut singular_extension = 0;
-        // Only trigger SE if:
-        // 1. We are at sufficient depth
-        // 2. We have a TT move (which is likely the singular move)
-        // 3. The TT entry is strong enough (Exact or LowerBound) and has sufficient depth
-        // 4. We are NOT already in a singular search (excluded_move is None)
-        if depth >= self.config.singular_extension_min_depth
-            && excluded_move.is_none()
-            && best_move_tt.is_some()
-        {
-            if let Some(entry) = tt_entry {
-                if entry.depth >= depth - 3
-                    && (entry.flag == TTFlag::Exact || entry.flag == TTFlag::LowerBound)
-                {
-                    let margin = self.config.singular_extension_margin;
-                    let singular_beta = entry.score - margin;
-
-                    // Search with reduced depth to see if any OTHER move can beat (score - margin)
-                    // If all other moves fail low (return < singular_beta), then the TT move is singular.
-                    // We exclude the TT move from this search.
-                    let val = self.alpha_beta(
-                        board,
-                        singular_beta - 1,
-                        singular_beta,
-                        (depth - 1) / 2,
-                        turn,
-                        best_move_tt,
-                    );
-
-                    if let Some(score) = val {
-                        if score < singular_beta {
-                            singular_extension = 1;
-                        }
-                    }
-                }
-            }
-        }
+        let singular_extension =
+            self.singular_extension(board, tt_entry, depth, turn, best_move_tt, excluded_move);
 
         let mut moves = self.generate_moves(board, turn, best_move_tt, depth);
 
@@ -645,7 +676,7 @@ impl AlphaBetaEngine {
 
     fn generate_moves_internal(
         &self,
-        board: &mut Board,
+        board: &Board,
         turn: Color,
         best_move: Option<Move>,
         depth: u8,
@@ -656,6 +687,15 @@ impl AlphaBetaEngine {
             self.killer_moves.get(depth as usize).unwrap_or(&[None; 2])
         } else {
             &[None; 2]
+        };
+
+        let mut ctx = MoveGenContext {
+            board,
+            turn,
+            moves: &mut moves,
+            best_move,
+            killers,
+            only_captures,
         };
 
         use crate::logic::board::BitboardIterator;
@@ -677,76 +717,13 @@ impl AlphaBetaEngine {
                 };
 
                 match piece_type {
-                    PieceType::Chariot => self.gen_rook_moves(
-                        board,
-                        turn,
-                        r,
-                        c,
-                        &mut moves,
-                        best_move,
-                        killers,
-                        only_captures,
-                    ),
-                    PieceType::Cannon => self.gen_cannon_moves(
-                        board,
-                        turn,
-                        r,
-                        c,
-                        &mut moves,
-                        best_move,
-                        killers,
-                        only_captures,
-                    ),
-                    PieceType::Horse => self.gen_horse_moves(
-                        board,
-                        turn,
-                        r,
-                        c,
-                        &mut moves,
-                        best_move,
-                        killers,
-                        only_captures,
-                    ),
-                    PieceType::Elephant => self.gen_elephant_moves(
-                        board,
-                        turn,
-                        r,
-                        c,
-                        &mut moves,
-                        best_move,
-                        killers,
-                        only_captures,
-                    ),
-                    PieceType::Advisor => self.gen_advisor_moves(
-                        board,
-                        turn,
-                        r,
-                        c,
-                        &mut moves,
-                        best_move,
-                        killers,
-                        only_captures,
-                    ),
-                    PieceType::General => self.gen_king_moves(
-                        board,
-                        turn,
-                        r,
-                        c,
-                        &mut moves,
-                        best_move,
-                        killers,
-                        only_captures,
-                    ),
-                    PieceType::Soldier => self.gen_pawn_moves(
-                        board,
-                        turn,
-                        r,
-                        c,
-                        &mut moves,
-                        best_move,
-                        killers,
-                        only_captures,
-                    ),
+                    PieceType::Chariot => self.gen_rook_moves(&mut ctx, r, c),
+                    PieceType::Cannon => self.gen_cannon_moves(&mut ctx, r, c),
+                    PieceType::Horse => self.gen_horse_moves(&mut ctx, r, c),
+                    PieceType::Elephant => self.gen_elephant_moves(&mut ctx, r, c),
+                    PieceType::Advisor => self.gen_advisor_moves(&mut ctx, r, c),
+                    PieceType::General => self.gen_king_moves(&mut ctx, r, c),
+                    PieceType::Soldier => self.gen_pawn_moves(&mut ctx, r, c),
                 }
             }
         }
@@ -772,34 +749,24 @@ impl AlphaBetaEngine {
 
     // is_mate removed as it is too expensive and not needed for search correctness
 
-    #[allow(clippy::too_many_arguments)]
-    fn add_move(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        from: (usize, usize),
-        to: (usize, usize),
-        moves: &mut MoveList,
-        best_move: Option<Move>,
-        killers: &[Option<Move>; 2],
-        only_captures: bool,
-    ) {
+    fn add_move(&self, ctx: &mut MoveGenContext, from: (usize, usize), to: (usize, usize)) {
         let (r, c) = from;
         let (tr, tc) = to;
 
         let target_sq = Board::square_index(tr, tc);
-        let is_occupied = (board.occupied & (1 << target_sq)) != 0;
+        let is_occupied = (ctx.board.occupied & (1 << target_sq)) != 0;
 
         if is_occupied {
-            if (board.get_color_bb(turn) & (1 << target_sq)) != 0 {
+            if (ctx.board.get_color_bb(ctx.turn) & (1 << target_sq)) != 0 {
                 return; // Blocked by friendly
             }
-        } else if only_captures {
+        } else if ctx.only_captures {
             return;
         }
 
         let target = if is_occupied {
-            board.get_piece(unsafe { BoardCoordinate::new_unchecked(tr, tc) })
+            ctx.board
+                .get_piece(unsafe { BoardCoordinate::new_unchecked(tr, tc) })
         } else {
             None
         };
@@ -810,7 +777,7 @@ impl AlphaBetaEngine {
 
         // Scoring
         let mut score;
-        let is_hash_move = best_move.is_some_and(|bm| {
+        let is_hash_move = ctx.best_move.is_some_and(|bm| {
             bm.from_row as usize == r
                 && bm.from_col as usize == c
                 && bm.to_row as usize == tr
@@ -822,12 +789,13 @@ impl AlphaBetaEngine {
         } else if let Some(t) = target {
             // MVV-LVA
             let victim_val = self.get_piece_value(t.piece_type);
-            let attacker_val = board
+            let attacker_val = ctx
+                .board
                 .get_piece(unsafe { BoardCoordinate::new_unchecked(r, c) })
                 .map_or(0, |p| self.get_piece_value(p.piece_type));
             score = self.config.score_capture_base + victim_val - (attacker_val / 10);
         } else {
-            let is_killer_move = killers.iter().any(|k| {
+            let is_killer_move = ctx.killers.iter().any(|k| {
                 k.is_some_and(|km| {
                     km.from_row as usize == r
                         && km.from_col as usize == c
@@ -853,7 +821,7 @@ impl AlphaBetaEngine {
             }
         }
 
-        moves.push(Move {
+        ctx.moves.push(Move {
             from_row: r as u8,
             from_col: c as u8,
             to_row: tr as u8,
@@ -868,94 +836,61 @@ impl AlphaBetaEngine {
         usize::try_from(res).ok()
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn gen_rook_moves(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        r: usize,
-        c: usize,
-        moves: &mut MoveList,
-        bm: Option<Move>,
-        k: &[Option<Move>; 2],
-        oc: bool,
-    ) {
+    fn gen_rook_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         use crate::logic::lookup::AttackTables;
         let tables = AttackTables::get();
 
         // Rank attacks (Horizontal)
-        let rank_occ = board.occupied_rows[r];
+        let rank_occ = ctx.board.occupied_rows[r];
         let rank_attacks = tables.get_rook_attacks(c, rank_occ, 9);
 
         let mut attacks = rank_attacks;
         while attacks != 0 {
             let col = attacks.trailing_zeros() as usize;
             attacks &= attacks - 1;
-            self.add_move(board, turn, (r, c), (r, col), moves, bm, k, oc);
+            self.add_move(ctx, (r, c), (r, col));
         }
 
         // File attacks (Vertical)
-        let file_occ = board.occupied_cols[c];
+        let file_occ = ctx.board.occupied_cols[c];
         let file_attacks = tables.get_rook_attacks(r, file_occ, 10);
 
         let mut attacks = file_attacks;
         while attacks != 0 {
             let row = attacks.trailing_zeros() as usize;
             attacks &= attacks - 1;
-            self.add_move(board, turn, (r, c), (row, c), moves, bm, k, oc);
+            self.add_move(ctx, (r, c), (row, c));
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn gen_cannon_moves(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        r: usize,
-        c: usize,
-        moves: &mut MoveList,
-        bm: Option<Move>,
-        k: &[Option<Move>; 2],
-        oc: bool,
-    ) {
+    fn gen_cannon_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         use crate::logic::lookup::AttackTables;
         let tables = AttackTables::get();
 
         // Rank attacks (Horizontal)
-        let rank_occ = board.occupied_rows[r];
+        let rank_occ = ctx.board.occupied_rows[r];
         let rank_attacks = tables.get_cannon_attacks(c, rank_occ, 9);
 
         let mut attacks = rank_attacks;
         while attacks != 0 {
             let col = attacks.trailing_zeros() as usize;
             attacks &= attacks - 1;
-            self.add_move(board, turn, (r, c), (r, col), moves, bm, k, oc);
+            self.add_move(ctx, (r, c), (r, col));
         }
 
         // File attacks (Vertical)
-        let file_occ = board.occupied_cols[c];
+        let file_occ = ctx.board.occupied_cols[c];
         let file_attacks = tables.get_cannon_attacks(r, file_occ, 10);
 
         let mut attacks = file_attacks;
         while attacks != 0 {
             let row = attacks.trailing_zeros() as usize;
             attacks &= attacks - 1;
-            self.add_move(board, turn, (r, c), (row, c), moves, bm, k, oc);
+            self.add_move(ctx, (r, c), (row, c));
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn gen_horse_moves(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        r: usize,
-        c: usize,
-        moves: &mut MoveList,
-        bm: Option<Move>,
-        k: &[Option<Move>; 2],
-        oc: bool,
-    ) {
+    fn gen_horse_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         let moves_offsets = [
             (-2, -1),
             (-2, 1),
@@ -987,24 +922,13 @@ impl AlphaBetaEngine {
             };
 
             let leg_sq = Board::square_index(leg_r, leg_c);
-            if (board.occupied & (1 << leg_sq)) == 0 {
-                self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
+            if (ctx.board.occupied & (1 << leg_sq)) == 0 {
+                self.add_move(ctx, (r, c), (tr, tc));
             }
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn gen_elephant_moves(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        r: usize,
-        c: usize,
-        moves: &mut MoveList,
-        bm: Option<Move>,
-        k: &[Option<Move>; 2],
-        oc: bool,
-    ) {
+    fn gen_elephant_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         let offsets = [(-2, -2), (-2, 2), (2, -2), (2, 2)];
         for (dr, dc) in offsets {
             let Some(tr) = Self::offset(r, dr) else {
@@ -1018,10 +942,10 @@ impl AlphaBetaEngine {
             }
 
             // River check
-            if turn == Color::Red && tr > 4 {
+            if ctx.turn == Color::Red && tr > 4 {
                 continue;
             }
-            if turn == Color::Black && tr < 5 {
+            if ctx.turn == Color::Black && tr < 5 {
                 continue;
             }
 
@@ -1034,24 +958,13 @@ impl AlphaBetaEngine {
             };
 
             let eye_sq = Board::square_index(eye_r, eye_c);
-            if (board.occupied & (1 << eye_sq)) == 0 {
-                self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
+            if (ctx.board.occupied & (1 << eye_sq)) == 0 {
+                self.add_move(ctx, (r, c), (tr, tc));
             }
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn gen_advisor_moves(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        r: usize,
-        c: usize,
-        moves: &mut MoveList,
-        bm: Option<Move>,
-        k: &[Option<Move>; 2],
-        oc: bool,
-    ) {
+    fn gen_advisor_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         let offsets = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
         for (dr, dc) in offsets {
             let Some(tr) = Self::offset(r, dr) else {
@@ -1068,29 +981,18 @@ impl AlphaBetaEngine {
             if !(3..=5).contains(&tc) {
                 continue;
             }
-            if turn == Color::Red && tr > 2 {
+            if ctx.turn == Color::Red && tr > 2 {
                 continue;
             }
-            if turn == Color::Black && tr < 7 {
+            if ctx.turn == Color::Black && tr < 7 {
                 continue;
             }
 
-            self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
+            self.add_move(ctx, (r, c), (tr, tc));
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn gen_king_moves(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        r: usize,
-        c: usize,
-        moves: &mut MoveList,
-        bm: Option<Move>,
-        k: &[Option<Move>; 2],
-        oc: bool,
-    ) {
+    fn gen_king_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         let offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)];
         for (dr, dc) in offsets {
             let Some(tr) = Self::offset(r, dr) else {
@@ -1107,44 +1009,33 @@ impl AlphaBetaEngine {
             if !(3..=5).contains(&tc) {
                 continue;
             }
-            if turn == Color::Red && tr > 2 {
+            if ctx.turn == Color::Red && tr > 2 {
                 continue;
             }
-            if turn == Color::Black && tr < 7 {
+            if ctx.turn == Color::Black && tr < 7 {
                 continue;
             }
 
-            self.add_move(board, turn, (r, c), (tr, tc), moves, bm, k, oc);
+            self.add_move(ctx, (r, c), (tr, tc));
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn gen_pawn_moves(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        r: usize,
-        c: usize,
-        moves: &mut MoveList,
-        bm: Option<Move>,
-        k: &[Option<Move>; 2],
-        oc: bool,
-    ) {
-        let forward = if turn == Color::Red { 1 } else { -1 };
+    fn gen_pawn_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
+        let forward = if ctx.turn == Color::Red { 1 } else { -1 };
 
         // Forward
         let tr = Self::offset(r, forward).unwrap_or(10);
         if tr < 10 {
-            self.add_move(board, turn, (r, c), (tr, c), moves, bm, k, oc);
+            self.add_move(ctx, (r, c), (tr, c));
         }
 
         // Horizontal (if crossed river)
-        let crossed_river = if turn == Color::Red { r > 4 } else { r < 5 };
+        let crossed_river = if ctx.turn == Color::Red { r > 4 } else { r < 5 };
         if crossed_river {
             for dc in [-1, 1] {
                 let tc = Self::offset(c, dc).unwrap_or(9);
                 if tc < 9 {
-                    self.add_move(board, turn, (r, c), (r, tc), moves, bm, k, oc);
+                    self.add_move(ctx, (r, c), (r, tc));
                 }
             }
         }

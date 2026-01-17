@@ -2,22 +2,21 @@ use crate::components::board::BoardView;
 use cotuong_core::engine::config::EngineConfig;
 use cotuong_core::engine::Move;
 use cotuong_core::engine::SearchLimit;
-use cotuong_core::logic::board::{BoardCoordinate, Color, PieceType};
+use cotuong_core::logic::board::{BoardCoordinate, Color};
 use cotuong_core::logic::game::{GameState, GameStatus};
 use cotuong_core::logic::rules::is_in_check;
 use cotuong_core::worker::{GameWorker, Input, Output};
 use gloo_worker::{Spawnable, WorkerBridge};
 use leptos::{
     component, create_effect, create_signal, document, event_target_value, set_timeout,
-    store_value, view, wasm_bindgen, web_sys, IntoView, SignalGet, SignalSet, SignalUpdate,
-    SignalWithUntracked, WriteSignal,
+    store_value, view, wasm_bindgen, web_sys, Callable, Callback, IntoView, ReadSignal, SignalGet,
+    SignalSet, SignalUpdate, SignalWithUntracked, WriteSignal,
 };
 use std::rc::Rc;
 use std::time::Duration;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use std::fmt::Write;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Difficulty {
     Level1,
@@ -75,60 +74,6 @@ pub fn App() -> impl IntoView {
     // Dual Configs
     let (red_config, set_red_config) = create_signal(EngineConfig::default());
     let (black_config, set_black_config) = create_signal(EngineConfig::default());
-
-    let get_piece_symbol = |p: PieceType, c: Color| -> &'static str {
-        match p {
-            PieceType::General => {
-                if c == Color::Red {
-                    "帥"
-                } else {
-                    "將"
-                }
-            }
-            PieceType::Advisor => {
-                if c == Color::Red {
-                    "仕"
-                } else {
-                    "士"
-                }
-            }
-            PieceType::Elephant => {
-                if c == Color::Red {
-                    "相"
-                } else {
-                    "象"
-                }
-            }
-            PieceType::Horse => {
-                if c == Color::Red {
-                    "傌"
-                } else {
-                    "馬"
-                }
-            }
-            PieceType::Chariot => {
-                if c == Color::Red {
-                    "俥"
-                } else {
-                    "車"
-                }
-            }
-            PieceType::Cannon => {
-                if c == Color::Red {
-                    "炮"
-                } else {
-                    "砲"
-                }
-            }
-            PieceType::Soldier => {
-                if c == Color::Red {
-                    "兵"
-                } else {
-                    "卒"
-                }
-            }
-        }
-    };
 
     // Worker Bridge
     let (worker_bridge, set_worker_bridge) =
@@ -195,8 +140,6 @@ pub fn App() -> impl IntoView {
                                         &format!("❌ Move error: {e:?}").into(),
                                     );
                                 }
-                                set_is_thinking.set(false);
-                                    set_is_thinking.set(false);
                                 }
                             }
                         }
@@ -442,12 +385,6 @@ pub fn App() -> impl IntoView {
         let current_len = state.history.len();
 
         last_len.update_value(|prev| {
-            // Only play if history length increased and it's not the initial state (or empty)
-            // We also want to skip if we just loaded a game?
-            // For now, simple logic: if current > prev, play.
-            // Exception: if prev is 0 and current is large (loaded game), maybe skip?
-            // But we can't distinguish load vs fast moves easily without more state.
-            // Let's just play sound.
             if current_len > *prev {
                 if let Some(last_move) = state.history.last() {
                     let mut sound = &move_sound;
@@ -467,201 +404,6 @@ pub fn App() -> impl IntoView {
             *prev = current_len;
         });
     });
-
-    let export_csv = move |_| {
-        let state = game_state.get();
-        let mut csv = String::from("Turn,From,To,Piece,Captured,Note\n");
-        for (i, record) in state.history.iter().enumerate() {
-            let turn = if i % 2 == 0 { "Red" } else { "Black" };
-            let from = format!("({},{})", record.from.row, record.from.col);
-            let to = format!("({},{})", record.to.row, record.to.col);
-            let piece = format!("{:?}", record.piece.piece_type);
-            let captured = record
-                .captured
-                .map(|p| format!("{:?}", p.piece_type))
-                .unwrap_or_default();
-            let note = record.note.clone().unwrap_or_default();
-            let _ = writeln!(csv, "{turn},{from},{to},{piece},{captured},{note}");
-        }
-
-        // Create download link
-        if let Ok(blob) = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&csv.into())) {
-            if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
-                if let Ok(a) = document().create_element("a") {
-                    if let Ok(a) = a.dyn_into::<web_sys::HtmlAnchorElement>() {
-                        a.set_href(&url);
-                        a.set_download("xiangqi_game.csv");
-                        a.click();
-                        let _ = web_sys::Url::revoke_object_url(&url);
-                    }
-                }
-            }
-        }
-    };
-
-    // Helper component for sliders
-    let slider = |label: &'static str,
-                  val: i32,
-                  min: i32,
-                  max: i32,
-                  step: i32,
-                  setter: Box<dyn Fn(i32)>| {
-        view! {
-            <div style="margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
-                    <span>{label}</span>
-                    <span>{val}</span>
-                </div>
-                <input
-                    type="range"
-                    min=min
-                    max=max
-                    step=step
-                    value=val // This sets the initial value
-                    prop:value=val // This ensures the DOM property is updated on re-renders
-                    style="width: 100%; accent-color: #a8e6cf;"
-                    on:input=move |ev| {
-                        if let Ok(v) = event_target_value(&ev).parse::<i32>() {
-                            setter(v);
-                        }
-                    }
-                />
-            </div>
-        }
-    };
-
-    let dropdown = |label: &'static str,
-                    val: i32,
-                    options: Vec<(i32, &'static str)>,
-                    setter: Box<dyn Fn(i32)>| {
-        view! {
-            <div style="margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
-                    <span>{label}</span>
-                </div>
-                <select
-                    style="width: 100%; padding: 4px; background: #444; color: #eee; border: 1px solid #555; border-radius: 4px;"
-                    on:change=move |ev| {
-                        if let Ok(v) = event_target_value(&ev).parse::<i32>() {
-                            setter(v);
-                        }
-                    }
-                    prop:value=val
-                >
-                    {options.into_iter().map(|(v, txt)| {
-                        view! {
-                            <option value=v selected={v == val}>{txt}</option>
-                        }
-                    }).collect::<Vec<_>>()}
-                </select>
-            </div>
-        }
-    };
-
-    let float_slider = |label: &'static str,
-                        val: f32,
-                        min: f32,
-                        max: f32,
-                        step: f32,
-                        setter: Box<dyn Fn(f32)>| {
-        view! {
-            <div style="margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
-                    <span>{label}</span>
-                    <span>{format!("{val:.1}")}</span>
-                </div>
-                <input
-                    type="range"
-                    min=min
-                    max=max
-                    step=step
-                    value=val
-                    prop:value=val
-                    style="width: 100%; accent-color: #a8e6cf;"
-                    on:input=move |ev| {
-                        if let Ok(v) = event_target_value(&ev).parse::<f32>() {
-                            setter(v);
-                        }
-                    }
-                />
-            </div>
-        }
-    };
-
-    // Helper to create setters for config fields
-    // We need to clone the config, update field, and set it back.
-    // Since we can't easily pass generic field accessors, we'll just inline the logic in the view or create specific closures.
-
-    let handle_file_upload = |setter: WriteSignal<EngineConfig>| {
-        move |ev: web_sys::Event| {
-            let Some(target) = ev.target() else {
-                return;
-            };
-            let Ok(target) = target.dyn_into::<web_sys::HtmlInputElement>() else {
-                return;
-            };
-
-            if let Some(files) = target.files() {
-                if let Some(file) = files.get(0) {
-                    let Ok(reader) = web_sys::FileReader::new() else {
-                        return;
-                    };
-                    let reader_c = reader.clone();
-
-                    let on_load = Closure::wrap(Box::new(move |_e: web_sys::Event| {
-                        if let Ok(res) = reader_c.result() {
-                            if let Some(text) = res.as_string() {
-                                match serde_json::from_str::<EngineConfig>(&text) {
-                                    Ok(config) => {
-                                        web_sys::console::log_1(
-                                            &"Config loaded successfully".into(),
-                                        );
-                                        setter.set(config);
-                                    }
-                                    Err(e) => {
-                                        web_sys::console::log_1(
-                                            &format!("Error parsing config: {e:?}").into(),
-                                        );
-                                        if let Some(window) = web_sys::window() {
-                                            let _ = window.alert_with_message(&format!(
-                                                "Error parsing JSON: {e}"
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }) as Box<dyn FnMut(_)>);
-
-                    reader.set_onload(Some(on_load.as_ref().unchecked_ref()));
-                    on_load.forget();
-
-                    if let Err(e) = reader.read_as_text(&file) {
-                        web_sys::console::log_1(&format!("Error reading file: {e:?}").into());
-                    }
-                }
-            }
-        }
-    };
-
-    let export_config = |config: EngineConfig, filename: &str| {
-        if let Ok(json) = serde_json::to_string_pretty(&config) {
-            if let Ok(blob) =
-                web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&json.into()))
-            {
-                if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
-                    if let Ok(a) = document().create_element("a") {
-                        if let Ok(a) = a.dyn_into::<web_sys::HtmlAnchorElement>() {
-                            a.set_href(&url);
-                            a.set_download(filename);
-                            a.click();
-                            let _ = web_sys::Url::revoke_object_url(&url);
-                        }
-                    }
-                }
-            }
-        }
-    };
 
     view! {
         <div class="game-container" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-height: 100vh; background-color: #222; color: #eee; display: flex; flex-direction: column; align-items: center;">
@@ -1013,378 +755,41 @@ pub fn App() -> impl IntoView {
 
             <h1 style="margin: 20px 0; color: #f0d9b5; text-shadow: 0 2px 4px rgba(0,0,0,0.5); text-align: center;">"Cờ Tướng"</h1>
 
-            <div class="controls-area">
-                <div class="controls-config">
-                    <div class="control-group">
-                        <span class="control-label">"Chế độ"</span>
-                        <select
-                            on:change=move |ev| {
-                                let val = event_target_value(&ev);
-                                match val.as_str() {
-                                    "HumanVsComputer" => {
-                                        set_game_mode.set(GameMode::HumanVsComputer);
-                                        set_is_paused.set(false);
-                                        set_online_status.set(OnlineStatus::None);
-                                    },
-                                    "ComputerVsComputer" => {
-                                        set_game_mode.set(GameMode::ComputerVsComputer);
-                                        set_is_paused.set(true); // Auto-pause on switch to CvC
-                                        set_online_status.set(OnlineStatus::None);
-                                    },
-                                    "HumanVsHuman" => {
-                                        set_game_mode.set(GameMode::HumanVsHuman);
-                                        set_is_paused.set(false);
-                                        set_online_status.set(OnlineStatus::None);
-                                    },
-                                    "Online" => {
-                                        set_game_mode.set(GameMode::Online);
-                                        set_is_paused.set(false);
-                                        set_online_status.set(OnlineStatus::None);
-                                    },
-                                    _ => {},
-                                }
-                            }
-                        >
-                            <option value="HumanVsComputer">"Người vs Máy"</option>
-                            <option value="ComputerVsComputer">"Máy vs Máy"</option>
-                            <option value="HumanVsHuman">"Người vs Người"</option>
-                            <option value="Online">"🌐 Chơi Online"</option>
-                        </select>
-                    </div>
+            <ThinkingIndicator is_thinking=is_thinking />
 
-                    <div class="control-group">
-                        <span class="control-label">"Chọn bên"</span>
-                        <select
-                            on:change=move |ev| {
-                                let val = event_target_value(&ev);
-                                match val.as_str() {
-                                    "Red" => set_player_side.set(Color::Red),
-                                    "Black" => set_player_side.set(Color::Black),
-                                    _ => {},
-                                }
-                            }
-                        >
-                            <option value="Red">"Đỏ (Đi trước)"</option>
-                            <option value="Black">"Đen (Đi sau)"</option>
-                        </select>
-                    </div>
+            <ControlsArea
+                game_mode=game_mode
+                set_game_mode=set_game_mode
+                player_side=player_side
+                set_player_side=set_player_side
+                difficulty=difficulty
+                set_difficulty=set_difficulty
+                is_paused=is_paused
+                set_is_paused=set_is_paused
+                game_state=game_state
+                set_game_state=set_game_state
+                is_thinking=is_thinking
+                set_is_thinking=set_is_thinking
+                on_export_csv=Callback::new(move |_| export_csv(game_state.get()))
+            />
 
-                    <div class="control-group">
-                        <span class="control-label">"Độ khó"</span>
-                        <select
-                            on:change=move |ev| {
-                                let val = event_target_value(&ev);
-                                match val.as_str() {
-                                    "Level1" => set_difficulty.set(Difficulty::Level1),
-                                    "Level2" => set_difficulty.set(Difficulty::Level2),
-                                    "Level3" => set_difficulty.set(Difficulty::Level3),
-                                    "Level4" => set_difficulty.set(Difficulty::Level4),
-                                    "Level5" => set_difficulty.set(Difficulty::Level5),
-                                    _ => {},
-                                }
-                            }
-                        >
-                            <option value="Level1">"Mức 1 (1s)"</option>
-                            <option value="Level2">"Mức 2 (2s)"</option>
-                            <option value="Level3">"Mức 3 (5s)"</option>
-                            <option value="Level4">"Mức 4 (10s)"</option>
-                            <option value="Level5">"Mức 5 (20s)"</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="controls-actions">
-                    {move || {
-                        if game_mode.get() == GameMode::ComputerVsComputer {
-                            if is_paused.get() {
-                                view! { <button class="control-btn btn-primary" on:click=move |_| set_is_paused.set(false)>"▶ Bắt đầu"</button> }.into_view()
-                            } else {
-                                view! { <button class="control-btn btn-danger" on:click=move |_| set_is_paused.set(true)>"⏸ Tạm dừng"</button> }.into_view()
-                            }
-                        } else {
-                            view! {}.into_view()
-                        }
-                    }}
-
-                    <button class="control-btn btn-info" on:click=move |_| {
-                        set_game_state.set(GameState::new());
-                        set_is_thinking.set(false);
-                        if game_mode.get() == GameMode::ComputerVsComputer {
-                            set_is_paused.set(true);
-                        }
-                    }>"Chơi mới"</button>
-
-                    <button class="control-btn btn-warning" on:click=move |_| {
-                        if is_thinking.get() {
-                            return;
-                        }
-                        let mut state = game_state.get();
-                        let mode = game_mode.get();
-
-                        if mode == GameMode::HumanVsComputer && state.turn == Color::Red && state.history.len() >= 2 {
-                            state.undo_move();
-                        }
-                        state.undo_move();
-                        set_game_state.set(state);
-                    }>"Đi lại"</button>
-
-                    <button class="control-btn" on:click=export_csv>"Xuất CSV"</button>
-                </div>
-            </div>
-
-            {move || {
-                let style = if is_thinking.get() {
-                    "visibility: visible;"
-                } else {
-                    "visibility: hidden;"
-                };
-                view! {
-                    <div class="thinking-indicator" style=style>
-                        <span>"Máy đang nghĩ..."</span>
-                        <div style="width: 10px; height: 10px; background: #a8e6cf; border-radius: 50%; display: inline-block;"></div>
-                    </div>
-                }
-            }}
-
-            // Online Status Panel
-            {move || {
-                let mode = game_mode.get();
-                let status = online_status.get();
-                let state = game_state.get();
-                let side = player_side.get();
-
-                if mode == GameMode::Online {
-                    let status_content = match status {
-                        OnlineStatus::None => view! {
-                            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
-                                <div style="font-size: 1.2em; color: #a8e6cf;">
-                                    "🌐 Chế độ chơi Online"
-                                </div>
-                                <button
-                                    class="control-btn btn-primary"
-                                    style="padding: 15px 40px; font-size: 1.1em;"
-                                    on:click=move |_| {
-                                        if let Some(client) = network_client.get() {
-                                            client.send(&GameMessage::FindMatch);
-                                        }
-                                    }
-                                >
-                                    "🎮 Tìm trận"
-                                </button>
-                            </div>
-                        }.into_view(),
-                        OnlineStatus::Finding => view! {
-                            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
-                                <div class="thinking-indicator" style="visibility: visible;">
-                                    <span style="font-size: 1.2em;">"🔍 Đang tìm trận..."</span>
-                                </div>
-                                <button
-                                    class="control-btn btn-danger"
-                                    on:click=move |_| {
-                                        if let Some(client) = network_client.get() {
-                                            client.send(&GameMessage::CancelFindMatch);
-                                        }
-                                        set_online_status.set(OnlineStatus::None);
-                                    }
-                                >
-                                    "❌ Huỷ tìm"
-                                </button>
-                            </div>
-                        }.into_view(),
-                        OnlineStatus::MatchFound => view! {
-                            <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px;">
-                                <div style="font-size: 1.5em; color: #4CAF50; animation: pulse 1s infinite;">
-                                    "✅ Đã tìm thấy đối thủ!"
-                                </div>
-                                <div style="font-size: 1.1em; color: #eee;">
-                                    {format!("Bạn là bên: {}", if side == Color::Red { "🔴 Đỏ (đi trước)" } else { "⚫ Đen (đi sau)" })}
-                                </div>
-                            </div>
-                        }.into_view(),
-                        OnlineStatus::Playing => {
-                            let is_my_turn = state.turn == side;
-                            let turn_style = if is_my_turn {
-                                "background: linear-gradient(135deg, #4CAF50, #45a049); color: white; padding: 15px 30px; border-radius: 12px; font-size: 1.2em; font-weight: bold; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); animation: pulse 1.5s infinite;"
-                            } else {
-                                "background: linear-gradient(135deg, #555, #444); color: #aaa; padding: 15px 30px; border-radius: 12px; font-size: 1.2em; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"
-                            };
-                            let turn_text = if is_my_turn {
-                                if side == Color::Red { "🔴 Lượt của bạn!" } else { "⚫ Lượt của bạn!" }
-                            } else {
-                                "⏳ Đang chờ đối thủ..."
-                            };
-                            view! {
-                                <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 15px;">
-                                    <div style=turn_style>
-                                        {turn_text}
-                                    </div>
-                                    <div style="display: flex; gap: 10px;">
-                                        <button
-                                            class="control-btn btn-danger"
-                                            style="padding: 10px 20px;"
-                                            on:click=move |_| {
-                                                if let Some(client) = network_client.get() {
-                                                    client.send(&GameMessage::Surrender);
-                                                }
-                                            }
-                                        >
-                                            "🏳️ Đầu hàng"
-                                        </button>
-                                    </div>
-                                </div>
-                            }.into_view()
-                        },
-                        OnlineStatus::OpponentDisconnected => view! {
-                            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
-                                <div style="font-size: 1.3em; color: #FF9800;">
-                                    "⚠️ Đối thủ đã mất kết nối!"
-                                </div>
-                                <button
-                                    class="control-btn btn-primary"
-                                    on:click=move |_| {
-                                        set_online_status.set(OnlineStatus::None);
-                                        set_game_state.set(GameState::new());
-                                    }
-                                >
-                                    "🔄 Tìm trận mới"
-                                </button>
-                            </div>
-                        }.into_view(),
-                        OnlineStatus::GameEnded => {
-                            let winner = game_end_winner.get();
-                            let reason = game_end_reason.get();
-                            let ready = is_ready_for_rematch.get();
-
-                            // Determine win/loss status
-                            let (result_icon, result_text, result_color) = match winner {
-                                Some(Some(w)) if w == side => ("🏆", "Bạn thắng!", "#4CAF50"),
-                                Some(Some(_)) => ("😔", "Bạn thua!", "#f44336"),
-                                Some(None) => ("🤝", "Hòa cờ!", "#FF9800"),
-                                None => ("🏁", "Kết thúc", "#aaa"),
-                            };
-
-                            // Translate reason
-                            let reason_text = match reason.as_str() {
-                                "Checkmate" => "Chiếu hết",
-                                "Surrender" => "Đầu hàng",
-                                "Draw" => "Hòa",
-                                "Disconnect" => "Mất kết nối",
-                                _ => reason.as_str(),
-                            };
-
-                            view! {
-                                <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
-                                    <div style=format!("font-size: 2em; color: {};", result_color)>
-                                        {format!("{result_icon} {result_text}")}
-                                    </div>
-                                    <div style="font-size: 1em; color: #aaa;">
-                                        {format!("Lý do: {reason_text}")}
-                                    </div>
-
-                                    <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; align-items: center;">
-                                        {if ready {
-                                            view! {
-                                                <div style="background: #4CAF50; color: white; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
-                                                    "✅ Đã sẵn sàng - Đang chờ đối thủ..."
-                                                </div>
-                                            }.into_view()
-                                        } else {
-                                            view! {
-                                                <button
-                                                    class="control-btn btn-primary"
-                                                    style="padding: 15px 40px; font-size: 1.1em;"
-                                                    on:click=move |_| {
-                                                        if let Some(client) = network_client.get() {
-                                                            client.send(&GameMessage::PlayAgain);
-                                                        }
-                                                        set_is_ready_for_rematch.set(true);
-                                                    }
-                                                >
-                                                    "🎮 Sẵn sàng (Chơi tiếp)"
-                                                </button>
-                                            }.into_view()
-                                        }}
-
-                                        <button
-                                            class="control-btn"
-                                            style="padding: 10px 20px;"
-                                            on:click=move |_| {
-                                                if let Some(client) = network_client.get() {
-                                                    client.send(&GameMessage::PlayerLeft);
-                                                }
-                                                set_online_status.set(OnlineStatus::None);
-                                                set_game_state.set(GameState::new());
-                                                set_is_ready_for_rematch.set(false);
-                                            }
-                                        >
-                                            "🚪 Thoát"
-                                        </button>
-                                    </div>
-                                </div>
-                            }.into_view()
-                        },
-                    };
-
-                    view! {
-                        <div style="background: linear-gradient(180deg, #2a2a2a, #333); border: 1px solid #444; border-radius: 12px; margin: 15px auto; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
-                            {status_content}
-                        </div>
-                    }.into_view()
-                } else {
-                    view! {}.into_view()
-                }
-            }}
+            <OnlineStatusPanel
+                game_mode=game_mode
+                online_status=online_status
+                game_state=game_state
+                player_side=player_side
+                network_client=network_client
+                game_end_winner=game_end_winner
+                game_end_reason=game_end_reason
+                is_ready_for_rematch=is_ready_for_rematch
+                set_online_status=set_online_status
+                set_game_state=set_game_state
+                set_is_ready_for_rematch=set_is_ready_for_rematch
+            />
 
             <div class="game-layout">
-                // Log Panel (Order 1 in HTML, but reversed on mobile to be bottom)
                 <div class="side-column left">
-                    <div class="log-panel">
-                        <div class="log-header">
-                            <span>"Lịch sử nước đi"</span>
-                            <span style="font-size: 0.8em; opacity: 0.7;">{move || format!("{} moves", game_state.get().history.len())}</span>
-                        </div>
-
-                        <ul class="log-list">
-                            {move || {
-                                game_state.get().history.iter().enumerate().rev().map(|(i, record)| {
-                                    let turn_icon = if i % 2 == 0 { "🔴" } else { "⚫" };
-                                    let turn_text = if i % 2 == 0 { "Red" } else { "Black" };
-                                    let note = record.note.clone().unwrap_or_default();
-
-                                    // Format coordinates to be more readable (e.g. A1, B2 style or just standard)
-                                    // Here we stick to (row, col) but maybe 1-based for user friendliness?
-                                    // Let's keep 0-8, 0-9 for now but make it clear.
-                                    // Actually, Xiangqi notation is complex. Let's stick to coordinates but make them clear.
-                                    let from_str = format!("({}, {})", record.from.row, record.from.col);
-                                    let to_str = format!("({}, {})", record.to.row, record.to.col);
-
-                                    view! {
-                                        <li class="log-item">
-                                            <div class="move-info">
-                                                <span>{format!("{}. {} {}", i + 1, turn_icon, turn_text)}</span>
-                                                <div style="display: flex; align-items: center; gap: 5px;">
-                                                    <span>{format!("{from_str} ➝ {to_str}")}</span>
-                                                    {record.captured.map_or_else(
-                                                        || view! {}.into_view(),
-                                                        |cap| view! {
-                                                            <span style="color: #ff9800; font-size: 0.9em; margin-left: 5px;">
-                                                                {format!("(Eat {})", get_piece_symbol(cap.piece_type, cap.color))}
-                                                            </span>
-                                                        }.into_view()
-                                                    )}
-                                                </div>
-                                            </div>
-                                            {if note.is_empty() {
-                                                view! {}.into_view()
-                                            } else {
-                                                view! { <div class="ai-stats">{note}</div> }.into_view()
-                                            }}
-                                        </li>
-                                    }
-                                }).collect::<Vec<_>>()
-                            }}
-                        </ul>
-                    </div>
+                    <LogPanel game_state=game_state />
                 </div>
 
                 // Board View (Order 2 in HTML)
@@ -1410,86 +815,708 @@ pub fn App() -> impl IntoView {
                 </button>
             </div>
 
-            {move || {
-                if show_config.get() {
-                    view! {
-                        <div class="config-panel">
-                            <div class="config-column">
-                                <div class="config-title" style="color: #ff6b6b;">"Cấu hình Đỏ (Red)"</div>
-                                <div style="margin-bottom: 15px; text-align: center;">
-                                    <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
-                                    <input type="file" accept=".json" on:change=handle_file_upload(set_red_config) style="color: #ccc;" />
-                                    <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(red_config.get(), "red_config.json")>"Export JSON"</button>
+            <ConfigPanel
+                show_config=show_config
+                red_config=red_config
+                set_red_config=set_red_config
+                black_config=black_config
+                set_black_config=set_black_config
+            />
+        </div>
+    }
+}
+
+#[component]
+#[allow(clippy::too_many_arguments)]
+fn ControlsArea(
+    game_mode: ReadSignal<GameMode>,
+    set_game_mode: WriteSignal<GameMode>,
+    player_side: ReadSignal<Color>,
+    set_player_side: WriteSignal<Color>,
+    difficulty: ReadSignal<Difficulty>,
+    set_difficulty: WriteSignal<Difficulty>,
+    is_paused: ReadSignal<bool>,
+    set_is_paused: WriteSignal<bool>,
+    game_state: ReadSignal<GameState>,
+    set_game_state: WriteSignal<GameState>,
+    is_thinking: ReadSignal<bool>,
+    set_is_thinking: WriteSignal<bool>,
+    on_export_csv: Callback<()>,
+) -> impl IntoView {
+    view! {
+        <div class="controls-area">
+            <div class="controls-config">
+                <div class="control-group">
+                    <span class="control-label">"Chế độ"</span>
+                    <select
+                        on:change=move |ev| {
+                            let val = event_target_value(&ev);
+                            match val.as_str() {
+                                "HumanVsComputer" => {
+                                    set_game_mode.set(GameMode::HumanVsComputer);
+                                    set_is_paused.set(false);
+                                },
+                                "ComputerVsComputer" => {
+                                    set_game_mode.set(GameMode::ComputerVsComputer);
+                                    set_is_paused.set(true);
+                                },
+                                "HumanVsHuman" => {
+                                    set_game_mode.set(GameMode::HumanVsHuman);
+                                    set_is_paused.set(false);
+                                },
+                                "Online" => {
+                                    set_game_mode.set(GameMode::Online);
+                                    set_is_paused.set(false);
+                                },
+                                _ => {},
+                            }
+                        }
+                        prop:value=move || match game_mode.get() {
+                            GameMode::HumanVsComputer => "HumanVsComputer",
+                            GameMode::ComputerVsComputer => "ComputerVsComputer",
+                            GameMode::HumanVsHuman => "HumanVsHuman",
+                            GameMode::Online => "Online",
+                        }
+                    >
+                        <option value="HumanVsComputer">"Người vs Máy"</option>
+                        <option value="ComputerVsComputer">"Máy vs Máy"</option>
+                        <option value="HumanVsHuman">"Người vs Người"</option>
+                        <option value="Online">"🌐 Chơi Online"</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <span class="control-label">"Chọn bên"</span>
+                    <select
+                        on:change=move |ev| {
+                            let val = event_target_value(&ev);
+                            match val.as_str() {
+                                "Red" => set_player_side.set(Color::Red),
+                                "Black" => set_player_side.set(Color::Black),
+                                _ => {},
+                            }
+                        }
+                        prop:value=move || match player_side.get() {
+                            Color::Red => "Red",
+                            Color::Black => "Black",
+                        }
+                    >
+                        <option value="Red">"Đỏ (Đi trước)"</option>
+                        <option value="Black">"Đen (Đi sau)"</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <span class="control-label">"Độ khó"</span>
+                    <select
+                        on:change=move |ev| {
+                            let val = event_target_value(&ev);
+                            match val.as_str() {
+                                "Level1" => set_difficulty.set(Difficulty::Level1),
+                                "Level2" => set_difficulty.set(Difficulty::Level2),
+                                "Level3" => set_difficulty.set(Difficulty::Level3),
+                                "Level4" => set_difficulty.set(Difficulty::Level4),
+                                "Level5" => set_difficulty.set(Difficulty::Level5),
+                                _ => {},
+                            }
+                        }
+                        prop:value=move || match difficulty.get() {
+                            Difficulty::Level1 => "Level1",
+                            Difficulty::Level2 => "Level2",
+                            Difficulty::Level3 => "Level3",
+                            Difficulty::Level4 => "Level4",
+                            Difficulty::Level5 => "Level5",
+                        }
+                    >
+                        <option value="Level1">"Mức 1 (1s)"</option>
+                        <option value="Level2">"Mức 2 (2s)"</option>
+                        <option value="Level3">"Mức 3 (5s)"</option>
+                        <option value="Level4">"Mức 4 (10s)"</option>
+                        <option value="Level5">"Mức 5 (20s)"</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="controls-actions">
+                {move || {
+                    if game_mode.get() == GameMode::ComputerVsComputer {
+                        if is_paused.get() {
+                            view! { <button class="control-btn btn-primary" on:click=move |_| set_is_paused.set(false)>"▶ Bắt đầu"</button> }.into_view()
+                        } else {
+                            view! { <button class="control-btn btn-danger" on:click=move |_| set_is_paused.set(true)>"⏸ Tạm dừng"</button> }.into_view()
+                        }
+                    } else {
+                        view! {}.into_view()
+                    }
+                }}
+
+                <button class="control-btn btn-info" on:click=move |_| {
+                    set_game_state.set(GameState::new());
+                    set_is_thinking.set(false);
+                    if game_mode.get() == GameMode::ComputerVsComputer {
+                        set_is_paused.set(true);
+                    }
+                }>"Chơi mới"</button>
+
+                <button class="control-btn btn-warning" on:click=move |_| {
+                    if is_thinking.get() {
+                        return;
+                    }
+                    let mut state = game_state.get();
+                    let mode = game_mode.get();
+
+                    if mode == GameMode::HumanVsComputer && state.turn == Color::Red && state.history.len() >= 2 {
+                        state.undo_move();
+                    }
+                    state.undo_move();
+                    set_game_state.set(state);
+                }>"Đi lại"</button>
+
+                <button class="control-btn" on:click=move |_| on_export_csv.call(())>"Xuất CSV"</button>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn LogPanel(game_state: ReadSignal<GameState>) -> impl IntoView {
+    view! {
+        <div class="log-panel">
+            <div class="log-header">
+                <span>"📜 Biên bản"</span>
+                <span style="font-size: 0.8em; opacity: 0.8;">{move || format!("{} nước", game_state.get().history.len())}</span>
+            </div>
+            <ul class="log-list">
+                {move || {
+                    let state = game_state.get();
+                    state.history.iter().enumerate().rev().map(|(i, record)| {
+                        let turn_num = (i / 2) + 1;
+                        let side = if i % 2 == 0 { "🔴" } else { "⚫" };
+                        view! {
+                            <li class="log-item">
+                                <div class="move-info">
+                                    <span>{format!("{turn_num}. {side} {} → {}",
+                                        format!("({},{})", record.from.row, record.from.col),
+                                        format!("({},{})", record.to.row, record.to.col)
+                                    )}</span>
+                                    <span style="color: #f0d9b5;">{format!("{:?}", record.piece.piece_type)}</span>
                                 </div>
-                                {
-                                    move || {
-                                        let config = red_config.get();
-                                        view! {
-                                            <div>
-                                                {slider("Tốt (Pawn)", config.val_pawn, 0, 200, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_pawn = v; set_red_config.set(c); }))}
-                                                {slider("Sĩ (Advisor)", config.val_advisor, 0, 400, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_advisor = v; set_red_config.set(c); }))}
-                                                {slider("Tượng (Elephant)", config.val_elephant, 0, 400, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_elephant = v; set_red_config.set(c); }))}
-                                                {slider("Mã (Horse)", config.val_horse, 0, 800, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_horse = v; set_red_config.set(c); }))}
-                                                {slider("Pháo (Cannon)", config.val_cannon, 0, 900, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_cannon = v; set_red_config.set(c); }))}
-                                                {slider("Xe (Rook)", config.val_rook, 0, 1800, 10, Box::new(move |v| { let mut c = red_config.get(); c.val_rook = v; set_red_config.set(c); }))}
-                                                {slider("Tướng (King)", config.val_king, 5000, 20000, 100, Box::new(move |v| { let mut c = red_config.get(); c.val_king = v; set_red_config.set(c); }))}
-                                                <hr style="border-color: #444; margin: 10px 0;"/>
-                                                {slider("Hash Move", config.score_hash_move, 0, 5_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_hash_move = v; set_red_config.set(c); }))}
-                                                {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_capture_base = v; set_red_config.set(c); }))}
-                                                {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_killer_move = v; set_red_config.set(c); }))}
-                                                {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = red_config.get(); c.score_history_max = v; set_red_config.set(c); }))}
-                                                {dropdown("Pruning Method", config.pruning_method, vec![
-                                                    (0, "Dynamic Limiting"),
-                                                    (1, "Late Move Reductions (LMR)"),
-                                                    (2, "Both (Aggressive)"),
-                                                ], Box::new(move |v| { let mut c = red_config.get(); c.pruning_method = v; set_red_config.set(c); }))}
-                                                {float_slider("Multiplier", config.pruning_multiplier, 0.1, 2.0, 0.1, Box::new(move |v| { let mut c = red_config.get(); c.pruning_multiplier = v; set_red_config.set(c); }))}
-                                            </div>
-                                        }
-                                    }
-                                }
+                                {if let Some(note) = &record.note {
+                                    view! { <div class="ai-stats">{note}</div> }.into_view()
+                                } else {
+                                    view! {}.into_view()
+                                }}
+                            </li>
+                        }
+                    }).collect::<Vec<_>>()
+                }}
+            </ul>
+        </div>
+    }
+}
+
+#[component]
+fn ThinkingIndicator(is_thinking: ReadSignal<bool>) -> impl IntoView {
+    view! {
+        <div class="thinking-indicator" style=move || if is_thinking.get() { "visibility: visible;" } else { "visibility: hidden;" }>
+            <span>"Máy đang nghĩ..."</span>
+            <div style="width: 10px; height: 10px; background: #a8e6cf; border-radius: 50%; display: inline-block;"></div>
+        </div>
+    }
+}
+
+#[component]
+#[allow(clippy::too_many_arguments)]
+fn OnlineStatusPanel(
+    game_mode: ReadSignal<GameMode>,
+    online_status: ReadSignal<OnlineStatus>,
+    game_state: ReadSignal<GameState>,
+    player_side: ReadSignal<Color>,
+    network_client: ReadSignal<Option<NetworkClient>>,
+    game_end_winner: ReadSignal<Option<Option<Color>>>,
+    game_end_reason: ReadSignal<String>,
+    is_ready_for_rematch: ReadSignal<bool>,
+    set_online_status: WriteSignal<OnlineStatus>,
+    set_game_state: WriteSignal<GameState>,
+    set_is_ready_for_rematch: WriteSignal<bool>,
+) -> impl IntoView {
+    view! {
+        {move || {
+            let mode = game_mode.get();
+            let status = online_status.get();
+            let state = game_state.get();
+            let side = player_side.get();
+
+            if mode == GameMode::Online {
+                let status_content = match status {
+                    OnlineStatus::None => view! {
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
+                            <div style="font-size: 1.2em; color: #a8e6cf;">
+                                "🌐 Chế độ chơi Online"
                             </div>
-                            <div class="config-column">
-                                <div class="config-title" style="color: #a8e6cf;">"Cấu hình Đen (Black)"</div>
-                                <div style="margin-bottom: 15px; text-align: center;">
-                                    <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
-                                    <input type="file" accept=".json" on:change=handle_file_upload(set_black_config) style="color: #ccc;" />
-                                    <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(black_config.get(), "black_config.json")>"Export JSON"</button>
-                                </div>
-                                {
-                                    move || {
-                                        let config = black_config.get();
-                                        view! {
-                                            <div>
-                                                {slider("Tốt (Pawn)", config.val_pawn, 0, 200, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_pawn = v; set_black_config.set(c); }))}
-                                                {slider("Sĩ (Advisor)", config.val_advisor, 0, 400, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_advisor = v; set_black_config.set(c); }))}
-                                                {slider("Tượng (Elephant)", config.val_elephant, 0, 400, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_elephant = v; set_black_config.set(c); }))}
-                                                {slider("Mã (Horse)", config.val_horse, 0, 800, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_horse = v; set_black_config.set(c); }))}
-                                                {slider("Pháo (Cannon)", config.val_cannon, 0, 900, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_cannon = v; set_black_config.set(c); }))}
-                                                {slider("Xe (Rook)", config.val_rook, 0, 1800, 10, Box::new(move |v| { let mut c = black_config.get(); c.val_rook = v; set_black_config.set(c); }))}
-                                                {slider("Tướng (King)", config.val_king, 5000, 20000, 100, Box::new(move |v| { let mut c = black_config.get(); c.val_king = v; set_black_config.set(c); }))}
-                                                <hr style="border-color: #444; margin: 10px 0;"/>
-                                                {slider("Hash Move", config.score_hash_move, 0, 5_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_hash_move = v; set_black_config.set(c); }))}
-                                                {slider("Capture Base", config.score_capture_base, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_capture_base = v; set_black_config.set(c); }))}
-                                                {slider("Killer Move", config.score_killer_move, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_killer_move = v; set_black_config.set(c); }))}
-                                                {slider("History Max", config.score_history_max, 0, 2_000_000, 100_000, Box::new(move |v| { let mut c = black_config.get(); c.score_history_max = v; set_black_config.set(c); }))}
-                                                {dropdown("Pruning Method", config.pruning_method, vec![
-                                                    (0, "Dynamic Limiting"),
-                                                    (1, "Late Move Reductions (LMR)"),
-                                                    (2, "Both (Aggressive)"),
-                                                ], Box::new(move |v| { let mut c = black_config.get(); c.pruning_method = v; set_black_config.set(c); }))}
-                                                {float_slider("Multiplier", config.pruning_multiplier, 0.1, 2.0, 0.1, Box::new(move |v| { let mut c = black_config.get(); c.pruning_multiplier = v; set_black_config.set(c); }))}
-                                            </div>
-                                        }
+                            <button
+                                class="control-btn btn-primary"
+                                style="padding: 15px 40px; font-size: 1.1em;"
+                                on:click=move |_| {
+                                    if let Some(client) = network_client.get() {
+                                        client.send(&GameMessage::FindMatch);
                                     }
                                 }
+                            >
+                                "🎮 Tìm trận"
+                            </button>
+                        </div>
+                    }.into_view(),
+                    OnlineStatus::Finding => view! {
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
+                            <div class="thinking-indicator" style="visibility: visible;">
+                                <span style="font-size: 1.2em;">"🔍 Đang tìm trận..."</span>
+                            </div>
+                            <button
+                                class="control-btn btn-danger"
+                                on:click=move |_| {
+                                    if let Some(client) = network_client.get() {
+                                        client.send(&GameMessage::CancelFindMatch);
+                                    }
+                                    set_online_status.set(OnlineStatus::None);
+                                }
+                            >
+                                "❌ Huỷ tìm"
+                            </button>
+                        </div>
+                    }.into_view(),
+                    OnlineStatus::MatchFound => view! {
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px;">
+                            <div style="font-size: 1.5em; color: #4CAF50; animation: pulse 1s infinite;">
+                                "✅ Đã tìm thấy đối thủ!"
+                            </div>
+                            <div style="font-size: 1.1em; color: #eee;">
+                                {format!("Bạn là bên: {}", if side == Color::Red { "🔴 Đỏ (đi trước)" } else { "⚫ Đen (đi sau)" })}
                             </div>
                         </div>
-                    }.into_view()
-                } else {
-                    view! {}.into_view()
-                }
-            }}
+                    }.into_view(),
+                    OnlineStatus::Playing => {
+                        let is_my_turn = state.turn == side;
+                        let turn_style = if is_my_turn {
+                            "background: linear-gradient(135deg, #4CAF50, #45a049); color: white; padding: 15px 30px; border-radius: 12px; font-size: 1.2em; font-weight: bold; box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4); animation: pulse 1.5s infinite;"
+                        } else {
+                            "background: linear-gradient(135deg, #555, #444); color: #aaa; padding: 15px 30px; border-radius: 12px; font-size: 1.2em; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"
+                        };
+                        let turn_text = if is_my_turn {
+                            if side == Color::Red { "🔴 Lượt của bạn!" } else { "⚫ Lượt của bạn!" }
+                        } else {
+                            "⏳ Đang chờ đối thủ..."
+                        };
+                        view! {
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 15px;">
+                                <div style=turn_style>
+                                    {turn_text}
+                                </div>
+                                <div style="display: flex; gap: 10px;">
+                                    <button
+                                        class="control-btn btn-danger"
+                                        style="padding: 10px 20px;"
+                                        on:click=move |_| {
+                                            if let Some(client) = network_client.get() {
+                                                client.send(&GameMessage::Surrender);
+                                            }
+                                        }
+                                    >
+                                        "🏳️ Đầu hàng"
+                                    </button>
+                                </div>
+                            </div>
+                        }.into_view()
+                    },
+                    OnlineStatus::OpponentDisconnected => view! {
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
+                            <div style="font-size: 1.3em; color: #FF9800;">
+                                "⚠️ Đối thủ đã mất kết nối!"
+                            </div>
+                            <button
+                                class="control-btn btn-primary"
+                                on:click=move |_| {
+                                    set_online_status.set(OnlineStatus::None);
+                                    set_game_state.set(GameState::new());
+                                }
+                            >
+                                "🔄 Tìm trận mới"
+                            </button>
+                        </div>
+                    }.into_view(),
+                    OnlineStatus::GameEnded => {
+                        let winner = game_end_winner.get();
+                        let reason = game_end_reason.get();
+                        let ready = is_ready_for_rematch.get();
+
+                        // Determine win/loss status
+                        let (result_icon, result_text, result_color) = match winner {
+                            Some(Some(w)) if w == side => ("🏆", "Bạn thắng!", "#4CAF50"),
+                            Some(Some(_)) => ("😔", "Bạn thua!", "#f44336"),
+                            Some(None) => ("🤝", "Hòa cờ!", "#FF9800"),
+                            None => ("🏁", "Kết thúc", "#aaa"),
+                        };
+
+                        // Translate reason
+                        let reason_text = match reason.as_str() {
+                            "Checkmate" => "Chiếu hết",
+                            "Surrender" => "Đầu hàng",
+                            "Draw" => "Hòa",
+                            "Disconnect" => "Mất kết nối",
+                            _ => reason.as_str(),
+                        };
+
+                        view! {
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 20px;">
+                                <div style=format!("font-size: 2em; color: {};", result_color)>
+                                    {format!("{result_icon} {result_text}")}
+                                </div>
+                                <div style="font-size: 1em; color: #aaa;">
+                                    {format!("Lý do: {reason_text}")}
+                                </div>
+
+                                <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; align-items: center;">
+                                    {if ready {
+                                        view! {
+                                            <div style="background: #4CAF50; color: white; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
+                                                "✅ Đã sẵn sàng - Đang chờ đối thủ..."
+                                            </div>
+                                        }.into_view()
+                                    } else {
+                                        view! {
+                                            <button
+                                                class="control-btn btn-primary"
+                                                style="padding: 15px 40px; font-size: 1.1em;"
+                                                on:click=move |_| {
+                                                    if let Some(client) = network_client.get() {
+                                                        client.send(&GameMessage::PlayAgain);
+                                                    }
+                                                    set_is_ready_for_rematch.set(true);
+                                                }
+                                            >
+                                                "🎮 Sẵn sàng (Chơi tiếp)"
+                                            </button>
+                                        }.into_view()
+                                    }}
+
+                                    <button
+                                        class="control-btn"
+                                        style="padding: 10px 20px;"
+                                        on:click=move |_| {
+                                            if let Some(client) = network_client.get() {
+                                                client.send(&GameMessage::PlayerLeft);
+                                            }
+                                            set_online_status.set(OnlineStatus::None);
+                                            set_game_state.set(GameState::new());
+                                            set_is_ready_for_rematch.set(false);
+                                        }
+                                    >
+                                        "🚪 Thoát"
+                                    </button>
+                                </div>
+                            </div>
+                        }.into_view()
+                    },
+                };
+
+                view! {
+                    <div style="background: linear-gradient(180deg, #2a2a2a, #333); border: 1px solid #444; border-radius: 12px; margin: 15px auto; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+                        {status_content}
+                    </div>
+                }.into_view()
+            } else {
+                view! {}.into_view()
+            }
+        }}
+    }
+}
+#[component]
+fn ConfigPanel(
+    show_config: ReadSignal<bool>,
+    red_config: ReadSignal<EngineConfig>,
+    set_red_config: WriteSignal<EngineConfig>,
+    black_config: ReadSignal<EngineConfig>,
+    set_black_config: WriteSignal<EngineConfig>,
+) -> impl IntoView {
+    view! {
+        <div style=move || if show_config.get() { "display: block;" } else { "display: none;" }>
+            <div class="config-panel">
+                <div class="config-column">
+                    <div class="config-title" style="color: #ff6b6b;">"Cấu hình Đỏ (Red)"</div>
+                    <div style="margin-bottom: 15px; text-align: center;">
+                        <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
+                        <input type="file" accept=".json" on:change=handle_file_upload(set_red_config) style="color: #ccc;" />
+                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(red_config.get(), "red_config.json")>"Export JSON"</button>
+                    </div>
+                    {
+                        move || {
+                            let config = red_config.get();
+                            view! {
+                                <div>
+                                    <Slider label="Tốt (Pawn)" val=config.val_pawn min=0 max=200 step=1 on_input=move |v| { let mut c = red_config.get(); c.val_pawn = v; set_red_config.set(c); } />
+                                    <Slider label="Sĩ (Advisor)" val=config.val_advisor min=0 max=400 step=1 on_input=move |v| { let mut c = red_config.get(); c.val_advisor = v; set_red_config.set(c); } />
+                                    <Slider label="Tượng (Elephant)" val=config.val_elephant min=0 max=400 step=1 on_input=move |v| { let mut c = red_config.get(); c.val_elephant = v; set_red_config.set(c); } />
+                                    <Slider label="Mã (Horse)" val=config.val_horse min=0 max=800 step=1 on_input=move |v| { let mut c = red_config.get(); c.val_horse = v; set_red_config.set(c); } />
+                                    <Slider label="Pháo (Cannon)" val=config.val_cannon min=0 max=900 step=1 on_input=move |v| { let mut c = red_config.get(); c.val_cannon = v; set_red_config.set(c); } />
+                                    <Slider label="Xe (Rook)" val=config.val_rook min=0 max=1800 step=1 on_input=move |v| { let mut c = red_config.get(); c.val_rook = v; set_red_config.set(c); } />
+                                    <Slider label="Tướng (King)" val=config.val_king min=5000 max=20000 step=100 on_input=move |v| { let mut c = red_config.get(); c.val_king = v; set_red_config.set(c); } />
+                                    <hr style="border-color: #444; margin: 10px 0;"/>
+                                    <Slider label="Hash Move" val=config.score_hash_move min=0 max=5_000_000 step=100_000 on_input=move |v| { let mut c = red_config.get(); c.score_hash_move = v; set_red_config.set(c); } />
+                                    <Slider label="Capture Base" val=config.score_capture_base min=0 max=2_000_000 step=100_000 on_input=move |v| { let mut c = red_config.get(); c.score_capture_base = v; set_red_config.set(c); } />
+                                    <Slider label="Killer Move" val=config.score_killer_move min=0 max=2_000_000 step=100_000 on_input=move |v| { let mut c = red_config.get(); c.score_killer_move = v; set_red_config.set(c); } />
+                                    <Slider label="History Max" val=config.score_history_max min=0 max=2_000_000 step=100_000 on_input=move |v| { let mut c = red_config.get(); c.score_history_max = v; set_red_config.set(c); } />
+                                    <Dropdown label="Pruning Method" val=config.pruning_method options=vec![
+                                        (0, "Dynamic Limiting"),
+                                        (1, "Late Move Reductions (LMR)"),
+                                        (2, "Both (Aggressive)"),
+                                    ] on_set=move |v| { let mut c = red_config.get(); c.pruning_method = v; set_red_config.set(c); } />
+                                    <FloatSlider label="Multiplier" val=config.pruning_multiplier min=0.1 max=2.0 step=0.1 on_input=move |v| { let mut c = red_config.get(); c.pruning_multiplier = v; set_red_config.set(c); } />
+                                </div>
+                            }
+                        }
+                    }
+                </div>
+                <div class="config-column">
+                    <div class="config-title" style="color: #a8e6cf;">"Cấu hình Đen (Black)"</div>
+                    <div style="margin-bottom: 15px; text-align: center;">
+                        <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
+                        <input type="file" accept=".json" on:change=handle_file_upload(set_black_config) style="color: #ccc;" />
+                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(black_config.get(), "black_config.json")>"Export JSON"</button>
+                    </div>
+                    {
+                        move || {
+                            let config = black_config.get();
+                            view! {
+                                <div>
+                                    <Slider label="Tốt (Pawn)" val=config.val_pawn min=0 max=200 step=1 on_input=move |v| { let mut c = black_config.get(); c.val_pawn = v; set_black_config.set(c); } />
+                                    <Slider label="Sĩ (Advisor)" val=config.val_advisor min=0 max=400 step=1 on_input=move |v| { let mut c = black_config.get(); c.val_advisor = v; set_black_config.set(c); } />
+                                    <Slider label="Tượng (Elephant)" val=config.val_elephant min=0 max=400 step=1 on_input=move |v| { let mut c = black_config.get(); c.val_elephant = v; set_black_config.set(c); } />
+                                    <Slider label="Mã (Horse)" val=config.val_horse min=0 max=800 step=1 on_input=move |v| { let mut c = black_config.get(); c.val_horse = v; set_black_config.set(c); } />
+                                    <Slider label="Pháo (Cannon)" val=config.val_cannon min=0 max=900 step=1 on_input=move |v| { let mut c = black_config.get(); c.val_cannon = v; set_black_config.set(c); } />
+                                    <Slider label="Xe (Rook)" val=config.val_rook min=0 max=1800 step=1 on_input=move |v| { let mut c = black_config.get(); c.val_rook = v; set_black_config.set(c); } />
+                                    <Slider label="Tướng (King)" val=config.val_king min=5000 max=20000 step=100 on_input=move |v| { let mut c = black_config.get(); c.val_king = v; set_black_config.set(c); } />
+                                    <hr style="border-color: #444; margin: 10px 0;"/>
+                                    <Slider label="Hash Move" val=config.score_hash_move min=0 max=5_000_000 step=100_000 on_input=move |v| { let mut c = black_config.get(); c.score_hash_move = v; set_black_config.set(c); } />
+                                    <Slider label="Capture Base" val=config.score_capture_base min=0 max=2_000_000 step=100_000 on_input=move |v| { let mut c = black_config.get(); c.score_capture_base = v; set_black_config.set(c); } />
+                                    <Slider label="Killer Move" val=config.score_killer_move min=0 max=2_000_000 step=100_000 on_input=move |v| { let mut c = black_config.get(); c.score_killer_move = v; set_black_config.set(c); } />
+                                    <Slider label="History Max" val=config.score_history_max min=0 max=2_000_000 step=100_000 on_input=move |v| { let mut c = black_config.get(); c.score_history_max = v; set_black_config.set(c); } />
+                                    <Dropdown label="Pruning Method" val=config.pruning_method options=vec![
+                                        (0, "Dynamic Limiting"),
+                                        (1, "Late Move Reductions (LMR)"),
+                                        (2, "Both (Aggressive)"),
+                                    ] on_set=move |v| { let mut c = black_config.get(); c.pruning_method = v; set_black_config.set(c); } />
+                                    <FloatSlider label="Multiplier" val=config.pruning_multiplier min=0.1 max=2.0 step=0.1 on_input=move |v| { let mut c = black_config.get(); c.pruning_multiplier = v; set_black_config.set(c); } />
+                                </div>
+                            }
+                        }
+                    }
+                </div>
+            </div>
         </div>
+    }
+}
+
+#[component]
+fn Slider<F>(
+    label: &'static str,
+    val: i32,
+    min: i32,
+    max: i32,
+    step: i32,
+    on_input: F,
+) -> impl IntoView
+where
+    F: Fn(i32) + 'static,
+{
+    view! {
+        <div style="margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
+                <span>{label}</span>
+                <span>{val}</span>
+            </div>
+            <input
+                type="range"
+                min=min
+                max=max
+                step=step
+                value=val
+                prop:value=val
+                style="width: 100%; accent-color: #a8e6cf;"
+                on:input=move |ev| {
+                    if let Ok(v) = event_target_value(&ev).parse::<i32>() {
+                        on_input(v);
+                    }
+                }
+            />
+        </div>
+    }
+}
+
+#[component]
+fn Dropdown<F>(
+    label: &'static str,
+    val: i32,
+    options: Vec<(i32, &'static str)>,
+    on_set: F,
+) -> impl IntoView
+where
+    F: Fn(i32) + 'static,
+{
+    view! {
+        <div style="margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
+                <span>{label}</span>
+            </div>
+            <select
+                style="width: 100%; padding: 4px; background: #444; color: #eee; border: 1px solid #555; border-radius: 4px;"
+                on:change=move |ev| {
+                    if let Ok(v) = event_target_value(&ev).parse::<i32>() {
+                        on_set(v);
+                    }
+                }
+                prop:value=val
+            >
+                {options.into_iter().map(|(v, txt)| {
+                    view! {
+                        <option value=v selected={v == val}>{txt}</option>
+                    }
+                }).collect::<Vec<_>>()}
+            </select>
+        </div>
+    }
+}
+
+#[component]
+fn FloatSlider<F>(
+    label: &'static str,
+    val: f32,
+    min: f32,
+    max: f32,
+    step: f32,
+    on_input: F,
+) -> impl IntoView
+where
+    F: Fn(f32) + 'static,
+{
+    view! {
+        <div style="margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #ccc;">
+                <span>{label}</span>
+                <span>{format!("{val:.1}")}</span>
+            </div>
+            <input
+                type="range"
+                min=min
+                max=max
+                step=step
+                value=val
+                prop:value=val
+                style="width: 100%; accent-color: #a8e6cf;"
+                on:input=move |ev| {
+                    if let Ok(v) = event_target_value(&ev).parse::<f32>() {
+                        on_input(v);
+                    }
+                }
+            />
+        </div>
+    }
+}
+
+fn handle_file_upload(setter: WriteSignal<EngineConfig>) -> impl Fn(web_sys::Event) {
+    move |ev: web_sys::Event| {
+        let Some(target) = ev.target() else {
+            return;
+        };
+        let Ok(target) = target.dyn_into::<web_sys::HtmlInputElement>() else {
+            return;
+        };
+
+        if let Some(files) = target.files() {
+            if let Some(file) = files.get(0) {
+                let Ok(reader) = web_sys::FileReader::new() else {
+                    return;
+                };
+                let reader_c = reader.clone();
+
+                let on_load = Closure::wrap(Box::new(move |_e: web_sys::Event| {
+                    if let Ok(res) = reader_c.result() {
+                        if let Some(text) = res.as_string() {
+                            match serde_json::from_str::<EngineConfig>(&text) {
+                                Ok(config) => {
+                                    web_sys::console::log_1(&"Config loaded successfully".into());
+                                    setter.set(config);
+                                }
+                                Err(e) => {
+                                    web_sys::console::log_1(
+                                        &format!("Error parsing config: {e:?}").into(),
+                                    );
+                                    if let Some(window) = web_sys::window() {
+                                        let _ = window.alert_with_message(&format!(
+                                            "Error parsing JSON: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }) as Box<dyn FnMut(_)>);
+
+                reader.set_onload(Some(on_load.as_ref().unchecked_ref()));
+                on_load.forget();
+
+                if let Err(e) = reader.read_as_text(&file) {
+                    web_sys::console::log_1(&format!("Error reading file: {e:?}").into());
+                }
+            }
+        }
+    }
+}
+
+fn export_config(config: EngineConfig, filename: &str) {
+    if let Ok(json) = serde_json::to_string_pretty(&config) {
+        if let Ok(blob) = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&json.into())) {
+            if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
+                if let Ok(a) = document().create_element("a") {
+                    if let Ok(a) = a.dyn_into::<web_sys::HtmlAnchorElement>() {
+                        a.set_href(&url);
+                        a.set_download(filename);
+                        a.click();
+                        let _ = web_sys::Url::revoke_object_url(&url);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn export_csv(state: GameState) {
+    use std::fmt::Write; // Import Write trait for writeln!
+
+    let mut csv = String::from("Turn,From,To,Piece,Captured,Note\n");
+    for (i, record) in state.history.iter().enumerate() {
+        let turn = if i % 2 == 0 { "Red" } else { "Black" };
+        let from = format!("({},{})", record.from.row, record.from.col);
+        let to = format!("({},{})", record.to.row, record.to.col);
+        let piece = format!("{:?}", record.piece.piece_type);
+        let captured = record
+            .captured
+            .map(|p| format!("{:?}", p.piece_type))
+            .unwrap_or_default();
+        let note = record.note.clone().unwrap_or_default();
+        let _ = writeln!(csv, "{turn},{from},{to},{piece},{captured},{note}");
+    }
+
+    // Create download link
+    if let Ok(blob) = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&csv.into())) {
+        if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
+            if let Ok(a) = document().create_element("a") {
+                if let Ok(a) = a.dyn_into::<web_sys::HtmlAnchorElement>() {
+                    a.set_href(&url);
+                    a.set_download("xiangqi_game.csv");
+                    a.click();
+                    let _ = web_sys::Url::revoke_object_url(&url);
+                }
+            }
+        }
     }
 }
