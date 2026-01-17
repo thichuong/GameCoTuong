@@ -173,13 +173,9 @@ impl MoveGenerator {
         let dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
         for (dr, dc) in dirs {
             let mut dist = 1;
-            loop {
-                if let Some(to) = self.offset(from, dr * dist, dc * dist) {
-                    self.try_add_move(board, from, to, turn, moves);
-                    dist += 1;
-                } else {
-                    break;
-                }
+            while let Some(to) = self.offset(from, dr * dist, dc * dist) {
+                self.try_add_move(board, from, to, turn, moves);
+                dist += 1;
             }
         }
     }
@@ -215,13 +211,9 @@ impl MoveGenerator {
     ) {
         for (dr, dc) in dirs {
             let mut dist = 1;
-            loop {
-                if let Some(to) = self.offset(from, dr * dist, dc * dist) {
-                    self.try_add_move(board, from, to, turn, moves);
-                    dist += 1;
-                } else {
-                    break;
-                }
+            while let Some(to) = self.offset(from, dr * dist, dc * dist) {
+                self.try_add_move(board, from, to, turn, moves);
+                dist += 1;
             }
         }
     }
@@ -235,7 +227,7 @@ impl MoveGenerator {
         let r = from.row as isize + row_delta;
         let c = from.col as isize + col_delta;
 
-        if r >= 0 && r < 10 && c >= 0 && c < 9 {
+        if (0..10).contains(&r) && (0..9).contains(&c) {
             // Safety: Bounds checked
             Some(unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) })
         } else {

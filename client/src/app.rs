@@ -255,14 +255,14 @@ pub fn App() -> impl IntoView {
                                 let calculated_fen = state.board.to_fen_string(state.turn);
                                 let is_valid = calculated_fen == fen;
 
-                                if !is_valid {
+                                if is_valid {
+                                    // leptos::logging::log!("Move Verified. FEN: {}", fen);
+                                } else {
                                     leptos::logging::log!(
                                         "FEN Mismatch! Server: {}, Client: {}",
                                         fen,
                                         calculated_fen
                                     );
-                                } else {
-                                    // leptos::logging::log!("Move Verified. FEN: {}", fen);
                                 }
 
                                 if let Some(client) = network_client.get() {

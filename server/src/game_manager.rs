@@ -167,7 +167,7 @@ impl GameManager {
                 }
 
                 // Store pending move (Optimistic Relay)
-                game.pending_move = Some((player_id.clone(), mv.clone(), fen.clone()));
+                game.pending_move = Some((player_id.clone(), mv, fen.clone()));
 
                 let opponent_id = if is_red {
                     game.black_player.clone()
@@ -447,6 +447,233 @@ impl GameManager {
         } else {
             // Player might be in matchmaking queue
             self.matchmaking_queue.remove(&player_id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::sync::mpsc;
+
+    // Helper to receive next message with timeout
+    async fn expect_msg_timeout(rx: &mut mpsc::UnboundedReceiver<ServerMessage>) -> ServerMessage {
+        tokio::time::timeout(Duration::from_millis(1500), rx.recv())
+            .await
+            .expect("Timed out waiting for message")
+            .expect("Channel closed")
+    }
+
+    // Drain setup messages (MatchFound, GameStart, Waiting)
+    async fn drain_setup_messages(rx: &mut mpsc::UnboundedReceiver<ServerMessage>) {
+        loop {
+            match tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+                Ok(Some(msg)) => match msg {
+                    ServerMessage::GameStart(_) => break,
+                    _ => continue,
+                },
+                _ => break,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_happy_path_distributed_validation() {
+        let mut gm = GameManager::new();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+
+        let p1_id = "p1".to_string();
+        let p2_id = "p2".to_string();
+
+        gm.add_player(p1_id.clone(), tx1);
+        gm.add_player(p2_id.clone(), tx2);
+
+        // Matchmake
+        gm.find_match(p1_id.clone());
+        gm.find_match(p2_id.clone());
+
+        // Drain setup
+        drain_setup_messages(&mut rx1).await;
+        drain_setup_messages(&mut rx2).await;
+
+        let game_id = gm
+            .player_to_game
+            .get(&p1_id)
+            .clone()
+            .expect("Game should exist")
+            .clone();
+        let game = gm.games.get(&game_id).expect("Game session missing");
+        let red_id = game.red_player.clone();
+        let is_p1_red = red_id == p1_id;
+
+        // Identify Black
+        let black_id = if is_p1_red {
+            p2_id.clone()
+        } else {
+            p1_id.clone()
+        };
+
+        // Generate valid move (Red)
+        let board = Board::new();
+        let mut gen = cotuong_core::logic::generator::MoveGenerator::new();
+        let moves = gen.generate_moves(&board, Color::Red);
+        let valid_move = moves.first().expect("Should have moves").clone();
+
+        // Calculate expected FEN
+        let mut test_board = board.clone();
+        test_board.apply_move(&valid_move, Color::Red);
+        let expected_fen = test_board.to_fen_string(Color::Black);
+
+        // P1 sends MakeMove
+        gm.handle_move(red_id.clone(), valid_move.clone(), expected_fen.clone());
+
+        // Verify Pending
+        {
+            let game = gm.games.get(&game_id).unwrap();
+            assert!(game.pending_move.is_some());
+            if let Some((pid, m, f)) = &game.pending_move {
+                assert_eq!(pid, &red_id);
+                assert_eq!(m.from_row, valid_move.from_row);
+                assert_eq!(f, &expected_fen);
+            }
+        }
+
+        // Opponent (Black) should receive OpponentMove
+        let mut opponent_rx = if is_p1_red { &mut rx2 } else { &mut rx1 };
+
+        match expect_msg_timeout(&mut opponent_rx).await {
+            ServerMessage::OpponentMove { move_data, fen } => {
+                assert_eq!(move_data.from_row, valid_move.from_row);
+                assert_eq!(fen, expected_fen);
+            }
+            // Ignore other messages if any (like Waiting)
+            other => {
+                // If we got something else, try one more time (maybe race on setup messages?)
+                match expect_msg_timeout(&mut opponent_rx).await {
+                    ServerMessage::OpponentMove { move_data, fen } => {
+                        assert_eq!(move_data.from_row, valid_move.from_row);
+                        assert_eq!(fen, expected_fen);
+                    }
+                    _ => panic!("Expected OpponentMove, got {:?}", other),
+                }
+            }
+        }
+
+        // Opponent Verifies (TRUE)
+        gm.handle_verify_move(black_id.clone(), expected_fen.clone(), true);
+
+        // Verify Server State Updated
+        {
+            let game = gm.games.get(&game_id).unwrap();
+            assert!(game.pending_move.is_none());
+            assert_eq!(game.turn, Color::Black);
+            assert_eq!(game.board.to_fen_string(Color::Black), expected_fen);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_conflict_resolution() {
+        let mut gm = GameManager::new();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+
+        let p1_id = "p1".to_string();
+        let p2_id = "p2".to_string();
+
+        gm.add_player(p1_id.clone(), tx1);
+        gm.add_player(p2_id.clone(), tx2);
+
+        gm.find_match(p1_id.clone());
+        gm.find_match(p2_id.clone());
+
+        drain_setup_messages(&mut rx1).await;
+        drain_setup_messages(&mut rx2).await;
+
+        let game_id = gm.player_to_game.get(&p1_id).unwrap().clone();
+        let game = gm.games.get(&game_id).unwrap();
+        let red_id = game.red_player.clone();
+        let is_p1_red = red_id == p1_id;
+        let black_id = if is_p1_red {
+            p2_id.clone()
+        } else {
+            p1_id.clone()
+        };
+
+        // Valid Move
+        let board = Board::new();
+        let mut gen = cotuong_core::logic::generator::MoveGenerator::new();
+        let moves = gen.generate_moves(&board, Color::Red);
+        let valid_move = moves.first().unwrap().clone();
+
+        // Correct FEN
+        let mut test_board = board.clone();
+        test_board.apply_move(&valid_move, Color::Red);
+        let valid_fen = test_board.to_fen_string(Color::Black);
+
+        // Incorrect FEN (simulated malicious/buggy client)
+        let initial_fen = board.to_fen_string(Color::Red);
+
+        // P1 sends VALID move but claims INITIAL FEN (invalid state transition logic)
+        gm.handle_move(red_id.clone(), valid_move.clone(), initial_fen.clone());
+
+        // Destructure to avoid borrow checker confusion
+        let (p1_rx, p2_rx) = if is_p1_red {
+            (&mut rx1, &mut rx2)
+        } else {
+            (&mut rx2, &mut rx1)
+        };
+        // p1_rx is Mover, p2_rx is Opponent
+
+        // Ensure P2 gets relay (might skip other messages)
+        loop {
+            let msg = expect_msg_timeout(&mut *p2_rx).await;
+            match msg {
+                ServerMessage::OpponentMove { fen, .. } => {
+                    assert_eq!(fen, initial_fen);
+                    break;
+                }
+                _ => continue,
+            }
+        }
+
+        // P2 reports CONFLICT (false) because they calc valid_fen != initial_fen
+        gm.handle_verify_move(black_id.clone(), valid_fen.clone(), false);
+
+        // Check P1 (Red) receives correction
+        // Might need loop if other messages queued
+        loop {
+            let msg = expect_msg_timeout(&mut *p1_rx).await;
+            match msg {
+                ServerMessage::GameStateCorrection { fen, turn } => {
+                    assert_eq!(fen, valid_fen);
+                    assert_eq!(turn, Color::Black);
+                    break;
+                }
+                _ => continue,
+            }
+        }
+
+        // Check P2 (Black) receives correction
+        loop {
+            let msg = expect_msg_timeout(&mut *p2_rx).await;
+            match msg {
+                ServerMessage::GameStateCorrection { fen, turn } => {
+                    assert_eq!(fen, valid_fen);
+                    assert_eq!(turn, Color::Black);
+                    break;
+                }
+                _ => continue,
+            }
+        }
+
+        // Verify Server State Updated
+        {
+            let game = gm.games.get(&game_id).unwrap();
+            assert!(game.pending_move.is_none());
+            // Since move was valid, server corrected state to valid_fen
+            assert_eq!(game.board.to_fen_string(Color::Black), valid_fen);
         }
     }
 }
