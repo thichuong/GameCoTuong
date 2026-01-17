@@ -242,14 +242,63 @@ pub fn App() -> impl IntoView {
                     new_state.board = *board;
                     set_game_state.set(new_state);
                 }
-                ServerMessage::OpponentMove(m) => {
+                ServerMessage::OpponentMove { move_data: m, fen } => {
                     let mut state = game_state.get();
                     if let (Some(from), Some(to)) = (
                         BoardCoordinate::new(m.from_row as usize, m.from_col as usize),
                         BoardCoordinate::new(m.to_row as usize, m.to_col as usize),
                     ) {
-                        if state.make_move(from, to) == Ok(()) {
+                        match state.make_move(from, to) {
+                            Ok(()) => {
+                                set_game_state.set(state.clone());
+                                // Calculate FEN and verify
+                                let calculated_fen = state.board.to_fen_string(state.turn);
+                                let is_valid = calculated_fen == fen;
+
+                                if !is_valid {
+                                    leptos::logging::log!(
+                                        "FEN Mismatch! Server: {}, Client: {}",
+                                        fen,
+                                        calculated_fen
+                                    );
+                                } else {
+                                    // leptos::logging::log!("Move Verified. FEN: {}", fen);
+                                }
+
+                                if let Some(client) = network_client.get() {
+                                    client.send(&GameMessage::VerifyMove {
+                                        fen: calculated_fen,
+                                        is_valid,
+                                    });
+                                }
+                            }
+                            Err(e) => {
+                                leptos::logging::log!("Error applying opponent move: {:?}", e);
+                                // If we can't apply the move, it's definitely invalid (or we are out of sync)
+                                if let Some(client) = network_client.get() {
+                                    client.send(&GameMessage::VerifyMove {
+                                        fen: state.board.to_fen_string(state.turn),
+                                        is_valid: false,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                ServerMessage::GameStateCorrection { fen, turn } => {
+                    match cotuong_core::logic::board::Board::from_fen(&fen) {
+                        Ok((board, _)) => {
+                            let mut state = GameState::new();
+                            state.board = board;
+                            state.turn = turn;
+                            // Reset history/status if needed, or maybe partial reset?
+                            // For simplicity, we might lose history or need to reconstruct it?
+                            // This is a correction, so we assume we were wrong.
+                            leptos::logging::log!("Correcting Game State to: {} ({:?})", fen, turn);
                             set_game_state.set(state);
+                        }
+                        Err(e) => {
+                            leptos::logging::log!("Failed to parse correction FEN: {}", e);
                         }
                     }
                 }
@@ -273,7 +322,9 @@ pub fn App() -> impl IntoView {
         Rc::new(move |m: Move| {
             if game_mode.get() == GameMode::Online {
                 if let Some(client) = network_client.get() {
-                    client.send(&GameMessage::MakeMove(m));
+                    let state = game_state.get();
+                    let fen = state.board.to_fen_string(state.turn);
+                    client.send(&GameMessage::MakeMove { move_data: m, fen });
                 }
             }
         }) as Rc<dyn Fn(Move)>

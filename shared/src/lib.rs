@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 pub enum GameMessage {
     FindMatch,
     CancelFindMatch,
-    MakeMove(Move),
+    MakeMove { move_data: Move, fen: String },
+    VerifyMove { fen: String, is_valid: bool },
     Surrender,
     RequestDraw,
     AcceptDraw,
@@ -24,7 +25,14 @@ pub enum ServerMessage {
         game_id: String,
     },
     GameStart(Box<Board>),
-    OpponentMove(Move),
+    OpponentMove {
+        move_data: Move,
+        fen: String,
+    },
+    GameStateCorrection {
+        fen: String,
+        turn: Color,
+    },
     GameEnd {
         winner: Option<Color>,
         reason: String, // "Checkmate", "Surrender", "Draw", "Disconnect"

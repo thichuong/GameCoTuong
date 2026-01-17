@@ -29,6 +29,7 @@ pub struct GameSession {
     pub game_ended: bool,
     pub red_ready_for_rematch: bool,
     pub black_ready_for_rematch: bool,
+    pub pending_move: Option<(String, Move, String)>,
 }
 
 pub struct GameManager {
@@ -122,6 +123,7 @@ impl GameManager {
             game_ended: false,
             red_ready_for_rematch: false,
             black_ready_for_rematch: false,
+            pending_move: None,
         };
 
         self.games.insert(game_id.clone(), game);
@@ -148,7 +150,7 @@ impl GameManager {
         }
     }
 
-    pub fn handle_move(&mut self, player_id: String, mv: Move) {
+    pub fn handle_move(&mut self, player_id: String, mv: Move, fen: String) {
         if let Some(game_id) = self.player_to_game.get(&player_id).cloned() {
             if let Some(game) = self.games.get_mut(&game_id) {
                 if game.game_ended {
@@ -164,9 +166,8 @@ impl GameManager {
                     return;
                 }
 
-                // Apply move
-                game.board.apply_move(&mv, game.turn);
-                game.turn = game.turn.opposite();
+                // Store pending move (Optimistic Relay)
+                game.pending_move = Some((player_id.clone(), mv.clone(), fen.clone()));
 
                 let opponent_id = if is_red {
                     game.black_player.clone()
@@ -174,31 +175,179 @@ impl GameManager {
                     game.red_player.clone()
                 };
 
-                // Notify opponent of move
+                // Notify opponent of move (Relay)
                 if let Some(p) = self.players.get(&opponent_id) {
-                    let _ = p.tx.send(ServerMessage::OpponentMove(mv));
+                    let _ =
+                        p.tx.send(ServerMessage::OpponentMove { move_data: mv, fen });
+                }
+            }
+        }
+    }
+
+    pub fn handle_verify_move(&mut self, player_id: String, _fen: String, is_valid: bool) {
+        let game_id = if let Some(gid) = self.player_to_game.get(&player_id) {
+            gid.clone()
+        } else {
+            return;
+        };
+
+        let (pending_data, red_id, black_id) = {
+            if let Some(game) = self.games.get(&game_id) {
+                (
+                    game.pending_move.clone(),
+                    game.red_player.clone(),
+                    game.black_player.clone(),
+                )
+            } else {
+                return;
+            }
+        };
+
+        if let Some((mover_id, mv, claimed_fen)) = pending_data {
+            let is_mover_red = mover_id == red_id;
+            let opponent_id = if is_mover_red {
+                black_id.clone()
+            } else {
+                red_id.clone()
+            };
+
+            if player_id != opponent_id {
+                return;
+            }
+
+            if is_valid {
+                // 1. Happy Path: Verification Success
+                if let Ok((new_board, new_turn)) = Board::from_fen(&claimed_fen) {
+                    let (game_ended, winner) = {
+                        let game = self.games.get_mut(&game_id).unwrap();
+                        game.board = new_board;
+                        game.turn = new_turn;
+                        game.pending_move = None;
+
+                        // Check Checkmate/Stalemate
+                        if !has_any_valid_move(&game.board, game.turn) {
+                            let winner = if game.turn == Color::Red {
+                                Color::Black
+                            } else {
+                                Color::Red
+                            };
+                            game.game_ended = true;
+                            (true, Some(winner))
+                        } else {
+                            (false, None)
+                        }
+                    };
+
+                    if game_ended {
+                        if let Some(w) = winner {
+                            self.notify_game_end(&game_id, w, "Checkmate".to_string());
+                        }
+                    }
+                } else {
+                    self.resolve_conflict(&game_id, &mv);
+                }
+            } else {
+                // 2. Conflict Path: Mismatch
+                self.resolve_conflict(&game_id, &mv);
+            }
+        }
+    }
+
+    fn resolve_conflict(&mut self, game_id: &str, mv: &Move) {
+        let (msg, end_data) = {
+            if let Some(game) = self.games.get_mut(game_id) {
+                // Apply logic strictly on current server board
+                use cotuong_core::logic::rules::is_valid_move;
+
+                let from = if let Some(c) = cotuong_core::logic::board::BoardCoordinate::new(
+                    mv.from_row as usize,
+                    mv.from_col as usize,
+                ) {
+                    c
+                } else {
+                    // Invalid coords ? restore current
+                    return;
+                };
+
+                let to = if let Some(c) = cotuong_core::logic::board::BoardCoordinate::new(
+                    mv.to_row as usize,
+                    mv.to_col as usize,
+                ) {
+                    c
+                } else {
+                    return;
+                };
+
+                let is_legal = is_valid_move(&game.board, from, to, game.turn).is_ok();
+
+                let true_fen: String;
+                let true_turn: Color;
+
+                if is_legal {
+                    game.board.apply_move(mv, game.turn);
+                    game.turn = game.turn.opposite();
+                    true_turn = game.turn;
+                    true_fen = game.board.to_fen_string(game.turn);
+                } else {
+                    // Illegal move. Revert to current (Pre-move).
+                    true_turn = game.turn;
+                    true_fen = game.board.to_fen_string(game.turn);
                 }
 
-                // Check for checkmate/stalemate after move
-                if !has_any_valid_move(&game.board, game.turn) {
-                    // The player whose turn it is has no valid moves = they lose
-                    let winner = player_color; // The player who just moved wins
+                game.pending_move = None;
+
+                let msg = ServerMessage::GameStateCorrection {
+                    fen: true_fen,
+                    turn: true_turn,
+                };
+
+                let end_data = if !has_any_valid_move(&game.board, game.turn) {
+                    let winner = if game.turn == Color::Red {
+                        Color::Black
+                    } else {
+                        Color::Red
+                    };
                     game.game_ended = true;
+                    Some(winner)
+                } else {
+                    None
+                };
 
-                    // Notify both players of game end
-                    if let Some(p) = self.players.get(&game.red_player) {
-                        let _ = p.tx.send(ServerMessage::GameEnd {
-                            winner: Some(winner),
-                            reason: "Checkmate".to_string(),
-                        });
-                    }
-                    if let Some(p) = self.players.get(&game.black_player) {
-                        let _ = p.tx.send(ServerMessage::GameEnd {
-                            winner: Some(winner),
-                            reason: "Checkmate".to_string(),
-                        });
-                    }
+                (Some(msg), end_data)
+            } else {
+                (None, None)
+            }
+        };
+
+        if let Some(message) = msg {
+            if let Some(game) = self.games.get(game_id) {
+                let red_id = game.red_player.clone();
+                let black_id = game.black_player.clone();
+                if let Some(p) = self.players.get(&red_id) {
+                    let _ = p.tx.send(message.clone());
                 }
+                if let Some(p) = self.players.get(&black_id) {
+                    let _ = p.tx.send(message);
+                }
+            }
+        }
+
+        if let Some(winner) = end_data {
+            self.notify_game_end(game_id, winner, "Checkmate".to_string());
+        }
+    }
+
+    fn notify_game_end(&mut self, game_id: &str, winner: Color, reason: String) {
+        if let Some(game) = self.games.get(game_id) {
+            let msg = ServerMessage::GameEnd {
+                winner: Some(winner),
+                reason,
+            };
+            if let Some(p) = self.players.get(&game.red_player) {
+                let _ = p.tx.send(msg.clone());
+            }
+            if let Some(p) = self.players.get(&game.black_player) {
+                let _ = p.tx.send(msg);
             }
         }
     }
@@ -254,6 +403,7 @@ impl GameManager {
                     game.game_ended = false;
                     game.red_ready_for_rematch = false;
                     game.black_ready_for_rematch = false;
+                    game.pending_move = None;
 
                     // Notify both players of new game
                     if let Some(p) = self.players.get(&red_id) {

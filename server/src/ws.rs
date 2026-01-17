@@ -51,7 +51,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 let mut gm = state.game_manager.lock().unwrap();
                 match game_msg {
                     GameMessage::FindMatch => gm.find_match(player_id.clone()),
-                    GameMessage::MakeMove(mv) => gm.handle_move(player_id.clone(), mv),
+                    GameMessage::MakeMove { move_data, fen } => {
+                        gm.handle_move(player_id.clone(), move_data, fen)
+                    }
+                    GameMessage::VerifyMove { fen, is_valid } => {
+                        gm.handle_verify_move(player_id.clone(), fen, is_valid)
+                    }
                     GameMessage::CancelFindMatch => {
                         gm.matchmaking_queue.remove(&player_id);
                     }

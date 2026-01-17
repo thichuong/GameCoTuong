@@ -147,6 +147,76 @@ impl Board {
 
         fen
     }
+
+    pub fn from_fen(fen: &str) -> Result<(Self, Color), String> {
+        let parts: Vec<&str> = fen.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err("Invalid FEN string: missing parts".to_string());
+        }
+
+        let mut board = Self::new();
+        board.clear();
+
+        // 1. Piece placement
+        let rows: Vec<&str> = parts[0].split('/').collect();
+        if rows.len() != 10 {
+            return Err("Invalid FEN: must have 10 rows".to_string());
+        }
+
+        for (r_idx, row_str) in rows.iter().enumerate() {
+            let r = 9 - r_idx;
+            let mut c = 0;
+            for ch in row_str.chars() {
+                if c >= 9 {
+                    return Err(format!("Row {} is too long", r));
+                }
+                if let Some(digit) = ch.to_digit(10) {
+                    c += digit as usize;
+                } else {
+                    let color = if ch.is_uppercase() {
+                        Color::Red
+                    } else {
+                        Color::Black
+                    };
+                    let piece_type = match ch.to_ascii_lowercase() {
+                        'k' => PieceType::General,
+                        'a' => PieceType::Advisor,
+                        'b' => PieceType::Elephant,
+                        'n' => PieceType::Horse,
+                        'r' => PieceType::Chariot,
+                        'c' => PieceType::Cannon,
+                        'p' => PieceType::Soldier,
+                        _ => return Err(format!("Invalid piece char: {}", ch)),
+                    };
+
+                    if let Some(pos) = BoardCoordinate::new(r, c) {
+                        board.add_piece(pos, piece_type, color);
+                    }
+                    c += 1;
+                }
+            }
+            if c != 9 {
+                return Err(format!("Row {} has invalid length {}", r, c));
+            }
+        }
+
+        // 2. Turn
+        let turn = match parts[1] {
+            "w" | "r" => Color::Red,
+            "b" => Color::Black,
+            _ => return Err("Invalid turn color".to_string()),
+        };
+
+        // Recalculate internals
+        board.zobrist_hash = board.calculate_initial_hash();
+        if turn == Color::Black {
+            let keys = ZobristKeys::get();
+            board.zobrist_hash ^= keys.side_key;
+        }
+        board.calculate_initial_score();
+
+        Ok((board, turn))
+    }
 }
 
 impl Default for Board {
