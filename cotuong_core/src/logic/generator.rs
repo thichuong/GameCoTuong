@@ -1,5 +1,6 @@
 use crate::engine::Move;
-use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
+use crate::logic::board::{BitboardIterator, Board, BoardCoordinate, Color, PieceType};
+use crate::logic::lookup::AttackTables;
 use crate::logic::rules::is_valid_move;
 
 pub struct MoveGenerator;
@@ -10,19 +11,29 @@ impl MoveGenerator {
     }
 
     pub fn generate_moves(&self, board: &Board, turn: Color) -> Vec<Move> {
-        let mut moves = Vec::new();
+        let mut moves = Vec::with_capacity(64);
 
-        // Iterate over all squares to find pieces of the current turn
-        for r in 0..10 {
-            for c in 0..9 {
-                // Safety: r and c are within bounds
+        // Iterate over bitboards for the current turn
+        let start_idx = turn.index() * 7;
+        for i in 0..7 {
+            let bb = board.bitboards[start_idx + i];
+            for sq in BitboardIterator::new(bb) {
+                let piece_type = match i {
+                    0 => PieceType::General,
+                    1 => PieceType::Advisor,
+                    2 => PieceType::Elephant,
+                    3 => PieceType::Horse,
+                    4 => PieceType::Chariot,
+                    5 => PieceType::Cannon,
+                    6 => PieceType::Soldier,
+                    _ => unreachable!(),
+                };
+
+                // Safety: BitboardIterator returns valid indices 0..89
+                let (r, c) = Board::index_to_coord(sq);
                 let from = unsafe { BoardCoordinate::new_unchecked(r, c) };
 
-                if let Some(piece) = board.get_piece(from) {
-                    if piece.color == turn {
-                        self.generate_piece_moves(board, from, piece.piece_type, turn, &mut moves);
-                    }
-                }
+                self.generate_piece_moves(board, from, piece_type, turn, &mut moves);
             }
         }
 
@@ -56,6 +67,22 @@ impl MoveGenerator {
         turn: Color,
         moves: &mut Vec<Move>,
     ) {
+        // We still use is_valid_move for complex checks (like flying general or self-check),
+        // but simple geometry is now handled by lookup tables.
+        // Optimization: In a real engine, we would defer "is_valid_move" (self-check)
+        // until *making* the move in search, or check it here if we want strictly legal moves.
+        // `is_valid_move` does:
+        // 1. Bounds check (handled by lookup)
+        // 2. Color check (handled by lookup/generator)
+        // 3. Piece rules (handled by lookup)
+        // 4. Flying general (NOT handled)
+        // 5. Self-check (NOT handled)
+
+        // For now, to keep behavior identical, we call is_valid_move.
+        // But since we pre-filtered geometry, it should be faster if is_valid_move short-circuits?
+        // Actually is_valid_move re-checks everything.
+        // Optimally, we should just check the crucial parts: Flying General & Self-Check.
+
         if is_valid_move(board, from, to, turn).is_ok() {
             moves.push(Move {
                 from_row: from.row as u8,
@@ -74,11 +101,13 @@ impl MoveGenerator {
         turn: Color,
         moves: &mut Vec<Move>,
     ) {
-        let deltas = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-        for (dr, dc) in deltas {
-            if let Some(to) = self.offset(from, dr, dc) {
-                self.try_add_move(board, from, to, turn, moves);
-            }
+        let tables = AttackTables::get();
+        let sq = from.index();
+
+        for &target_sq in &tables.general_moves[sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
+            let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+            self.try_add_move(board, from, to, turn, moves);
         }
     }
 
@@ -89,11 +118,13 @@ impl MoveGenerator {
         turn: Color,
         moves: &mut Vec<Move>,
     ) {
-        let deltas = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
-        for (dr, dc) in deltas {
-            if let Some(to) = self.offset(from, dr, dc) {
-                self.try_add_move(board, from, to, turn, moves);
-            }
+        let tables = AttackTables::get();
+        let sq = from.index();
+
+        for &target_sq in &tables.advisor_moves[sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
+            let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+            self.try_add_move(board, from, to, turn, moves);
         }
     }
 
@@ -104,9 +135,14 @@ impl MoveGenerator {
         turn: Color,
         moves: &mut Vec<Move>,
     ) {
-        let deltas = [(2, 2), (2, -2), (-2, 2), (-2, -2)];
-        for (dr, dc) in deltas {
-            if let Some(to) = self.offset(from, dr, dc) {
+        let tables = AttackTables::get();
+        let sq = from.index();
+
+        for &(target_sq, eye_sq) in &tables.elephant_moves[sq] {
+            // Check eye
+            if board.grid[eye_sq].is_none() {
+                let (tr, tc) = Board::index_to_coord(target_sq);
+                let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
                 self.try_add_move(board, from, to, turn, moves);
             }
         }
@@ -119,18 +155,14 @@ impl MoveGenerator {
         turn: Color,
         moves: &mut Vec<Move>,
     ) {
-        let deltas = [
-            (2, 1),
-            (2, -1),
-            (-2, 1),
-            (-2, -1),
-            (1, 2),
-            (1, -2),
-            (-1, 2),
-            (-1, -2),
-        ];
-        for (dr, dc) in deltas {
-            if let Some(to) = self.offset(from, dr, dc) {
+        let tables = AttackTables::get();
+        let sq = from.index();
+
+        for &(target_sq, leg_sq) in &tables.horse_moves[sq] {
+            // Check leg
+            if board.grid[leg_sq].is_none() {
+                let (tr, tc) = Board::index_to_coord(target_sq);
+                let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
                 self.try_add_move(board, from, to, turn, moves);
             }
         }
@@ -143,14 +175,29 @@ impl MoveGenerator {
         turn: Color,
         moves: &mut Vec<Move>,
     ) {
-        // Horizontal and Vertical
-        self.generate_linear_moves(
-            board,
-            from,
-            turn,
-            moves,
-            &[(0, 1), (0, -1), (1, 0), (-1, 0)],
-        );
+        // Use Magic/Rotated bitboards or simple lookups for sliding pieces?
+        // We have `get_rook_attacks` in tables.
+        let tables = AttackTables::get();
+        let r = from.row;
+        let c = from.col;
+
+        let rank_occ = board.occupied_rows[r];
+        let mut attacks = tables.get_rook_attacks(c, rank_occ, 9);
+        while attacks != 0 {
+            let col = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            let to = unsafe { BoardCoordinate::new_unchecked(r, col) };
+            self.try_add_move(board, from, to, turn, moves);
+        }
+
+        let file_occ = board.occupied_cols[c];
+        let mut attacks = tables.get_rook_attacks(r, file_occ, 10);
+        while attacks != 0 {
+            let row = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            let to = unsafe { BoardCoordinate::new_unchecked(row, c) };
+            self.try_add_move(board, from, to, turn, moves);
+        }
     }
 
     fn generate_cannon_moves(
@@ -160,23 +207,26 @@ impl MoveGenerator {
         turn: Color,
         moves: &mut Vec<Move>,
     ) {
-        // Horizontal and Vertical (Cannon logic handled by is_valid_move largely, but linear scan helps)
-        // Actually, linear scan is better for Chariot/Cannon to stop at blocking pieces.
-        // But `try_add_move` relies on `is_valid_move` which does the check.
-        // To catch all moves efficiently, we should scan until board edge.
-        // `is_valid_move` will reject invalid jumps, but we don't want to call it for (0,0) -> (0,8) if (0,1) is blocked for a Chariot.
+        let tables = AttackTables::get();
+        let r = from.row;
+        let c = from.col;
 
-        // For optimization, we should implement custom linear scan here, OR just rely on `is_valid_move` for now
-        // but iterate all possible linear targets.
-        // Iterating all targets is still O(10+9) = 19 calls. Safe enough compared to 90.
+        let rank_occ = board.occupied_rows[r];
+        let mut attacks = tables.get_cannon_attacks(c, rank_occ, 9);
+        while attacks != 0 {
+            let col = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            let to = unsafe { BoardCoordinate::new_unchecked(r, col) };
+            self.try_add_move(board, from, to, turn, moves);
+        }
 
-        let dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-        for (dr, dc) in dirs {
-            let mut dist = 1;
-            while let Some(to) = self.offset(from, dr * dist, dc * dist) {
-                self.try_add_move(board, from, to, turn, moves);
-                dist += 1;
-            }
+        let file_occ = board.occupied_cols[c];
+        let mut attacks = tables.get_cannon_attacks(r, file_occ, 10);
+        while attacks != 0 {
+            let row = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            let to = unsafe { BoardCoordinate::new_unchecked(row, c) };
+            self.try_add_move(board, from, to, turn, moves);
         }
     }
 
@@ -187,53 +237,20 @@ impl MoveGenerator {
         turn: Color,
         moves: &mut Vec<Move>,
     ) {
-        let forward = match turn {
-            Color::Red => 1,
-            Color::Black => -1,
-        };
+        let tables = AttackTables::get();
+        let sq = from.index();
+        let color_idx = turn.index();
 
-        let deltas = [(forward, 0), (0, 1), (0, -1)];
-        for (dr, dc) in deltas {
-            if let Some(to) = self.offset(from, dr, dc) {
-                self.try_add_move(board, from, to, turn, moves);
-            }
+        for &target_sq in &tables.soldier_moves[color_idx][sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
+            let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+            self.try_add_move(board, from, to, turn, moves);
         }
     }
 
-    // Helper to add offset
-    fn generate_linear_moves(
-        &self,
-        board: &Board,
-        from: BoardCoordinate,
-        turn: Color,
-        moves: &mut Vec<Move>,
-        dirs: &[(isize, isize)],
-    ) {
-        for (dr, dc) in dirs {
-            let mut dist = 1;
-            while let Some(to) = self.offset(from, dr * dist, dc * dist) {
-                self.try_add_move(board, from, to, turn, moves);
-                dist += 1;
-            }
-        }
-    }
-
-    fn offset(
-        &self,
-        from: BoardCoordinate,
-        row_delta: isize,
-        col_delta: isize,
-    ) -> Option<BoardCoordinate> {
-        let r = from.row as isize + row_delta;
-        let c = from.col as isize + col_delta;
-
-        if (0..10).contains(&r) && (0..9).contains(&c) {
-            // Safety: Bounds checked
-            Some(unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) })
-        } else {
-            None
-        }
-    }
+    // `offset` helper is no longer needed but we can keep it if strictly necessary,
+    // but the above implementation replaces it.
+    // We'll remove it to clean up.
 }
 
 impl Default for MoveGenerator {
@@ -264,6 +281,7 @@ mod tests {
             !moves.is_empty(),
             "Red should have moves in initial position"
         );
+        // Previously > 5. Now we generate exact set.
         assert!(moves.len() > 5);
     }
 

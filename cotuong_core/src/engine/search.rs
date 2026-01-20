@@ -408,6 +408,16 @@ impl AlphaBetaEngine {
                 continue;
             }
 
+            // Late Move Pruning (LMP)
+            // Prune quiet moves if we have searched enough moves at low depth
+            if !in_check
+                && depth <= 4
+                && !is_capture
+                && moves_searched >= (8 + 5 * (depth as usize * depth as usize))
+            {
+                continue;
+            }
+
             if let Some(ex_mv) = excluded_move {
                 if mv == ex_mv {
                     continue;
@@ -834,12 +844,6 @@ impl AlphaBetaEngine {
         });
     }
 
-    fn offset(base: usize, delta: i32) -> Option<usize> {
-        let base_i = i32::try_from(base).ok()?;
-        let res = base_i.checked_add(delta)?;
-        usize::try_from(res).ok()
-    }
-
     fn gen_rook_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         use crate::logic::lookup::AttackTables;
         let tables = AttackTables::get();
@@ -928,153 +932,62 @@ impl AlphaBetaEngine {
     }
 
     fn gen_horse_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
-        let moves_offsets = [
-            (-2, -1),
-            (-2, 1),
-            (2, -1),
-            (2, 1),
-            (-1, -2),
-            (-1, 2),
-            (1, -2),
-            (1, 2),
-        ];
+        use crate::logic::lookup::AttackTables;
+        let tables = AttackTables::get();
+        let sq = r * 9 + c;
 
-        for (dr, dc) in moves_offsets {
-            let Some(tr) = Self::offset(r, dr) else {
-                continue;
-            };
-            let Some(tc) = Self::offset(c, dc) else {
-                continue;
-            };
-            if tr >= 10 || tc >= 9 {
-                continue;
-            }
-
-            // Check leg
-            let Some(leg_r) = Self::offset(r, if dr.abs() == 2 { dr / 2 } else { 0 }) else {
-                continue;
-            };
-            let Some(leg_c) = Self::offset(c, if dc.abs() == 2 { dc / 2 } else { 0 }) else {
-                continue;
-            };
-
-            let leg_sq = Board::square_index(leg_r, leg_c);
+        for &(target_sq, leg_sq) in &tables.horse_moves[sq] {
             if (ctx.board.occupied & (1 << leg_sq)) == 0 {
+                let (tr, tc) = Board::index_to_coord(target_sq);
                 self.add_move(ctx, (r, c), (tr, tc));
             }
         }
     }
 
     fn gen_elephant_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
-        let offsets = [(-2, -2), (-2, 2), (2, -2), (2, 2)];
-        for (dr, dc) in offsets {
-            let Some(tr) = Self::offset(r, dr) else {
-                continue;
-            };
-            let Some(tc) = Self::offset(c, dc) else {
-                continue;
-            };
-            if tr >= 10 || tc >= 9 {
-                continue;
-            }
+        use crate::logic::lookup::AttackTables;
+        let tables = AttackTables::get();
+        let sq = r * 9 + c;
 
-            // River check
-            if ctx.turn == Color::Red && tr > 4 {
-                continue;
-            }
-            if ctx.turn == Color::Black && tr < 5 {
-                continue;
-            }
-
-            // Eye check
-            let Some(eye_r) = Self::offset(r, dr / 2) else {
-                continue;
-            };
-            let Some(eye_c) = Self::offset(c, dc / 2) else {
-                continue;
-            };
-
-            let eye_sq = Board::square_index(eye_r, eye_c);
+        for &(target_sq, eye_sq) in &tables.elephant_moves[sq] {
             if (ctx.board.occupied & (1 << eye_sq)) == 0 {
+                let (tr, tc) = Board::index_to_coord(target_sq);
                 self.add_move(ctx, (r, c), (tr, tc));
             }
         }
     }
 
     fn gen_advisor_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
-        let offsets = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
-        for (dr, dc) in offsets {
-            let Some(tr) = Self::offset(r, dr) else {
-                continue;
-            };
-            let Some(tc) = Self::offset(c, dc) else {
-                continue;
-            };
-            if tr >= 10 || tc >= 9 {
-                continue;
-            }
+        use crate::logic::lookup::AttackTables;
+        let tables = AttackTables::get();
+        let sq = r * 9 + c;
 
-            // Palace check
-            if !(3..=5).contains(&tc) {
-                continue;
-            }
-            if ctx.turn == Color::Red && tr > 2 {
-                continue;
-            }
-            if ctx.turn == Color::Black && tr < 7 {
-                continue;
-            }
-
+        for &target_sq in &tables.advisor_moves[sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
             self.add_move(ctx, (r, c), (tr, tc));
         }
     }
 
     fn gen_king_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
-        let offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-        for (dr, dc) in offsets {
-            let Some(tr) = Self::offset(r, dr) else {
-                continue;
-            };
-            let Some(tc) = Self::offset(c, dc) else {
-                continue;
-            };
-            if tr >= 10 || tc >= 9 {
-                continue;
-            }
+        use crate::logic::lookup::AttackTables;
+        let tables = AttackTables::get();
+        let sq = r * 9 + c;
 
-            // Palace check
-            if !(3..=5).contains(&tc) {
-                continue;
-            }
-            if ctx.turn == Color::Red && tr > 2 {
-                continue;
-            }
-            if ctx.turn == Color::Black && tr < 7 {
-                continue;
-            }
-
+        for &target_sq in &tables.general_moves[sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
             self.add_move(ctx, (r, c), (tr, tc));
         }
     }
 
     fn gen_pawn_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
-        let forward = if ctx.turn == Color::Red { 1 } else { -1 };
+        use crate::logic::lookup::AttackTables;
+        let tables = AttackTables::get();
+        let sq = r * 9 + c;
+        let color_idx = ctx.turn.index();
 
-        // Forward
-        let tr = Self::offset(r, forward).unwrap_or(10);
-        if tr < 10 {
-            self.add_move(ctx, (r, c), (tr, c));
-        }
-
-        // Horizontal (if crossed river)
-        let crossed_river = if ctx.turn == Color::Red { r > 4 } else { r < 5 };
-        if crossed_river {
-            for dc in [-1, 1] {
-                let tc = Self::offset(c, dc).unwrap_or(9);
-                if tc < 9 {
-                    self.add_move(ctx, (r, c), (r, tc));
-                }
-            }
+        for &target_sq in &tables.soldier_moves[color_idx][sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
+            self.add_move(ctx, (r, c), (tr, tc));
         }
     }
 
