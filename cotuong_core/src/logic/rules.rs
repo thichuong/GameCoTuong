@@ -126,15 +126,40 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
     }];
     if enemy_horses != 0 {
         // Offsets: (dr, dc, leg_r_off, leg_c_off)
+        // Offsets: (dr, dc, leg_r_off, leg_c_off)
+        // Correct logic: leg is at (Start + dir). Start = Target - move.
+        // For check, we look from General (Target) to Horse (Source).
+        // Move is Source -> Target.
+        // Leg is Source + 1 step orthogonal.
+        // If relative to General, Source is at (dr, dc).
+        // Leg is at (dr, dc) + 1 step towards General? No.
+        // Leg is at Source + 1 step towards Target.
+        // Source = (gr+dr, gc+dc). Target = (gr, gc).
+        // If |dr|=2, step is row-wise towards Target. dr has sign S. Step is -S.
+        // LegRow = (gr+dr) - sign(dr). LegCol = gc+dc.
+        // LegRow relative to Gr: dr - sign(dr). LegCol relative to Gc: dc.
+        // Example: dr=-2, dc=-1. sign(dr)=-1.
+        // LegRelRow = -2 - (-1) = -1. LegRelCol = -1.
+        // Wait, my previous manual calc was (-1, -1).
+        // Yes.
+        // So offsets should be (dr - sign(dr), dc)?
+        // For |dr|=2: LegRel = (dr/2, dc).
+        // For |dr|=1 (|dc|=2): LegRel = (dr, dc/2).
+        // Let's re-verify.
+        // Case 1: (-2, -1). LegRel (-1, -1).
+        // Formula 1: (-1, -1). Correct.
+        // Case 5: (-1, -2). LegRel (-1, -1).
+        // Formula 2: (-1, -1). Correct.
+        // So the table values should be:
         let offsets = [
-            (-2, -1, -1, 0),
-            (-2, 1, -1, 0),
-            (2, -1, 1, 0),
-            (2, 1, 1, 0),
-            (-1, -2, 0, -1),
-            (-1, 2, 0, 1),
-            (1, -2, 0, -1),
-            (1, 2, 0, 1),
+            (-2, -1, -1, -1),
+            (-2, 1, -1, 1),
+            (2, -1, 1, -1),
+            (2, 1, 1, 1),
+            (-1, -2, -1, -1),
+            (-1, 2, -1, 1),
+            (1, -2, 1, -1),
+            (1, 2, 1, 1),
         ];
 
         for (dr, dc, lr, lc) in offsets {
