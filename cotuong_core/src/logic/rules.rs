@@ -42,40 +42,145 @@ pub fn is_valid_move(
 }
 
 /// Checks if the `color` is currently in check.
+use crate::logic::board::BitboardIterator;
+use crate::logic::lookup::AttackTables;
+
+/// Checks if the `color` is currently in check.
 pub fn is_in_check(board: &Board, color: Color) -> bool {
-    // Find the General
-    let mut general_pos = None;
-    for r in 0..10 {
-        for c in 0..9 {
-            let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
-            if let Some(p) = board.get_piece(pos) {
-                if p.color == color && p.piece_type == PieceType::General {
-                    general_pos = Some(pos);
-                    break;
-                }
-            }
+    // Locate the General
+    let general_idx = match color {
+        Color::Red => 0,
+        Color::Black => 7,
+    };
+    let general_bb = board.bitboards[general_idx];
+
+    // Get general position (should be exactly one)
+    let general_sq = if let Some(sq) = BitboardIterator::new(general_bb).next() {
+        sq
+    } else {
+        return true; // No general means invalid state (or captured), treat as check
+    };
+
+    let (gr, gc) = Board::index_to_coord(general_sq);
+    let enemy_color = color.opposite();
+    let tables = AttackTables::get();
+
+    // 1. Check Rook/Chariot Attacks
+    let enemy_rooks = board.bitboards[match enemy_color {
+        Color::Red => 4,
+        Color::Black => 11,
+    }];
+    if enemy_rooks != 0 {
+        let rank_occ = board.occupied_rows[gr];
+        let file_occ = board.occupied_cols[gc];
+
+        // Rank Check
+        let rank_attacks = tables.get_rook_attacks(gc, rank_occ, 9);
+        let er_rank = (enemy_rooks >> (gr * 9)) as u16 & 0x1FF;
+        if (er_rank & rank_attacks) != 0 {
+            return true;
         }
-        if general_pos.is_some() {
-            break;
+
+        // File Check
+        let file_attacks = tables.get_rook_attacks(gr, file_occ, 10);
+        let mut attacks = file_attacks;
+        while attacks != 0 {
+            let r = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            if (enemy_rooks & (1u128 << (r * 9 + gc))) != 0 {
+                return true;
+            }
         }
     }
 
-    let Some(g_pos) = general_pos else {
-        return true;
-    };
+    // 2. Check Cannon Attacks
+    let enemy_cannons = board.bitboards[match enemy_color {
+        Color::Red => 5,
+        Color::Black => 12,
+    }];
+    if enemy_cannons != 0 {
+        let rank_occ = board.occupied_rows[gr];
+        let file_occ = board.occupied_cols[gc];
 
-    // Check if any enemy piece can move to g_pos
-    let enemy_color = color.opposite();
-    for r in 0..10 {
-        for c in 0..9 {
-            let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
-            if let Some(p) = board.get_piece(pos) {
-                if p.color == enemy_color {
-                    // Check if this piece can attack the general
-                    // We ignore self-check for the attacker here, just geometry
-                    if validate_piece_logic(board, pos, g_pos, enemy_color).is_ok() {
+        let rank_attacks = tables.get_cannon_attacks(gc, rank_occ, 9);
+        let er_rank = (enemy_cannons >> (gr * 9)) as u16 & 0x1FF;
+        if (er_rank & rank_attacks) != 0 {
+            return true;
+        }
+
+        let file_attacks = tables.get_cannon_attacks(gr, file_occ, 10);
+        let mut attacks = file_attacks;
+        while attacks != 0 {
+            let r = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            if (enemy_cannons & (1u128 << (r * 9 + gc))) != 0 {
+                return true;
+            }
+        }
+    }
+
+    // 3. Check Horse Attacks
+    let enemy_horses = board.bitboards[match enemy_color {
+        Color::Red => 3,
+        Color::Black => 10,
+    }];
+    if enemy_horses != 0 {
+        // Offsets: (dr, dc, leg_r_off, leg_c_off)
+        let offsets = [
+            (-2, -1, -1, 0),
+            (-2, 1, -1, 0),
+            (2, -1, 1, 0),
+            (2, 1, 1, 0),
+            (-1, -2, 0, -1),
+            (-1, 2, 0, 1),
+            (1, -2, 0, -1),
+            (1, 2, 0, 1),
+        ];
+
+        for (dr, dc, lr, lc) in offsets {
+            let tr = gr as isize + dr;
+            let tc = gc as isize + dc;
+
+            if (0..10).contains(&tr) && (0..9).contains(&tc) {
+                let check_sr = tr as usize;
+                let check_sc = tc as usize;
+
+                if (enemy_horses & (1u128 << (check_sr * 9 + check_sc))) != 0 {
+                    // Found enemy horse, check leg
+                    let leg_r = (gr as isize + lr) as usize;
+                    let leg_c = (gc as isize + lc) as usize;
+                    if (board.occupied & (1u128 << (leg_r * 9 + leg_c))) == 0 {
                         return true;
                     }
+                }
+            }
+        }
+    }
+
+    // 4. Check Soldier Attacks
+    let enemy_soldiers = board.bitboards[match enemy_color {
+        Color::Red => 6,
+        Color::Black => 13,
+    }];
+    if enemy_soldiers != 0 {
+        // Red soldiers attack upwards (+1 row normally), but from perspective of General being attacked:
+        // If we are Black Gen, Red Soldier below us (row - 1) attacks us.
+        // If we are Red Gen, Black Soldier above us (row + 1) attacks us.
+        let backward_check = if enemy_color == Color::Red { -1 } else { 1 };
+
+        let fr = gr as isize + backward_check;
+        if (0..10).contains(&fr) {
+            if (enemy_soldiers & (1u128 << (fr as usize * 9 + gc))) != 0 {
+                return true;
+            }
+        }
+
+        // Side attacks
+        for dc in [-1, 1] {
+            let sc = gc as isize + dc;
+            if (0..9).contains(&sc) {
+                if (enemy_soldiers & (1u128 << (gr * 9 + sc as usize))) != 0 {
+                    return true;
                 }
             }
         }
@@ -85,39 +190,43 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
 }
 
 pub fn is_flying_general(board: &Board) -> bool {
-    let mut red_gen = None;
-    let mut black_gen = None;
+    let red_gen_bb = board.bitboards[0];
+    let black_gen_bb = board.bitboards[7];
 
-    for r in 0..10 {
-        for c in 3..6 {
-            let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
-            // Generals are only in cols 3-5
-            if let Some(p) = board.get_piece(pos) {
-                if p.piece_type == PieceType::General {
-                    if p.color == Color::Red {
-                        red_gen = Some(pos);
-                    } else {
-                        black_gen = Some(pos);
-                    }
-                }
-            }
-        }
+    let red_sq = if let Some(sq) = BitboardIterator::new(red_gen_bb).next() {
+        sq
+    } else {
+        return false;
+    };
+
+    let black_sq = if let Some(sq) = BitboardIterator::new(black_gen_bb).next() {
+        sq
+    } else {
+        return false;
+    };
+
+    let (r1, c1) = Board::index_to_coord(red_sq);
+    let (r2, c2) = Board::index_to_coord(black_sq);
+
+    if c1 != c2 {
+        return false;
     }
 
-    if let (Some(p1), Some(p2)) = (red_gen, black_gen) {
-        if p1.col == p2.col {
-            // Check if there are pieces between them
-            let min_r = p1.row.min(p2.row);
-            let max_r = p1.row.max(p2.row);
-            for r in (min_r + 1)..max_r {
-                let check_pos = unsafe { BoardCoordinate::new_unchecked(r, p1.col) };
-                if board.get_piece(check_pos).is_some() {
-                    return false; // Blocked
-                }
-            }
-            return true; // Flying General!
+    // Check for pieces in between
+    let min_r = r1.min(r2);
+    let max_r = r1.max(r2);
+
+    if max_r > min_r + 1 {
+        let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
+        let col_occ = board.occupied_cols[c1];
+        if (col_occ & mask) == 0 {
+            return true;
         }
+    } else {
+        // Generals are adjacent on same file (no pieces between)
+        return true;
     }
+
     false
 }
 

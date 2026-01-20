@@ -29,6 +29,7 @@ struct MoveGenContext<'a> {
     best_move: Option<Move>,
     killers: &'a [Option<Move>; 2],
     only_captures: bool,
+    enemy_bb: u128,
 }
 
 impl AlphaBetaEngine {
@@ -689,6 +690,8 @@ impl AlphaBetaEngine {
             &[None; 2]
         };
 
+        let enemy_bb = board.get_color_bb(turn.opposite());
+
         let mut ctx = MoveGenContext {
             board,
             turn,
@@ -696,6 +699,7 @@ impl AlphaBetaEngine {
             best_move,
             killers,
             only_captures,
+            enemy_bb,
         };
 
         use crate::logic::board::BitboardIterator;
@@ -843,8 +847,13 @@ impl AlphaBetaEngine {
         // Rank attacks (Horizontal)
         let rank_occ = ctx.board.occupied_rows[r];
         let rank_attacks = tables.get_rook_attacks(c, rank_occ, 9);
-
         let mut attacks = rank_attacks;
+
+        if ctx.only_captures {
+            let enemy_rank = (ctx.enemy_bb >> (r * 9)) as u16 & 0x1FF;
+            attacks &= enemy_rank;
+        }
+
         while attacks != 0 {
             let col = attacks.trailing_zeros() as usize;
             attacks &= attacks - 1;
@@ -854,12 +863,25 @@ impl AlphaBetaEngine {
         // File attacks (Vertical)
         let file_occ = ctx.board.occupied_cols[c];
         let file_attacks = tables.get_rook_attacks(r, file_occ, 10);
-
         let mut attacks = file_attacks;
-        while attacks != 0 {
-            let row = attacks.trailing_zeros() as usize;
-            attacks &= attacks - 1;
-            self.add_move(ctx, (r, c), (row, c));
+
+        if ctx.only_captures {
+            // Iterate bits and check enemy_bb
+            while attacks != 0 {
+                let row = attacks.trailing_zeros() as usize;
+                attacks &= attacks - 1;
+
+                // Manual check is faster than constructing mask for columns
+                if (ctx.enemy_bb & (1u128 << (row * 9 + c))) != 0 {
+                    self.add_move(ctx, (r, c), (row, c));
+                }
+            }
+        } else {
+            while attacks != 0 {
+                let row = attacks.trailing_zeros() as usize;
+                attacks &= attacks - 1;
+                self.add_move(ctx, (r, c), (row, c));
+            }
         }
     }
 
@@ -870,8 +892,13 @@ impl AlphaBetaEngine {
         // Rank attacks (Horizontal)
         let rank_occ = ctx.board.occupied_rows[r];
         let rank_attacks = tables.get_cannon_attacks(c, rank_occ, 9);
-
         let mut attacks = rank_attacks;
+
+        if ctx.only_captures {
+            let enemy_rank = (ctx.enemy_bb >> (r * 9)) as u16 & 0x1FF;
+            attacks &= enemy_rank;
+        }
+
         while attacks != 0 {
             let col = attacks.trailing_zeros() as usize;
             attacks &= attacks - 1;
@@ -881,12 +908,22 @@ impl AlphaBetaEngine {
         // File attacks (Vertical)
         let file_occ = ctx.board.occupied_cols[c];
         let file_attacks = tables.get_cannon_attacks(r, file_occ, 10);
-
         let mut attacks = file_attacks;
-        while attacks != 0 {
-            let row = attacks.trailing_zeros() as usize;
-            attacks &= attacks - 1;
-            self.add_move(ctx, (r, c), (row, c));
+
+        if ctx.only_captures {
+            while attacks != 0 {
+                let row = attacks.trailing_zeros() as usize;
+                attacks &= attacks - 1;
+                if (ctx.enemy_bb & (1u128 << (row * 9 + c))) != 0 {
+                    self.add_move(ctx, (r, c), (row, c));
+                }
+            }
+        } else {
+            while attacks != 0 {
+                let row = attacks.trailing_zeros() as usize;
+                attacks &= attacks - 1;
+                self.add_move(ctx, (r, c), (row, c));
+            }
         }
     }
 
