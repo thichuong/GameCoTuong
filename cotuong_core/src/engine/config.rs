@@ -55,8 +55,8 @@ impl Default for EngineConfig {
             val_rook: VAL_ROOK,
             val_king: VAL_KING,
 
-            hanging_piece_penalty: 10,
-            king_exposed_cannon_penalty: 20,
+            hanging_piece_penalty: 50,
+            king_exposed_cannon_penalty: 80,
 
             score_hash_move: 200_000,
             score_capture_base: 200_000, // Aggressive capturing
@@ -73,7 +73,7 @@ impl Default for EngineConfig {
             singular_extension_min_depth: 8,
             singular_extension_margin: 20,
 
-            mate_score: 20_000, // Increased from 20000 for stronger checkmate preference
+            mate_score: 30_000, // Effectively infinity for search
 
             tt_size_mb: 256,
         }

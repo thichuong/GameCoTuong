@@ -69,7 +69,7 @@ impl AlphaBetaEngine {
                         let r = 1.0
                             + (f64::from(depth as u32).ln()
                                 * f64::from(moves_searched as u32).ln())
-                                / 1.5; // Increased aggression from 2.0
+                                / 2.25; // Decreased aggression (Quality focus)
                         *val = (r as u8).min((depth - 1) as u8);
                     }
                 } else {
@@ -142,8 +142,9 @@ impl AlphaBetaEngine {
         beta: i32,
         depth: u8,
         turn: Color,
+        ply: u8,
     ) -> Option<Option<i32>> {
-        if depth >= self.config.probcut_depth && beta.abs() < 15000 {
+        if depth >= self.config.probcut_depth && beta.abs() < 25000 {
             let margin = self.config.probcut_margin;
             let reduction = self.config.probcut_reduction;
 
@@ -155,6 +156,7 @@ impl AlphaBetaEngine {
                     depth - reduction,
                     turn.opposite(),
                     None,
+                    ply + 1,
                 ) {
                     if -score >= beta + margin {
                         return Some(Some(beta));
@@ -173,8 +175,9 @@ impl AlphaBetaEngine {
         beta: i32,
         depth: u8,
         turn: Color,
+        ply: u8,
     ) -> Option<Option<i32>> {
-        if depth >= 3 && beta.abs() < 15000 && !is_in_check(board, turn) {
+        if depth >= 3 && beta.abs() < 25000 && !is_in_check(board, turn) {
             let r = if depth > 6 { 3 } else { 2 };
             board.apply_null_move();
 
@@ -185,6 +188,7 @@ impl AlphaBetaEngine {
                 depth - 1 - r,
                 turn.opposite(),
                 None,
+                ply + 1,
             );
 
             board.apply_null_move();
@@ -206,6 +210,7 @@ impl AlphaBetaEngine {
         tt_entry: Option<crate::engine::tt::TTEntry>,
         depth: u8,
         turn: Color,
+        ply: u8,
         best_move_tt: Option<Move>,
         excluded_move: Option<Move>,
     ) -> u8 {
@@ -227,6 +232,7 @@ impl AlphaBetaEngine {
                         (depth - 1) / 2,
                         turn,
                         best_move_tt,
+                        ply + 1,
                     ) {
                         if score < singular_beta {
                             return 1;
@@ -246,8 +252,17 @@ impl AlphaBetaEngine {
         depth: u8,
         turn: Color,
         excluded_move: Option<Move>,
+        ply: u8,
     ) -> Option<i32> {
         self.nodes_searched += 1;
+
+        if ply >= 100 {
+            return Some(if turn == Color::Red {
+                self.evaluator.evaluate(board)
+            } else {
+                -self.evaluator.evaluate(board)
+            });
+        }
 
         if self.check_time() {
             return None;
@@ -264,40 +279,50 @@ impl AlphaBetaEngine {
         let tt_entry = self.tt.probe(hash);
         if let Some(entry) = tt_entry {
             if entry.depth >= depth {
+                // Adjust mate score from TT to current ply
+                let mut score = entry.score;
+                if score.abs() > 20000 {
+                    if score > 0 {
+                        score -= i32::from(ply);
+                    } else {
+                        score += i32::from(ply);
+                    }
+                }
+
                 match entry.flag {
                     TTFlag::Exact => {
                         self.history_stack.pop();
-                        return Some(entry.score);
+                        return Some(score);
                     }
                     TTFlag::LowerBound => {
-                        if entry.score >= beta {
+                        if score >= beta {
                             self.history_stack.pop();
-                            return Some(entry.score);
+                            return Some(score);
                         }
-                        alpha = alpha.max(entry.score);
+                        alpha = alpha.max(score);
                     }
                     TTFlag::UpperBound => {
-                        if entry.score <= alpha {
+                        if score <= alpha {
                             self.history_stack.pop();
-                            return Some(entry.score);
+                            return Some(score);
                         }
-                        beta = beta.min(entry.score);
+                        beta = beta.min(score);
                     }
                 }
                 if alpha >= beta {
                     self.history_stack.pop();
-                    return Some(entry.score);
+                    return Some(score);
                 }
             }
         }
 
         if depth == 0 {
-            let score = self.quiescence(board, alpha, beta, turn);
+            let score = self.quiescence(board, alpha, beta, turn, ply);
             self.history_stack.pop();
             return Some(score);
         }
 
-        if let Some(res) = self.probcut(board, beta, depth, turn) {
+        if let Some(res) = self.probcut(board, beta, depth, turn, ply) {
             self.history_stack.pop();
             return res;
         }
@@ -305,7 +330,7 @@ impl AlphaBetaEngine {
         let in_check = is_in_check(board, turn);
 
         // Reverse Futility Pruning
-        if depth <= 3 && !in_check && beta.abs() < 15000 {
+        if depth <= 3 && !in_check && beta.abs() < 25000 {
             let eval = if turn == Color::Red {
                 self.evaluator.evaluate(board)
             } else {
@@ -318,7 +343,7 @@ impl AlphaBetaEngine {
             }
         }
 
-        if let Some(res) = self.null_move_pruning(board, beta, depth, turn) {
+        if let Some(res) = self.null_move_pruning(board, beta, depth, turn, ply) {
             self.history_stack.pop();
             return res;
         }
@@ -327,14 +352,21 @@ impl AlphaBetaEngine {
 
         // Internal Iterative Deepening (IID)
         if best_move_tt.is_none() && depth >= 4 {
-            let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn, None);
+            let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn, None, ply);
             if let Some(entry) = self.tt.probe(hash) {
                 best_move_tt = entry.best_move;
             }
         }
 
-        let singular_extension =
-            self.singular_extension(board, tt_entry, depth, turn, best_move_tt, excluded_move);
+        let singular_extension = self.singular_extension(
+            board,
+            tt_entry,
+            depth,
+            turn,
+            ply,
+            best_move_tt,
+            excluded_move,
+        );
 
         let mut moves = self.generate_moves(board, turn, best_move_tt, depth);
 
@@ -353,13 +385,15 @@ impl AlphaBetaEngine {
 
             if moves.is_empty() {
                 self.history_stack.pop();
-                return Some(-self.config.mate_score + (10 - i32::from(depth)));
+                // Exact mate score based on ply
+                return Some(-(self.config.mate_score - i32::from(ply)));
             }
         }
 
         if moves.is_empty() {
             self.history_stack.pop();
-            return Some(-self.config.mate_score + (10 - i32::from(depth)));
+            // Stalemate is loss (Xiangqi) - treated as mate
+            return Some(-(self.config.mate_score - i32::from(ply)));
         }
 
         // Dynamic Limiting Limit Calculation (Moved here, but applied inside loop)
@@ -448,10 +482,6 @@ impl AlphaBetaEngine {
                 continue;
             }
 
-            // Absolute Checkmate Detection - REMOVED for performance
-            // The search will naturally find checkmates.
-            // Explicitly checking for mate in 1 here is too expensive (full move gen for opponent).
-
             // Repetition Check (Pruning)
             // Check if this position has occurred 2 times before (so this is the 3rd)
             let mut rep_count = 0;
@@ -496,6 +526,7 @@ impl AlphaBetaEngine {
                     depth - 1 + extension,
                     turn.opposite(),
                     None,
+                    ply + 1,
                 );
 
                 match val {
@@ -509,7 +540,7 @@ impl AlphaBetaEngine {
             } else {
                 // Null window search for other moves (Cut-nodes)
                 // Try to prove that this move is NOT better than alpha
-                let search_depth = depth - 1 - reduction + extension;
+                let search_depth = (depth - 1 + extension).saturating_sub(reduction);
 
                 let mut val = self.alpha_beta(
                     board,
@@ -518,6 +549,7 @@ impl AlphaBetaEngine {
                     search_depth,
                     turn.opposite(),
                     None,
+                    ply + 1,
                 );
 
                 if let Some(v) = val {
@@ -532,6 +564,7 @@ impl AlphaBetaEngine {
                                 depth - 1 + extension,
                                 turn.opposite(),
                                 None,
+                                ply + 1,
                             );
                         }
 
@@ -545,6 +578,7 @@ impl AlphaBetaEngine {
                                     depth - 1 + extension,
                                     turn.opposite(),
                                     None,
+                                    ply + 1,
                                 );
                             }
                         }
@@ -592,14 +626,14 @@ impl AlphaBetaEngine {
             // Checkmate or Stalemate
             if in_check {
                 // Checkmate
-                return Some(-self.config.mate_score + (10 - i32::from(depth)));
+                return Some(-(self.config.mate_score - i32::from(ply)));
             }
             if has_repetition_move {
                 // All legal moves were pruned due to repetition -> Draw
                 return Some(0);
             }
             // Stalemate (Loss in Xiangqi)
-            return Some(-self.config.mate_score + (10 - i32::from(depth)));
+            return Some(-(self.config.mate_score - i32::from(ply)));
         }
 
         self.tt
@@ -609,8 +643,23 @@ impl AlphaBetaEngine {
         Some(best_score)
     }
 
-    fn quiescence(&mut self, board: &mut Board, mut alpha: i32, beta: i32, turn: Color) -> i32 {
+    fn quiescence(
+        &mut self,
+        board: &mut Board,
+        mut alpha: i32,
+        beta: i32,
+        turn: Color,
+        ply: u8,
+    ) -> i32 {
         self.nodes_searched += 1;
+
+        if ply >= 100 {
+            return if turn == Color::Red {
+                self.evaluator.evaluate(board)
+            } else {
+                -self.evaluator.evaluate(board)
+            };
+        }
 
         // Q-Search doesn't check time strictly to avoid partial evaluations,
         // but we could add it if needed. For now, let it finish.
@@ -656,7 +705,7 @@ impl AlphaBetaEngine {
                 continue;
             }
 
-            let score = -self.quiescence(board, -beta, -alpha, turn.opposite());
+            let score = -self.quiescence(board, -beta, -alpha, turn.opposite(), ply + 1);
 
             board.undo_move(&mv, captured, turn);
 
@@ -1152,7 +1201,7 @@ impl Searcher for AlphaBetaEngine {
                     let score_opt;
                     if moves_searched == 0 {
                         score_opt =
-                            self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), None);
+                            self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), None, 1);
                     } else {
                         // Root PVS
                         let mut val = self.alpha_beta(
@@ -1162,6 +1211,7 @@ impl Searcher for AlphaBetaEngine {
                             d - 1,
                             turn.opposite(),
                             None,
+                            1,
                         );
                         if let Some(v) = val {
                             let s = -v;
@@ -1173,6 +1223,7 @@ impl Searcher for AlphaBetaEngine {
                                     d - 1,
                                     turn.opposite(),
                                     None,
+                                    1,
                                 );
                             }
                         }
