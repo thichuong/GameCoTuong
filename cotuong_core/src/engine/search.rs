@@ -142,6 +142,7 @@ impl AlphaBetaEngine {
         beta: i32,
         depth: u8,
         turn: Color,
+        ply: u8,
     ) -> Option<Option<i32>> {
         if depth >= self.config.probcut_depth && beta.abs() < 15000 {
             let margin = self.config.probcut_margin;
@@ -154,6 +155,7 @@ impl AlphaBetaEngine {
                     -beta - margin + 1,
                     depth - reduction,
                     turn.opposite(),
+                    ply + 1,
                     None,
                 ) {
                     if -score >= beta + margin {
@@ -173,6 +175,7 @@ impl AlphaBetaEngine {
         beta: i32,
         depth: u8,
         turn: Color,
+        ply: u8,
     ) -> Option<Option<i32>> {
         if depth >= 3 && beta.abs() < 15000 && !is_in_check(board, turn) {
             let r = if depth > 6 { 3 } else { 2 };
@@ -184,6 +187,7 @@ impl AlphaBetaEngine {
                 -beta + 1,
                 depth - 1 - r,
                 turn.opposite(),
+                ply + 1,
                 None,
             );
 
@@ -206,6 +210,7 @@ impl AlphaBetaEngine {
         tt_entry: Option<crate::engine::tt::TTEntry>,
         depth: u8,
         turn: Color,
+        ply: u8,
         best_move_tt: Option<Move>,
         excluded_move: Option<Move>,
     ) -> u8 {
@@ -226,6 +231,7 @@ impl AlphaBetaEngine {
                         singular_beta,
                         (depth - 1) / 2,
                         turn,
+                        ply,
                         best_move_tt,
                     ) {
                         if score < singular_beta {
@@ -245,6 +251,7 @@ impl AlphaBetaEngine {
         mut beta: i32,
         depth: u8,
         turn: Color,
+        ply: u8,
         excluded_move: Option<Move>,
     ) -> Option<i32> {
         self.nodes_searched += 1;
@@ -297,7 +304,7 @@ impl AlphaBetaEngine {
             return Some(score);
         }
 
-        if let Some(res) = self.probcut(board, beta, depth, turn) {
+        if let Some(res) = self.probcut(board, beta, depth, turn, ply) {
             self.history_stack.pop();
             return res;
         }
@@ -318,7 +325,7 @@ impl AlphaBetaEngine {
             }
         }
 
-        if let Some(res) = self.null_move_pruning(board, beta, depth, turn) {
+        if let Some(res) = self.null_move_pruning(board, beta, depth, turn, ply) {
             self.history_stack.pop();
             return res;
         }
@@ -327,14 +334,21 @@ impl AlphaBetaEngine {
 
         // Internal Iterative Deepening (IID)
         if best_move_tt.is_none() && depth >= 4 {
-            let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn, None);
+            let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn, ply, None);
             if let Some(entry) = self.tt.probe(hash) {
                 best_move_tt = entry.best_move;
             }
         }
 
-        let singular_extension =
-            self.singular_extension(board, tt_entry, depth, turn, best_move_tt, excluded_move);
+        let singular_extension = self.singular_extension(
+            board,
+            tt_entry,
+            depth,
+            turn,
+            ply,
+            best_move_tt,
+            excluded_move,
+        );
 
         let mut moves = self.generate_moves(board, turn, best_move_tt, depth);
 
@@ -353,13 +367,13 @@ impl AlphaBetaEngine {
 
             if moves.is_empty() {
                 self.history_stack.pop();
-                return Some(-self.config.mate_score + (10 - i32::from(depth)));
+                return Some(-self.config.mate_score + i32::from(ply));
             }
         }
 
         if moves.is_empty() {
             self.history_stack.pop();
-            return Some(-self.config.mate_score + (10 - i32::from(depth)));
+            return Some(-self.config.mate_score + i32::from(ply));
         }
 
         // Dynamic Limiting Limit Calculation (Moved here, but applied inside loop)
@@ -495,6 +509,7 @@ impl AlphaBetaEngine {
                     -alpha,
                     depth - 1 + extension,
                     turn.opposite(),
+                    ply + 1,
                     None,
                 );
 
@@ -517,6 +532,7 @@ impl AlphaBetaEngine {
                     -alpha,
                     search_depth,
                     turn.opposite(),
+                    ply + 1,
                     None,
                 );
 
@@ -531,6 +547,7 @@ impl AlphaBetaEngine {
                                 -alpha,
                                 depth - 1 + extension,
                                 turn.opposite(),
+                                ply + 1,
                                 None,
                             );
                         }
@@ -544,6 +561,7 @@ impl AlphaBetaEngine {
                                     -alpha,
                                     depth - 1 + extension,
                                     turn.opposite(),
+                                    ply + 1,
                                     None,
                                 );
                             }
@@ -592,14 +610,14 @@ impl AlphaBetaEngine {
             // Checkmate or Stalemate
             if in_check {
                 // Checkmate
-                return Some(-self.config.mate_score + (10 - i32::from(depth)));
+                return Some(-self.config.mate_score + i32::from(ply));
             }
             if has_repetition_move {
                 // All legal moves were pruned due to repetition -> Draw
                 return Some(0);
             }
             // Stalemate (Loss in Xiangqi)
-            return Some(-self.config.mate_score + (10 - i32::from(depth)));
+            return Some(-self.config.mate_score + i32::from(ply));
         }
 
         self.tt
@@ -1152,7 +1170,7 @@ impl Searcher for AlphaBetaEngine {
                     let score_opt;
                     if moves_searched == 0 {
                         score_opt =
-                            self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), None);
+                            self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), 1, None);
                     } else {
                         // Root PVS
                         let mut val = self.alpha_beta(
@@ -1161,6 +1179,7 @@ impl Searcher for AlphaBetaEngine {
                             -alpha,
                             d - 1,
                             turn.opposite(),
+                            1,
                             None,
                         );
                         if let Some(v) = val {
@@ -1172,6 +1191,7 @@ impl Searcher for AlphaBetaEngine {
                                     -alpha,
                                     d - 1,
                                     turn.opposite(),
+                                    1,
                                     None,
                                 );
                             }

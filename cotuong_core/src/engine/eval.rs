@@ -16,6 +16,8 @@ impl SimpleEvaluator {
 
 impl Evaluator for SimpleEvaluator {
     fn evaluate(&self, board: &Board) -> i32 {
+        use crate::logic::eval_constants::*;
+
         // 1. Material & PST (Base)
         let red_material = board.red_material + board.red_pst;
         let black_material = board.black_material + board.black_pst;
@@ -23,182 +25,257 @@ impl Evaluator for SimpleEvaluator {
         let mut score = red_material - black_material;
 
         // 2. Mobility & Positional
-        // We use a simplified mobility calculation for speed.
-
         use crate::logic::board::BitboardIterator;
         use crate::logic::lookup::AttackTables;
 
         let tables = AttackTables::get();
 
-        // Helper to count mobility and safety
+        // Helper buffers for mobility
         let mut red_mobility = 0;
         let mut black_mobility = 0;
 
-        // King Safety / Defender Count (simplified)
-        // Check if Advisors/Elephants are present
-        let red_defenders =
-            (board.bitboards[1].count_ones() + board.bitboards[2].count_ones()) as i32;
-        let black_defenders =
-            (board.bitboards[8].count_ones() + board.bitboards[9].count_ones()) as i32;
+        let all_pieces = board.occupied;
 
-        // Bonus for having defenders
-        score += (red_defenders - black_defenders) * 20;
-
-        // Red Chariots (Index 4)
+        // -- Red Mobility --
+        // Chariots (Index 4)
         for sq in BitboardIterator::new(board.bitboards[4]) {
             let (r, c) = Board::index_to_coord(sq);
             let rank_occ = board.occupied_rows[r];
             let file_occ = board.occupied_cols[c];
-            let attacks = tables.get_rook_attacks(c, rank_occ, 9).count_ones()
-                + tables.get_rook_attacks(r, file_occ, 10).count_ones();
-            red_mobility += attacks as i32;
+            let attacks =
+                tables.get_rook_attacks(c, rank_occ, 9) | tables.get_rook_attacks(r, file_occ, 10);
+            red_mobility += (attacks.count_ones() as i32) * WEIGHT_MOBILITY_ROOK;
         }
-
-        // Black Chariots (Index 11)
-        for sq in BitboardIterator::new(board.bitboards[11]) {
+        // Horses (Index 3)
+        for sq in BitboardIterator::new(board.bitboards[3]) {
             let (r, c) = Board::index_to_coord(sq);
-            let rank_occ = board.occupied_rows[r];
-            let file_occ = board.occupied_cols[c];
-            let attacks = tables.get_rook_attacks(c, rank_occ, 9).count_ones()
-                + tables.get_rook_attacks(r, file_occ, 10).count_ones();
-            black_mobility += attacks as i32;
-        }
+            // Horse attacks need blocking check.
+            // AttackTable `get_horse_moves` usually returns pseudo-legal moves.
+            // We need to check blocking pieces.
+            // Since we don't have a cheap "count valid horse moves" without generating them,
+            // we can use the precomputed attack table logic if exposed, OR just bitboard hacks.
+            // For now, let's assume `get_horse_moves` *without* blocking is available,
+            // but `tables` in current codebase might only have `get_horse_attacks(sq)`.
+            // Let's rely on `gen_horse_moves` equivalent logic if possible, or simplified:
+            // Simplified: +1 for each empty neighbor? No, that's not accuracy.
+            // Let's stick to standard attacks.
 
-        // Red Cannons (Index 5)
+            // Note: `tables` here is `&AttackTables`.
+            // We'll iterate standard horse moves and check blocking.
+            // Since we want speed, maybe we skip full blocking check for mobility?
+            // No, blocking is critical for Horse value ("Mã ngọa tào" vs "Mã què").
+
+            // Optimization: Just check the 4 orth neighbors for blockers.
+            // If neighbor is empty, add mobility for the 2 corresponding jumps?
+            // This logic is duplicated from MoveGen but simplified for score.
+
+            // Hardcoding offsets for speed context (simplified):
+            let neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1)]; // N, S, W, E
+            for &(dr, dc) in &neighbors {
+                let br = r as i32 + dr;
+                let bc = c as i32 + dc;
+                if br >= 0 && br < 10 && bc >= 0 && bc < 9 {
+                    let block_sq = Board::square_index(br as usize, bc as usize);
+                    if (all_pieces & (1 << block_sq)) == 0 {
+                        // Leg is free, adding "potential" mobility.
+                        // Real mobility depends on target square emptiness/capture, but "control" is good too.
+                        red_mobility += 2 * WEIGHT_MOBILITY_HORSE;
+                    }
+                }
+            }
+        }
+        // Cannons (Index 5)
         for sq in BitboardIterator::new(board.bitboards[5]) {
             let (r, c) = Board::index_to_coord(sq);
             let rank_occ = board.occupied_rows[r];
             let file_occ = board.occupied_cols[c];
-            let attacks = tables.get_cannon_attacks(c, rank_occ, 9).count_ones()
-                + tables.get_cannon_attacks(r, file_occ, 10).count_ones();
-            red_mobility += attacks as i32;
+            let attacks = tables.get_cannon_attacks(c, rank_occ, 9)
+                | tables.get_cannon_attacks(r, file_occ, 10);
+            red_mobility += (attacks.count_ones() as i32) * WEIGHT_MOBILITY_CANNON;
         }
 
-        // Black Cannons (Index 12)
+        // -- Black Mobility --
+        // Chariots (Index 11)
+        for sq in BitboardIterator::new(board.bitboards[11]) {
+            let (r, c) = Board::index_to_coord(sq);
+            let rank_occ = board.occupied_rows[r];
+            let file_occ = board.occupied_cols[c];
+            let attacks =
+                tables.get_rook_attacks(c, rank_occ, 9) | tables.get_rook_attacks(r, file_occ, 10);
+            black_mobility += (attacks.count_ones() as i32) * WEIGHT_MOBILITY_ROOK;
+        }
+        // Horses (Index 10)
+        for sq in BitboardIterator::new(board.bitboards[10]) {
+            let (r, c) = Board::index_to_coord(sq);
+            let neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+            for &(dr, dc) in &neighbors {
+                let br = r as i32 + dr;
+                let bc = c as i32 + dc;
+                if br >= 0 && br < 10 && bc >= 0 && bc < 9 {
+                    let block_sq = Board::square_index(br as usize, bc as usize);
+                    if (all_pieces & (1 << block_sq)) == 0 {
+                        black_mobility += 2 * WEIGHT_MOBILITY_HORSE;
+                    }
+                }
+            }
+        }
+        // Cannons (Index 12)
         for sq in BitboardIterator::new(board.bitboards[12]) {
             let (r, c) = Board::index_to_coord(sq);
             let rank_occ = board.occupied_rows[r];
             let file_occ = board.occupied_cols[c];
-            let attacks = tables.get_cannon_attacks(c, rank_occ, 9).count_ones()
-                + tables.get_cannon_attacks(r, file_occ, 10).count_ones();
-            black_mobility += attacks as i32;
+            let attacks = tables.get_cannon_attacks(c, rank_occ, 9)
+                | tables.get_cannon_attacks(r, file_occ, 10);
+            black_mobility += (attacks.count_ones() as i32) * WEIGHT_MOBILITY_CANNON;
         }
 
-        // Hanging Piece Implementation (Placeholder / Simplified)
-        // Since we don't have full attack maps for every piece here without high cost,
-        // we can check if valuable pieces are under attack by scanning opponent moves
-        // OR we just use the 'hanging_piece_penalty' from config if we detect obvious threats.
-        // For this task, strict "Hanging Piece" usually requires Static Exchange Eval (SEE).
-        // I will implement a basic "In Danger" check if time permits, but for now I'll apply
-        // the config penalty if a piece is undefended (not implemented fully without move gen).
-        // Instead, let's use the config penalty to weight the mobility/safety interaction.
+        score += red_mobility - black_mobility;
 
-        // Actually, let's just use the config penalty for *blocked* pieces if we can detect them easily?
-        // No, "Hanging" means under attack.
-        // Let's postpone complex Hanging Piece logic to a separate task if it requires full connection graph.
-        // I will stick to the King Safety and Config-based weights.
+        // 3. Structure & Safety
+        let mut red_structure = 0;
+        let mut black_structure = 0;
 
-        // Weighting
-        // Mobility is worth small amount per square (e.g. 2-5 points).
-        // Let's say 3 points per square.
-        score += (red_mobility - black_mobility) * 3;
+        // Connected Advisors (Red: Index 1, Black: Index 8)
+        // Simple check: if count == 2, assume connected (usually true in palace).
+        // Or check adjacency? Palace is small, 2 advisors are almost always supporting each other.
+        if board.bitboards[1].count_ones() == 2 {
+            red_structure += BONUS_CONNECTED_ADVISORS;
+        }
+        if board.bitboards[8].count_ones() == 2 {
+            black_structure += BONUS_CONNECTED_ADVISORS;
+        }
 
-        // 3. King Exposed to Cannon Penalty
-        // "Pháo đầu" or "Pháo giác" threats where the King faces a Cannon with 0 or 1 shield.
-
-        let penalty = self.config.king_exposed_cannon_penalty;
-        if penalty > 0 {
-            // Check Red King vs Black Cannons
-            if let Some(red_king_sq) = BitboardIterator::new(board.bitboards[0]).next() {
-                let (kr, kc) = Board::index_to_coord(red_king_sq);
-                for cannon_sq in BitboardIterator::new(board.bitboards[12]) {
-                    let (cr, cc) = Board::index_to_coord(cannon_sq);
-
-                    let mut exposed = false;
-                    if kr == cr {
-                        // Same Rank
-                        let min_c = kc.min(cc);
-                        let max_c = kc.max(cc);
-                        if max_c > min_c + 1 {
-                            // Mask for bits between min_c and max_c (exclusive)
-                            let mask = ((1u16 << max_c) - 1) ^ ((1u16 << (min_c + 1)) - 1);
-                            // Count pieces strictly between
-                            let count = (board.occupied_rows[kr] & mask).count_ones();
-                            if count <= 1 {
-                                exposed = true;
-                            }
-                        } else {
-                            // Adjacent - technically 0 pieces between
-                            exposed = true;
-                        }
-                    } else if kc == cc {
-                        // Same File
-                        let min_r = kr.min(cr);
-                        let max_r = kr.max(cr);
-                        if max_r > min_r + 1 {
-                            // Mask for bits between min_r and max_r (exclusive)
-                            let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
-                            // Count pieces strictly between
-                            let count = (board.occupied_cols[kc] & mask).count_ones();
-                            if count <= 1 {
-                                exposed = true;
-                            }
-                        } else {
-                            exposed = true;
-                        }
-                    }
-
-                    if exposed {
-                        score -= penalty;
-                    }
-                }
+        // Connected Elephants (Red: Index 2, Black: Index 9)
+        // Red Elephants are at (0,2), (0,6), (2,0), (2,4), (2,8), (4,2), (4,6)
+        // Connected usually means they share the central eye (2,4) or support each other.
+        // If 2 elephants exist and one is at 2,4 (Red) / 7,4 (Black), robust.
+        if board.bitboards[2].count_ones() == 2 {
+            // Check if one is at center (row 2, col 4 -> index 22)
+            if (board.bitboards[2] & (1 << 22)) != 0 {
+                red_structure += BONUS_CONNECTED_ELEPHANTS;
             }
+        }
+        if board.bitboards[9].count_ones() == 2 {
+            // Check if one is at center (row 7, col 4 -> index 67)
+            if (board.bitboards[9] & (1 << 67)) != 0 {
+                black_structure += BONUS_CONNECTED_ELEPHANTS;
+            }
+        }
 
-            // Check Black King vs Red Cannons
-            if let Some(black_king_sq) = BitboardIterator::new(board.bitboards[7]).next() {
-                let (kr, kc) = Board::index_to_coord(black_king_sq);
-                for cannon_sq in BitboardIterator::new(board.bitboards[5]) {
-                    let (cr, cc) = Board::index_to_coord(cannon_sq);
+        score += red_structure - black_structure;
 
-                    let mut exposed = false;
-                    if kr == cr {
-                        // Same Rank
-                        let min_c = kc.min(cc);
-                        let max_c = kc.max(cc);
-                        if max_c > min_c + 1 {
-                            let mask = ((1u16 << max_c) - 1) ^ ((1u16 << (min_c + 1)) - 1);
-                            let count = (board.occupied_rows[kr] & mask).count_ones();
-                            if count <= 1 {
-                                exposed = true;
-                            }
-                        } else {
-                            exposed = true;
+        // 4. King Safety (Sophisticated)
+        let mut red_danger = 0;
+        let mut black_danger = 0;
+
+        // King Exposed on File
+        if let Some(red_king_sq) = BitboardIterator::new(board.bitboards[0]).next() {
+            let (kr, kc) = Board::index_to_coord(red_king_sq);
+            // Check open file (no friendly pieces in front?)
+            // Actually, "Exposed" usually implies facing enemy Rook/Cannon without cover.
+            // Simplified: If King is on same file as enemy Rook/Cannon with no pieces in between.
+
+            // Check Enemy Rooks (Index 11)
+            let enemy_rooks = board.bitboards[11];
+            for rsq in BitboardIterator::new(enemy_rooks) {
+                let (rr, rc) = Board::index_to_coord(rsq);
+                if rc == kc {
+                    // Rook on same file.
+                    let min_r = kr.min(rr);
+                    let max_r = kr.max(rr);
+                    if max_r > min_r + 1 {
+                        let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
+                        let count = (board.occupied_cols[kc] & mask).count_ones();
+                        if count == 0 {
+                            red_danger += WEIGHT_KING_EXPOSED;
                         }
-                    } else if kc == cc {
-                        // Same File
-                        let min_r = kr.min(cr);
-                        let max_r = kr.max(cr);
-                        if max_r > min_r + 1 {
-                            let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
-                            let count = (board.occupied_cols[kc] & mask).count_ones();
-                            if count <= 1 {
-                                exposed = true;
-                            }
-                        } else {
-                            exposed = true;
-                        }
-                    }
-
-                    if exposed {
-                        score += penalty;
                     }
                 }
             }
         }
 
-        // Apply Config Penalties
-        // Example: If we had detected hanging pieces, we'd subtract self.config.hanging_piece_penalty
-        // score -= (red_hanging - black_hanging) * self.config.hanging_piece_penalty;
+        if let Some(black_king_sq) = BitboardIterator::new(board.bitboards[7]).next() {
+            let (kr, kc) = Board::index_to_coord(black_king_sq);
+            let enemy_rooks = board.bitboards[4]; // Red Rooks
+            for rsq in BitboardIterator::new(enemy_rooks) {
+                let (rr, rc) = Board::index_to_coord(rsq);
+                if rc == kc {
+                    let min_r = kr.min(rr);
+                    let max_r = kr.max(rr);
+                    if max_r > min_r + 1 {
+                        let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
+                        let count = (board.occupied_cols[kc] & mask).count_ones();
+                        if count == 0 {
+                            black_danger += WEIGHT_KING_EXPOSED;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cannon Danger (Existing "King Exposed to Cannon" logic + Mount check + Empty Cannon)
+        // Red King vs Black Cannons (Index 12)
+        if let Some(red_king_sq) = BitboardIterator::new(board.bitboards[0]).next() {
+            let (kr, kc) = Board::index_to_coord(red_king_sq);
+            for csq in BitboardIterator::new(board.bitboards[12]) {
+                let (cr, cc) = Board::index_to_coord(csq);
+                if kr == cr {
+                    // Rank
+                    let min_c = kc.min(cc);
+                    let max_c = kc.max(cc);
+                    if max_c > min_c + 1 {
+                        let mask = ((1u16 << max_c) - 1) ^ ((1u16 << (min_c + 1)) - 1);
+                        let count = (board.occupied_rows[kr] & mask).count_ones();
+                        if count <= 1 {
+                            // 0 pieces (Empty Cannon) or 1 piece (Check) = Danger!
+                            red_danger += self.config.king_exposed_cannon_penalty;
+                        }
+                    }
+                } else if kc == cc {
+                    // File
+                    let min_r = kr.min(cr);
+                    let max_r = kr.max(cr);
+                    if max_r > min_r + 1 {
+                        let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
+                        let count = (board.occupied_cols[kc] & mask).count_ones();
+                        if count <= 1 {
+                            red_danger += self.config.king_exposed_cannon_penalty;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Black King vs Red Cannons (Index 5)
+        if let Some(black_king_sq) = BitboardIterator::new(board.bitboards[7]).next() {
+            let (kr, kc) = Board::index_to_coord(black_king_sq);
+            for csq in BitboardIterator::new(board.bitboards[5]) {
+                let (cr, cc) = Board::index_to_coord(csq);
+                if kr == cr {
+                    let min_c = kc.min(cc);
+                    let max_c = kc.max(cc);
+                    if max_c > min_c + 1 {
+                        let mask = ((1u16 << max_c) - 1) ^ ((1u16 << (min_c + 1)) - 1);
+                        let count = (board.occupied_rows[kr] & mask).count_ones();
+                        if count <= 1 {
+                            black_danger += self.config.king_exposed_cannon_penalty;
+                        }
+                    }
+                } else if kc == cc {
+                    let min_r = kr.min(cr);
+                    let max_r = kr.max(cr);
+                    if max_r > min_r + 1 {
+                        let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
+                        let count = (board.occupied_cols[kc] & mask).count_ones();
+                        if count <= 1 {
+                            black_danger += self.config.king_exposed_cannon_penalty;
+                        }
+                    }
+                }
+            }
+        }
+
+        score -= red_danger - black_danger; // Danger is bad
 
         score
     }
