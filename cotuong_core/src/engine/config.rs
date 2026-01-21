@@ -39,6 +39,9 @@ pub struct EngineConfig {
 
     // Checkmate scoring
     pub mate_score: i32, // Base score for checkmate (higher = stronger preference)
+    pub mate_decay_factor: f32, // Exponential decay factor for mate score (0.0 < x < 1.0)
+    // Lower values = shallower mates are penalized MUCH more heavily
+    // e.g., 0.80 means depth 3 mate is ~2x worse than depth 5 mate
 
     // Transposition Table
     pub tt_size_mb: usize,
@@ -74,6 +77,7 @@ impl Default for EngineConfig {
             singular_extension_margin: 20,
 
             mate_score: 30_000, // Increased from 20000 for stronger checkmate preference
+            mate_decay_factor: 0.85, // Exponential decay: depth 3 mate is ~1.5x worse than depth 5
 
             tt_size_mb: 256,
         }
@@ -110,6 +114,7 @@ struct EngineConfigJson {
     singular_extension_margin: Option<i32>,
 
     mate_score: Option<i32>,
+    mate_decay_factor: Option<f32>,
 
     tt_size_mb: Option<usize>,
 }
@@ -169,6 +174,9 @@ impl EngineConfig {
                 .unwrap_or(default.singular_extension_margin),
 
             mate_score: json_config.mate_score.unwrap_or(default.mate_score),
+            mate_decay_factor: json_config
+                .mate_decay_factor
+                .unwrap_or(default.mate_decay_factor),
             tt_size_mb: json_config.tt_size_mb.unwrap_or(default.tt_size_mb),
         })
     }
