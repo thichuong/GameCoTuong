@@ -99,16 +99,22 @@ impl AlphaBetaEngine {
 
     fn precompute_mate_scores(config: &EngineConfig) -> [i32; 256] {
         let mut table = [0; 256];
-        let base = config.mate_score as f32;
-        let decay = config.mate_decay_factor;
+        let base = config.mate_score;
 
         for (ply, val) in table.iter_mut().enumerate() {
-            // Exponential decay: score = -base * decay^ply
-            let decay_power = decay.powi(ply as i32);
-            let score = -(base * decay_power) as i32;
-
-            // Ensure the score doesn't exceed the base mate score
-            *val = score.max(-config.mate_score);
+            if ply <= 10 {
+                // Short mate: Very high priority
+                // 30000, 29999, ... 29990
+                *val = base - (ply as i32);
+            } else {
+                // Deep mate: Aggressive penalty
+                // Ply 11: 15000 - 1100 = 13900
+                // Ply 20: 15000 - 2000 = 13000
+                // Ply 50: 15000 - 5000 = 10000 (still > material)
+                // Ply 150: 15000 - 15000 = 0 (draw)
+                let penalty = (ply as i32) * 100;
+                *val = (base / 2) - penalty;
+            }
         }
         table
     }
@@ -795,17 +801,6 @@ impl AlphaBetaEngine {
         // Apply depth discount - deeper depths get lower scores (relative to root)
         // Formula: score = score * (100 + discount * depth) / 100
         // This scales scores proportionally based on depth.
-        let discount_per_depth = self.config.depth_discount;
-        if discount_per_depth > 0 {
-            let depth_factor = i32::from(depth);
-            let scale = 100 + discount_per_depth * depth_factor;
-            for mv in moves.iter_mut() {
-                // Hash moves should not be discounted as they are already ordered
-                if mv.score < self.config.score_hash_move {
-                    mv.score = (mv.score * scale) / 100;
-                }
-            }
-        }
 
         moves.sort_by(|a, b| b.score.cmp(&a.score));
         moves

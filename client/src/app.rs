@@ -1273,7 +1273,7 @@ fn ConfigPanel(
                                     <FloatSlider label="Multiplier" val=config.pruning_multiplier min=0.1 max=2.0 step=0.1 on_input=move |v| { let mut c = red_config.get(); c.pruning_multiplier = v; set_red_config.set(c); } />
                                     <hr style="border-color: #444; margin: 10px 0;"/>
                                     <Slider label="Mate Score" val=config.mate_score min=10000 max=50000 step=1000 on_input=move |v| { let mut c = red_config.get(); c.mate_score = v; set_red_config.set(c); } />
-                                    <FloatSlider label="Mate Decay Factor" val=config.mate_decay_factor min=0.5 max=0.99 step=0.01 on_input=move |v| { let mut c = red_config.get(); c.mate_decay_factor = v; set_red_config.set(c); } />
+
                                 </div>
                             }
                         }
@@ -1311,7 +1311,7 @@ fn ConfigPanel(
                                     <FloatSlider label="Multiplier" val=config.pruning_multiplier min=0.1 max=2.0 step=0.1 on_input=move |v| { let mut c = black_config.get(); c.pruning_multiplier = v; set_black_config.set(c); } />
                                     <hr style="border-color: #444; margin: 10px 0;"/>
                                     <Slider label="Mate Score" val=config.mate_score min=10000 max=50000 step=1000 on_input=move |v| { let mut c = black_config.get(); c.mate_score = v; set_black_config.set(c); } />
-                                    <FloatSlider label="Mate Decay Factor" val=config.mate_decay_factor min=0.5 max=0.99 step=0.01 on_input=move |v| { let mut c = black_config.get(); c.mate_decay_factor = v; set_black_config.set(c); } />
+
                                 </div>
                             }
                         }

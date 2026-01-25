@@ -24,7 +24,7 @@ pub struct EngineConfig {
     pub score_capture_base: i32,
     pub score_killer_move: i32,
     pub score_history_max: i32,
-    pub depth_discount: i32, // Points subtracted per depth level
+
     pub pruning_method: i32, // 0: Dynamic Limiting, 1: LMR, 2: Both
     pub pruning_multiplier: f32,
 
@@ -39,9 +39,6 @@ pub struct EngineConfig {
 
     // Checkmate scoring
     pub mate_score: i32, // Base score for checkmate (higher = stronger preference)
-    pub mate_decay_factor: f32, // Exponential decay factor for mate score (0.0 < x < 1.0)
-    // Lower values = shallower mates are penalized MUCH more heavily
-    // e.g., 0.80 means depth 3 mate is ~2x worse than depth 5 mate
 
     // Transposition Table
     pub tt_size_mb: usize,
@@ -65,8 +62,8 @@ impl Default for EngineConfig {
             score_capture_base: 200_000, // Aggressive capturing
             score_killer_move: 120_000,
             score_history_max: 80_000,
-            depth_discount: 10, // 10% per depth level
-            pruning_method: 1,  // Default to LMR
+
+            pruning_method: 1, // Default to LMR
             pruning_multiplier: 1.0,
 
             probcut_depth: 5,
@@ -77,7 +74,6 @@ impl Default for EngineConfig {
             singular_extension_margin: 20,
 
             mate_score: 30_000, // Increased from 20000 for stronger checkmate preference
-            mate_decay_factor: 0.85, // Exponential decay: depth 3 mate is ~1.5x worse than depth 5
 
             tt_size_mb: 256,
         }
@@ -102,7 +98,7 @@ struct EngineConfigJson {
     score_capture_base: Option<f32>,
     score_killer_move: Option<f32>,
     score_history_max: Option<f32>,
-    depth_discount: Option<i32>,
+
     pruning_method: Option<i32>,
     pruning_multiplier: Option<f32>,
 
@@ -114,7 +110,6 @@ struct EngineConfigJson {
     singular_extension_margin: Option<i32>,
 
     mate_score: Option<i32>,
-    mate_decay_factor: Option<f32>,
 
     tt_size_mb: Option<usize>,
 }
@@ -154,7 +149,7 @@ impl EngineConfig {
                 default.score_history_max,
                 json_config.score_history_max,
             ),
-            depth_discount: json_config.depth_discount.unwrap_or(default.depth_discount),
+
             pruning_method: json_config.pruning_method.unwrap_or(default.pruning_method),
             pruning_multiplier: json_config
                 .pruning_multiplier
@@ -174,9 +169,7 @@ impl EngineConfig {
                 .unwrap_or(default.singular_extension_margin),
 
             mate_score: json_config.mate_score.unwrap_or(default.mate_score),
-            mate_decay_factor: json_config
-                .mate_decay_factor
-                .unwrap_or(default.mate_decay_factor),
+
             tt_size_mb: json_config.tt_size_mb.unwrap_or(default.tt_size_mb),
         })
     }
