@@ -102,19 +102,13 @@ impl AlphaBetaEngine {
         let base = config.mate_score;
 
         for (ply, val) in table.iter_mut().enumerate() {
-            if ply <= 10 {
-                // Short mate: Very high priority
-                // 30000, 29999, ... 29990
-                *val = base - (ply as i32);
-            } else {
-                // Deep mate: Aggressive penalty
-                // Ply 11: 15000 - 1100 = 13900
-                // Ply 20: 15000 - 2000 = 13000
-                // Ply 50: 15000 - 5000 = 10000 (still > material)
-                // Ply 150: 15000 - 15000 = 0 (draw)
-                let penalty = (ply as i32) * 100;
-                *val = (base / 2) - penalty;
-            }
+            // Standardize mate scoring: Always prefer faster mate.
+            // Score = Base - Ply
+            // Ply 1: 30000 - 1 = 29999
+            // Ply 10: 30000 - 10 = 29990
+            // Ply 100: 30000 - 100 = 29900
+            // This ensures we always find the shortest path to mate.
+            *val = base - (ply as i32);
         }
         table
     }
@@ -296,6 +290,22 @@ impl AlphaBetaEngine {
 
         if self.check_time() {
             return None;
+        }
+
+        // Mate Distance Pruning
+        // If we have already found a mate at a shallower depth (represented by alpha/beta),
+        // we can prune this branch if it cannot possibly beat that mate score.
+        // Or if the best possible outcome here is a mate slower than what we already have.
+        if ply > 0 {
+            let mat = self.config.mate_score - i32::from(ply);
+            // Alpha could be a mate found elsewhere (e.g., Mate in 5 -> 29995)
+            // If current ply is 10, max score is 29990.
+            // If alpha (29995) >= max_score (29990), we prune.
+            alpha = alpha.max(-mat);
+            beta = beta.min(mat);
+            if alpha >= beta {
+                return Some(alpha);
+            }
         }
 
         let hash = board.zobrist_hash;
