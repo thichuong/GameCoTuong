@@ -20,6 +20,7 @@ pub struct AlphaBetaEngine {
     time_limit: Option<f64>,
     dynamic_limits: [usize; 64],
     lmr_table: [[u8; 64]; 64],
+    mate_score_table: [i32; 256],
 }
 
 struct MoveGenContext<'a> {
@@ -35,6 +36,7 @@ struct MoveGenContext<'a> {
 impl AlphaBetaEngine {
     pub fn new(config: Arc<EngineConfig>) -> Self {
         let dynamic_limits = Self::precompute_limits(&config);
+        let mate_score_table = Self::precompute_mate_scores(&config);
         Self {
             evaluator: SimpleEvaluator::new(config.clone()),
             config,
@@ -47,6 +49,7 @@ impl AlphaBetaEngine {
             time_limit: None,
             dynamic_limits,
             lmr_table: Self::precompute_lmr(),
+            mate_score_table,
         }
     }
 
@@ -55,6 +58,7 @@ impl AlphaBetaEngine {
             self.tt = TranspositionTable::new(config.tt_size_mb);
         }
         self.dynamic_limits = Self::precompute_limits(&config);
+        self.mate_score_table = Self::precompute_mate_scores(&config);
         self.evaluator = SimpleEvaluator::new(config.clone());
         self.config = config;
     }
@@ -91,6 +95,22 @@ impl AlphaBetaEngine {
             }
         }
         limits
+    }
+
+    fn precompute_mate_scores(config: &EngineConfig) -> [i32; 256] {
+        let mut table = [0; 256];
+        let base = config.mate_score as f32;
+        let decay = config.mate_decay_factor;
+
+        for (ply, val) in table.iter_mut().enumerate() {
+            // Exponential decay: score = -base * decay^ply
+            let decay_power = decay.powi(ply as i32);
+            let score = -(base * decay_power) as i32;
+
+            // Ensure the score doesn't exceed the base mate score
+            *val = score.max(-config.mate_score);
+        }
+        table
     }
 
     fn now() -> f64 {
@@ -136,29 +156,10 @@ impl AlphaBetaEngine {
         self.history_stack.iter().filter(|&&h| h == hash).count() >= 2
     }
 
-    /// Calculate the mate score penalty with exponential decay based on ply.
-    ///
-    /// The penalty decreases exponentially as ply increases:
-    /// - `ply = 1`: penalty ≈ -25,500 (very severe)
-    /// - `ply = 3`: penalty ≈ -18,420 (severe)
-    /// - `ply = 5`: penalty ≈ -13,290 (moderate)
-    /// - `ply = 7`: penalty ≈ -9,630 (lighter)
-    ///
-    /// This ensures the engine strongly avoids shallow mates while being
-    /// more lenient about deep mates (which are harder to avoid).
+    /// Calculate the mate score penalty using precomputed table.
     #[inline]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     fn calculate_mate_score(&self, ply: u8) -> i32 {
-        let base = self.config.mate_score as f32;
-        let decay = self.config.mate_decay_factor;
-
-        // Exponential decay: score = -base * decay^ply
-        // As ply increases, decay^ply decreases, so the penalty becomes lighter
-        let decay_power = decay.powi(i32::from(ply));
-        let score = -(base * decay_power) as i32;
-
-        // Ensure the score doesn't exceed the base mate score
-        score.max(-self.config.mate_score)
+        self.mate_score_table[ply as usize]
     }
 
     /// Public wrapper for testing the mate score calculation.

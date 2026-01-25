@@ -39,7 +39,7 @@ impl Evaluator for SimpleEvaluator {
         // -- Red Mobility --
         // Chariots (Index 4)
         for sq in BitboardIterator::new(board.bitboards[4]) {
-            let (r, c) = Board::index_to_coord(sq);
+            let (r, c) = SQ_TO_COORD[sq];
             let rank_occ = board.occupied_rows[r];
             let file_occ = board.occupied_cols[c];
             let attacks =
@@ -48,7 +48,7 @@ impl Evaluator for SimpleEvaluator {
         }
         // Horses (Index 3)
         for sq in BitboardIterator::new(board.bitboards[3]) {
-            let (r, c) = Board::index_to_coord(sq);
+            let (r, c) = SQ_TO_COORD[sq];
             // Horse attacks need blocking check.
             // AttackTable `get_horse_moves` usually returns pseudo-legal moves.
             // We need to check blocking pieces.
@@ -86,7 +86,7 @@ impl Evaluator for SimpleEvaluator {
         }
         // Cannons (Index 5)
         for sq in BitboardIterator::new(board.bitboards[5]) {
-            let (r, c) = Board::index_to_coord(sq);
+            let (r, c) = SQ_TO_COORD[sq];
             let rank_occ = board.occupied_rows[r];
             let file_occ = board.occupied_cols[c];
             let attacks = tables.get_cannon_attacks(c, rank_occ, 9)
@@ -97,7 +97,7 @@ impl Evaluator for SimpleEvaluator {
         // -- Black Mobility --
         // Chariots (Index 11)
         for sq in BitboardIterator::new(board.bitboards[11]) {
-            let (r, c) = Board::index_to_coord(sq);
+            let (r, c) = SQ_TO_COORD[sq];
             let rank_occ = board.occupied_rows[r];
             let file_occ = board.occupied_cols[c];
             let attacks =
@@ -106,7 +106,7 @@ impl Evaluator for SimpleEvaluator {
         }
         // Horses (Index 10)
         for sq in BitboardIterator::new(board.bitboards[10]) {
-            let (r, c) = Board::index_to_coord(sq);
+            let (r, c) = SQ_TO_COORD[sq];
             let neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1)];
             for &(dr, dc) in &neighbors {
                 let br = r as i32 + dr;
@@ -121,7 +121,7 @@ impl Evaluator for SimpleEvaluator {
         }
         // Cannons (Index 12)
         for sq in BitboardIterator::new(board.bitboards[12]) {
-            let (r, c) = Board::index_to_coord(sq);
+            let (r, c) = SQ_TO_COORD[sq];
             let rank_occ = board.occupied_rows[r];
             let file_occ = board.occupied_cols[c];
             let attacks = tables.get_cannon_attacks(c, rank_occ, 9)
@@ -170,7 +170,7 @@ impl Evaluator for SimpleEvaluator {
 
         // King Exposed on File
         if let Some(red_king_sq) = BitboardIterator::new(board.bitboards[0]).next() {
-            let (kr, kc) = Board::index_to_coord(red_king_sq);
+            let (kr, kc) = SQ_TO_COORD[red_king_sq];
             // Check open file (no friendly pieces in front?)
             // Actually, "Exposed" usually implies facing enemy Rook/Cannon without cover.
             // Simplified: If King is on same file as enemy Rook/Cannon with no pieces in between.
@@ -178,7 +178,7 @@ impl Evaluator for SimpleEvaluator {
             // Check Enemy Rooks (Index 11)
             let enemy_rooks = board.bitboards[11];
             for rsq in BitboardIterator::new(enemy_rooks) {
-                let (rr, rc) = Board::index_to_coord(rsq);
+                let (rr, rc) = SQ_TO_COORD[rsq];
                 if rc == kc {
                     // Rook on same file.
                     let min_r = kr.min(rr);
@@ -195,10 +195,10 @@ impl Evaluator for SimpleEvaluator {
         }
 
         if let Some(black_king_sq) = BitboardIterator::new(board.bitboards[7]).next() {
-            let (kr, kc) = Board::index_to_coord(black_king_sq);
+            let (kr, kc) = SQ_TO_COORD[black_king_sq];
             let enemy_rooks = board.bitboards[4]; // Red Rooks
             for rsq in BitboardIterator::new(enemy_rooks) {
-                let (rr, rc) = Board::index_to_coord(rsq);
+                let (rr, rc) = SQ_TO_COORD[rsq];
                 if rc == kc {
                     let min_r = kr.min(rr);
                     let max_r = kr.max(rr);
@@ -216,9 +216,9 @@ impl Evaluator for SimpleEvaluator {
         // Cannon Danger (Existing "King Exposed to Cannon" logic + Mount check + Empty Cannon)
         // Red King vs Black Cannons (Index 12)
         if let Some(red_king_sq) = BitboardIterator::new(board.bitboards[0]).next() {
-            let (kr, kc) = Board::index_to_coord(red_king_sq);
+            let (kr, kc) = SQ_TO_COORD[red_king_sq];
             for csq in BitboardIterator::new(board.bitboards[12]) {
-                let (cr, cc) = Board::index_to_coord(csq);
+                let (cr, cc) = SQ_TO_COORD[csq];
                 if kr == cr {
                     // Rank
                     let min_c = kc.min(cc);
@@ -248,9 +248,9 @@ impl Evaluator for SimpleEvaluator {
 
         // Black King vs Red Cannons (Index 5)
         if let Some(black_king_sq) = BitboardIterator::new(board.bitboards[7]).next() {
-            let (kr, kc) = Board::index_to_coord(black_king_sq);
+            let (kr, kc) = SQ_TO_COORD[black_king_sq];
             for csq in BitboardIterator::new(board.bitboards[5]) {
-                let (cr, cc) = Board::index_to_coord(csq);
+                let (cr, cc) = SQ_TO_COORD[csq];
                 if kr == cr {
                     let min_c = kc.min(cc);
                     let max_c = kc.max(cc);
