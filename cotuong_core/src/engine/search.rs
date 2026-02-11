@@ -416,13 +416,13 @@ impl AlphaBetaEngine {
 
             if moves.is_empty() {
                 self.history_stack.pop();
-                return Some(self.calculate_mate_score(ply));
+                return Some(-self.calculate_mate_score(ply));
             }
         }
 
         if moves.is_empty() {
             self.history_stack.pop();
-            return Some(self.calculate_mate_score(ply));
+            return Some(-self.calculate_mate_score(ply));
         }
 
         // Dynamic Limiting Limit Calculation (Moved here, but applied inside loop)
@@ -437,7 +437,7 @@ impl AlphaBetaEngine {
                 moves.len()
             };
 
-        let mut best_score = -200000;
+        let mut best_score = -500000;
         let mut best_move_this_node = None;
         let mut tt_flag = TTFlag::UpperBound;
 
@@ -452,7 +452,7 @@ impl AlphaBetaEngine {
                 -self.evaluator.evaluate(board)
             }
         } else {
-            -200000 // Dummy
+            -500000 // Dummy
         };
 
         for (moves_searched, mv) in moves.into_iter().enumerate() {
@@ -514,12 +514,12 @@ impl AlphaBetaEngine {
             // Absolute Checkmate Detection - Optimized
             // Check if this move mates the opponent
             {
-                 let generator = MoveGenerator::new();
-                 if !generator.has_legal_moves(board, turn.opposite()) {
-                     self.history_stack.pop();
-                     board.undo_move(&mv, captured, turn);
-                     return Some(self.calculate_mate_score(ply + 1));
-                 }
+                let generator = MoveGenerator::new();
+                if !generator.has_legal_moves(board, turn.opposite()) {
+                    self.history_stack.pop();
+                    board.undo_move(&mv, captured, turn);
+                    return Some(self.calculate_mate_score(ply + 1));
+                }
             }
 
             // Repetition Check (Pruning)
@@ -666,14 +666,14 @@ impl AlphaBetaEngine {
             // Checkmate or Stalemate
             if in_check {
                 // Checkmate
-                return Some(self.calculate_mate_score(ply));
+                return Some(-self.calculate_mate_score(ply));
             }
             if has_repetition_move {
                 // All legal moves were pruned due to repetition -> Draw
                 return Some(0);
             }
             // Stalemate (Loss in Xiangqi)
-            return Some(self.calculate_mate_score(ply));
+            return Some(-self.calculate_mate_score(ply));
         }
 
         self.tt
@@ -1131,21 +1131,21 @@ impl Searcher for AlphaBetaEngine {
                 }
             }
 
-            let mut alpha = -200000;
-            let mut beta = 200000;
+            let mut alpha = -500000;
+            let mut beta = 500000;
             let mut delta = 50;
 
             if let Some(score) = previous_score {
                 if d >= 3 {
-                    alpha = (score - delta).max(-200000);
-                    beta = (score + delta).min(200000);
+                    alpha = (score - delta).max(-500000);
+                    beta = (score + delta).min(500000);
                 }
             }
 
             loop {
                 let alpha_orig = alpha;
                 let beta_orig = beta;
-                let mut best_score_this_iteration = -200000;
+                let mut best_score_this_iteration = -500000;
                 let mut current_best_move_this_iteration = None;
 
                 // Try to get best move from TT for this depth (or previous)
@@ -1273,13 +1273,13 @@ impl Searcher for AlphaBetaEngine {
 
                 if best_score_this_iteration <= alpha_orig {
                     // Fail Low
-                    alpha = (alpha_orig.saturating_sub(delta)).max(-200000);
+                    alpha = (alpha_orig.saturating_sub(delta)).max(-500000);
                     delta = delta.saturating_add(delta / 2);
                     continue;
                 }
                 if best_score_this_iteration >= beta_orig {
                     // Fail High
-                    beta = (beta_orig.saturating_add(delta)).min(200000);
+                    beta = (beta_orig.saturating_add(delta)).min(500000);
                     delta = delta.saturating_add(delta / 2);
                     continue;
                 }
