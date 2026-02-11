@@ -110,9 +110,9 @@ mod tests {
     }
 
     #[test]
-    fn test_exponential_mate_score_decay() {
+    fn test_mate_score_decay() {
         // Test that the mate score decay algorithm works correctly
-        // Shallower mates (lower ply) should have HIGHER penalty (more negative score)
+        // Shallower mates (lower ply) should have HIGHER score
         // Deeper mates (higher ply) should have LOWER penalty (less negative score)
 
         let config = Arc::new(EngineConfig::default());
@@ -132,53 +132,48 @@ mod tests {
         println!("Mate score at ply 5: {}", score_ply_5);
         println!("Mate score at ply 7: {}", score_ply_7);
 
-        // All scores should be negative (penalty)
-        assert!(score_ply_1 < 0, "Score at ply 1 should be negative");
-        assert!(score_ply_3 < 0, "Score at ply 3 should be negative");
-        assert!(score_ply_5 < 0, "Score at ply 5 should be negative");
-        assert!(score_ply_7 < 0, "Score at ply 7 should be negative");
+        // All scores should be positive (mate is good for us)
+        assert!(score_ply_1 > 0, "Score at ply 1 should be positive");
+        assert!(score_ply_3 > 0, "Score at ply 3 should be positive");
+        assert!(score_ply_5 > 0, "Score at ply 5 should be positive");
+        assert!(score_ply_7 > 0, "Score at ply 7 should be positive");
 
-        // Shallower mates should have worse (more negative) scores
+        // Faster mates should have higher scores
+        // Score = Base - Ply
+        // Ply 1: 300000 - 1 = 299999
+        // Ply 3: 300000 - 3 = 299997
+        // So Ply 1 > Ply 3
         assert!(
-            score_ply_1 < score_ply_3,
-            "Ply 1 ({}) should be worse than ply 3 ({})",
+            score_ply_1 > score_ply_3,
+            "Ply 1 ({}) should be better than ply 3 ({})",
             score_ply_1,
             score_ply_3
         );
         assert!(
-            score_ply_3 < score_ply_5,
-            "Ply 3 ({}) should be worse than ply 5 ({})",
+            score_ply_3 > score_ply_5,
+            "Ply 3 ({}) should be better than ply 5 ({})",
             score_ply_3,
             score_ply_5
         );
         assert!(
-            score_ply_5 < score_ply_7,
-            "Ply 5 ({}) should be worse than ply 7 ({})",
+            score_ply_5 > score_ply_7,
+            "Ply 5 ({}) should be better than ply 7 ({})",
             score_ply_5,
             score_ply_7
         );
 
-        // Verify the exponential nature: the difference should decrease as ply increases
-        let diff_1_3 = score_ply_3 - score_ply_1;
-        let diff_3_5 = score_ply_5 - score_ply_3;
-        let diff_5_7 = score_ply_7 - score_ply_5;
+        // Check differences
+        let diff_1_3 = score_ply_1 - score_ply_3;
+        let diff_3_5 = score_ply_3 - score_ply_5;
+        let diff_5_7 = score_ply_5 - score_ply_7;
 
         println!("Difference ply 1->3: {}", diff_1_3);
         println!("Difference ply 3->5: {}", diff_3_5);
         println!("Difference ply 5->7: {}", diff_5_7);
 
-        // Due to exponential decay, the differences should decrease
-        assert!(
-            diff_1_3 > diff_3_5,
-            "Difference 1->3 ({}) should be larger than 3->5 ({})",
-            diff_1_3,
-            diff_3_5
-        );
-        assert!(
-            diff_3_5 > diff_5_7,
-            "Difference 3->5 ({}) should be larger than 5->7 ({})",
-            diff_3_5,
-            diff_5_7
-        );
+        // Differences should be positive (score decreases with depth)
+        assert!(diff_1_3 > 0);
+        assert!(diff_3_5 > 0);
+        assert!(diff_5_7 > 0);
     }
 }

@@ -40,6 +40,63 @@ impl MoveGenerator {
         moves
     }
 
+    /// Checks if the current player has at least one legal move.
+    /// This is optimized to return `true` as soon as a valid move is found.
+    pub fn has_legal_moves(&self, board: &Board, turn: Color) -> bool {
+        // Iterate over bitboards for the current turn
+        let start_idx = turn.index() * 7;
+        for i in 0..7 {
+            let bb = board.bitboards[start_idx + i];
+            for sq in BitboardIterator::new(bb) {
+                let piece_type = match i {
+                    0 => PieceType::General,
+                    1 => PieceType::Advisor,
+                    2 => PieceType::Elephant,
+                    3 => PieceType::Horse,
+                    4 => PieceType::Chariot,
+                    5 => PieceType::Cannon,
+                    6 => PieceType::Soldier,
+                    _ => unreachable!(),
+                };
+
+                // Safety: BitboardIterator returns valid indices 0..89
+                let (r, c) = Board::index_to_coord(sq);
+                let from = unsafe { BoardCoordinate::new_unchecked(r, c) };
+
+                if self.can_piece_make_any_legal_move(board, from, piece_type, turn) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn can_piece_make_any_legal_move(
+        &self,
+        board: &Board,
+        from: BoardCoordinate,
+        piece_type: PieceType,
+        turn: Color,
+    ) -> bool {
+        match piece_type {
+            PieceType::General => self.check_general_moves(board, from, turn),
+            PieceType::Advisor => self.check_advisor_moves(board, from, turn),
+            PieceType::Elephant => self.check_elephant_moves(board, from, turn),
+            PieceType::Horse => self.check_horse_moves(board, from, turn),
+            PieceType::Chariot => self.check_chariot_moves(board, from, turn),
+            PieceType::Cannon => self.check_cannon_moves(board, from, turn),
+            PieceType::Soldier => self.check_soldier_moves(board, from, turn),
+        }
+    }
+
+    fn is_legal_move_fast(&self, board: &Board, from: BoardCoordinate, to: BoardCoordinate, turn: Color) -> bool {
+         if is_valid_move(board, from, to, turn).is_ok() {
+             return true;
+         }
+         false
+    }
+
     fn generate_piece_moves(
         &self,
         board: &Board,
@@ -248,6 +305,139 @@ impl MoveGenerator {
         }
     }
 
+    fn check_general_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
+         let tables = AttackTables::get();
+         let sq = from.index();
+
+         for &target_sq in &tables.general_moves[sq] {
+             let (tr, tc) = Board::index_to_coord(target_sq);
+             let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+             if self.is_legal_move_fast(board, from, to, turn) {
+                 return true;
+             }
+         }
+         false
+    }
+
+    fn check_advisor_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
+         let tables = AttackTables::get();
+         let sq = from.index();
+
+         for &target_sq in &tables.advisor_moves[sq] {
+             let (tr, tc) = Board::index_to_coord(target_sq);
+             let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+             if self.is_legal_move_fast(board, from, to, turn) {
+                 return true;
+             }
+         }
+         false
+    }
+
+    fn check_elephant_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
+         let tables = AttackTables::get();
+         let sq = from.index();
+
+         for &(target_sq, eye_sq) in &tables.elephant_moves[sq] {
+             if board.grid[eye_sq].is_none() {
+                 let (tr, tc) = Board::index_to_coord(target_sq);
+                 let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+                 if self.is_legal_move_fast(board, from, to, turn) {
+                     return true;
+                 }
+             }
+         }
+         false
+    }
+
+    fn check_horse_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
+         let tables = AttackTables::get();
+         let sq = from.index();
+
+         for &(target_sq, leg_sq) in &tables.horse_moves[sq] {
+             if board.grid[leg_sq].is_none() {
+                 let (tr, tc) = Board::index_to_coord(target_sq);
+                 let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+                 if self.is_legal_move_fast(board, from, to, turn) {
+                     return true;
+                 }
+             }
+         }
+         false
+    }
+
+    fn check_chariot_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
+         let tables = AttackTables::get();
+         let r = from.row;
+         let c = from.col;
+
+         let rank_occ = board.occupied_rows[r];
+         let mut attacks = tables.get_rook_attacks(c, rank_occ, 9);
+         while attacks != 0 {
+             let col = attacks.trailing_zeros() as usize;
+             attacks &= attacks - 1;
+             let to = unsafe { BoardCoordinate::new_unchecked(r, col) };
+             if self.is_legal_move_fast(board, from, to, turn) {
+                 return true;
+             }
+         }
+
+         let file_occ = board.occupied_cols[c];
+         let mut attacks = tables.get_rook_attacks(r, file_occ, 10);
+         while attacks != 0 {
+             let row = attacks.trailing_zeros() as usize;
+             attacks &= attacks - 1;
+             let to = unsafe { BoardCoordinate::new_unchecked(row, c) };
+             if self.is_legal_move_fast(board, from, to, turn) {
+                 return true;
+             }
+         }
+         false
+    }
+
+    fn check_cannon_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
+         let tables = AttackTables::get();
+         let r = from.row;
+         let c = from.col;
+
+         let rank_occ = board.occupied_rows[r];
+         let mut attacks = tables.get_cannon_attacks(c, rank_occ, 9);
+         while attacks != 0 {
+             let col = attacks.trailing_zeros() as usize;
+             attacks &= attacks - 1;
+             let to = unsafe { BoardCoordinate::new_unchecked(r, col) };
+             if self.is_legal_move_fast(board, from, to, turn) {
+                 return true;
+             }
+         }
+
+         let file_occ = board.occupied_cols[c];
+         let mut attacks = tables.get_cannon_attacks(r, file_occ, 10);
+         while attacks != 0 {
+             let row = attacks.trailing_zeros() as usize;
+             attacks &= attacks - 1;
+             let to = unsafe { BoardCoordinate::new_unchecked(row, c) };
+             if self.is_legal_move_fast(board, from, to, turn) {
+                 return true;
+             }
+         }
+         false
+    }
+
+    fn check_soldier_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
+         let tables = AttackTables::get();
+         let sq = from.index();
+         let color_idx = turn.index();
+
+         for &target_sq in &tables.soldier_moves[color_idx][sq] {
+             let (tr, tc) = Board::index_to_coord(target_sq);
+             let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+             if self.is_legal_move_fast(board, from, to, turn) {
+                 return true;
+             }
+         }
+         false
+    }
+
     // `offset` helper is no longer needed but we can keep it if strictly necessary,
     // but the above implementation replaces it.
     // We'll remove it to clean up.
@@ -286,6 +476,21 @@ mod tests {
     }
 
     #[test]
+    fn test_has_legal_moves() {
+        let board = Board::new();
+        let generator = MoveGenerator::new();
+
+        // Initial board has moves
+        assert!(generator.has_legal_moves(&board, Color::Red));
+        assert!(generator.has_legal_moves(&board, Color::Black));
+
+        // Stalemate board (from test_stalemate_check)
+        let mut empty_board = Board::new();
+        empty_board.clear();
+        assert!(!generator.has_legal_moves(&empty_board, Color::Red));
+    }
+
+    #[test]
     fn test_stalemate_check() {
         // Create a board where Red has no moves (stalemate or checkmate)
         let mut board = Board::new();
@@ -295,5 +500,52 @@ mod tests {
         let generator = MoveGenerator::new();
         let moves = generator.generate_moves(&board, Color::Red);
         assert!(moves.is_empty());
+    }
+
+    #[test]
+    fn test_absolute_checkmate_scenario() {
+        // Reproduction of the scenario in test_absolute_checkmate
+        // Red General (0, 4)
+        // Black General (9, 4)
+        // Red Chariot (9, 0) -- checking
+        // Black Soldier (8, 4) -- blocking general
+        // Turn: Black
+        // Expected: No legal moves (Checkmate)
+
+        let mut board = Board::new();
+        board.clear();
+
+        board.add_piece(
+            BoardCoordinate::new(0, 4).unwrap(),
+            PieceType::General,
+            Color::Red,
+        );
+        board.add_piece(
+            BoardCoordinate::new(9, 4).unwrap(),
+            PieceType::General,
+            Color::Black,
+        );
+        board.add_piece(
+            BoardCoordinate::new(9, 0).unwrap(),
+            PieceType::Chariot,
+            Color::Red,
+        );
+        board.add_piece(
+            BoardCoordinate::new(8, 4).unwrap(),
+            PieceType::Soldier,
+            Color::Black,
+        );
+
+        let generator = MoveGenerator::new();
+        
+        // Debugging: Iterate all moves to see if any are generated
+        let moves = generator.generate_moves(&board, Color::Black);
+        for mv in &moves {
+            println!("Generated move: {:?}", mv);
+        }
+
+        // Check if Black has any legal moves
+        let has_moves = generator.has_legal_moves(&board, Color::Black);
+        assert!(!has_moves, "Black should be in checkmate (no legal moves)");
     }
 }

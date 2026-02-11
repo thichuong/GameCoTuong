@@ -6,6 +6,7 @@ use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
 use crate::logic::game::GameState;
 use crate::logic::rules::{is_flying_general, is_in_check};
+use crate::logic::generator::MoveGenerator;
 use std::sync::Arc;
 
 pub struct AlphaBetaEngine {
@@ -510,9 +511,16 @@ impl AlphaBetaEngine {
                 continue;
             }
 
-            // Absolute Checkmate Detection - REMOVED for performance
-            // The search will naturally find checkmates.
-            // Explicitly checking for mate in 1 here is too expensive (full move gen for opponent).
+            // Absolute Checkmate Detection - Optimized
+            // Check if this move mates the opponent
+            {
+                 let generator = MoveGenerator::new();
+                 if !generator.has_legal_moves(board, turn.opposite()) {
+                     self.history_stack.pop();
+                     board.undo_move(&mv, captured, turn);
+                     return Some(self.calculate_mate_score(ply + 1));
+                 }
+            }
 
             // Repetition Check (Pruning)
             // Check if this position has occurred 2 times before (so this is the 3rd)

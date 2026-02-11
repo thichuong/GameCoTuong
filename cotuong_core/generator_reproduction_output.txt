@@ -1,0 +1,21 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /home/exblackhole/Desktop/GameCoTuong/cotuong_core/Cargo.toml
+workspace: /home/exblackhole/Desktop/GameCoTuong/Cargo.toml
+   Compiling cotuong_core v0.1.0 (/home/exblackhole/Desktop/GameCoTuong/cotuong_core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.10s
+     Running unittests src/lib.rs (/home/exblackhole/Desktop/GameCoTuong/target/debug/deps/cotuong_core-918b5528b0b95329)
+
+running 4 tests
+test logic::generator::tests::test_stalemate_check ... ok
+test logic::generator::tests::test_absolute_checkmate_scenario ... ok
+test logic::generator::tests::test_has_legal_moves ... ok
+test logic::generator::tests::test_initial_moves ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 23 filtered out; finished in 0.00s
+
+     Running tests/mate_solving.rs (/home/exblackhole/Desktop/GameCoTuong/target/debug/deps/mate_solving-06555e9ba629b9a6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+

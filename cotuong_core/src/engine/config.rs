@@ -73,7 +73,7 @@ impl Default for EngineConfig {
             singular_extension_min_depth: 8,
             singular_extension_margin: 20,
 
-            mate_score: 30_000, // Increased from 20000 for stronger checkmate preference
+            mate_score: 300_000, // Increased to be higher than score_capture_base (200,000)
 
             tt_size_mb: 256,
         }
