@@ -41,6 +41,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 
     while let Some(Ok(msg)) = receiver.next().await {
         if let Message::Text(text) = msg {
+            if !state.check_rate_limit(&player_id) {
+                continue; // Skip messages if too fast
+            }
             if let Ok(game_msg) = serde_json::from_str::<GameMessage>(&text) {
                 match game_msg {
                     GameMessage::FindMatch => state.find_match(player_id.clone()).await,

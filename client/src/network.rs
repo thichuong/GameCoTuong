@@ -10,7 +10,16 @@ pub struct NetworkClient {
 
 impl NetworkClient {
     pub fn new(on_message: WriteSignal<Option<ServerMessage>>) -> Result<Self, JsValue> {
-        let ws = WebSocket::new("ws://localhost:3000/ws")?;
+        let location = web_sys::window().unwrap().location();
+        let host = location.host()?; // e.g. "localhost:3000" or "example.com"
+        let protocol = if location.protocol()? == "https:" {
+            "wss:"
+        } else {
+            "ws:"
+        };
+        let url = format!("{}//{}/ws", protocol, host);
+
+        let ws = WebSocket::new(&url)?;
 
         let onmessage_callback = Closure::<dyn FnMut(_)>::new(move |e: MessageEvent| {
             if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {

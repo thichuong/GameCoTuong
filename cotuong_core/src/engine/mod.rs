@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub mod config;
 pub mod eval;
 pub mod move_list;
+pub mod movegen;
 pub mod search;
 pub mod tt;
 pub mod zobrist;
