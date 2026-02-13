@@ -18,17 +18,16 @@ pub fn LogPanel(game_state: ReadSignal<GameState>) -> impl IntoView {
                         view! {
                             <li class="log-item">
                                 <div class="move-info">
-                                    <span>{format!("{turn_num}. {side} {} → {}",
-                                        format!("({},{})", record.from.row, record.from.col),
-                                        format!("({},{})", record.to.row, record.to.col)
+                                    <span>{format!(
+                                        "{turn_num}. {side} ({},{}) → ({},{})",
+                                        record.from.row, record.from.col,
+                                        record.to.row, record.to.col
                                     )}</span>
                                     <span style="color: #f0d9b5;">{format!("{:?}", record.piece.piece_type)}</span>
                                 </div>
-                                {if let Some(note) = &record.note {
-                                    view! { <div class="ai-stats">{note}</div> }.into_view()
-                                } else {
-                                    view! {}.into_view()
-                                }}
+                                {record.note.as_ref().map(|note| {
+                                    view! { <div class="ai-stats">{note}</div> }
+                                }).into_view()}
                             </li>
                         }
                     }).collect::<Vec<_>>()

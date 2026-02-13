@@ -4,12 +4,14 @@ use cotuong_core::{
     logic::board::{Board, Color},
 };
 use shared::ServerMessage;
+use tracing;
 
 impl AppState {
     pub async fn handle_move(&self, player_id: String, mv: Move, fen: String) {
         let game_id = if let Some(gid) = self.player_to_game.get(&player_id) {
             gid.value().clone()
         } else {
+            tracing::warn!(player_id = %player_id, "Received move from player not in a game");
             return;
         };
 
@@ -17,6 +19,7 @@ impl AppState {
             let mut game = game_lock.write().await;
 
             if game.game_ended {
+                tracing::debug!(game_id = %game_id, player_id = %player_id, "Move ignored: game ended");
                 return;
             }
 
@@ -24,9 +27,11 @@ impl AppState {
             let player_color = if is_red { Color::Red } else { Color::Black };
 
             if game.turn != player_color {
+                tracing::warn!(game_id = %game_id, player_id = %player_id, "Move ignored: not player's turn");
                 return;
             }
 
+            tracing::debug!(game_id = %game_id, player_id = %player_id, ?mv, "Processing move");
             game.pending_move = Some((player_id.clone(), mv, fen.clone()));
             use std::time::Instant;
             game.last_activity = Instant::now();
@@ -50,8 +55,11 @@ impl AppState {
         let game_id = if let Some(gid) = self.player_to_game.get(&player_id) {
             gid.value().clone()
         } else {
+            tracing::warn!(player_id = %player_id, "Received verification from player not in a game");
             return;
         };
+
+        tracing::debug!(game_id = %game_id, player_id = %player_id, is_valid = %is_valid, "Processing verification");
 
         if let Some(game_lock) = self.games.get(&game_id) {
             let mut game = game_lock.write().await;
@@ -71,11 +79,13 @@ impl AppState {
                 };
 
                 if player_id != opponent_id {
+                    tracing::warn!(game_id = %game_id, player_id = %player_id, "Verification from non-opponent ignored");
                     return;
                 }
 
                 if is_valid {
                     if let Ok((new_board, new_turn)) = Board::from_fen(&claimed_fen) {
+                        tracing::debug!(game_id = %game_id, "Move verified successfully");
                         use std::time::Instant;
                         game.last_activity = Instant::now();
                         game.board = new_board;
@@ -93,6 +103,7 @@ impl AppState {
                                 Color::Red
                             };
                             game.game_ended = true;
+                            tracing::info!(game_id = %game_id, winner = ?winner, "Game ended (Checkmate detected)");
 
                             drop(game);
 
@@ -100,18 +111,23 @@ impl AppState {
                                 .await;
                         }
                     } else {
+                        tracing::error!(game_id = %game_id, claimed_fen = %claimed_fen, "Failed to parse FEN from move verification");
                         drop(game);
                         self.resolve_conflict(&game_id, &mv).await;
                     }
                 } else {
+                    tracing::warn!(game_id = %game_id, player_id = %player_id, "Move rejected by opponent, resolving conflict");
                     drop(game);
                     self.resolve_conflict(&game_id, &mv).await;
                 }
+            } else {
+                tracing::warn!(game_id = %game_id, "Received verification but no pending move exists");
             }
         }
     }
 
     async fn resolve_conflict(&self, game_id: &str, mv: &Move) {
+        tracing::info!(game_id = %game_id, ?mv, "Resolving move conflict server-side");
         if let Some(game_lock) = self.games.get(game_id) {
             let mut game = game_lock.write().await;
 
@@ -136,6 +152,7 @@ impl AppState {
             };
 
             let is_legal = is_valid_move(&game.board, from, to, game.turn).is_ok();
+            tracing::info!(game_id = %game_id, is_legal = %is_legal, "Server-side move legality check");
 
             let true_fen: String;
             let true_turn: Color;
@@ -155,9 +172,10 @@ impl AppState {
             game.pending_move = None;
 
             let msg = ServerMessage::GameStateCorrection {
-                fen: true_fen,
+                fen: true_fen.clone(),
                 turn: true_turn,
             };
+            tracing::info!(game_id = %game_id, fen = %true_fen, turn = ?true_turn, "Sending GameStateCorrection to players");
 
             let board_snapshot = game.board.clone();
             let turn_snapshot = game.turn;
@@ -195,6 +213,7 @@ impl AppState {
     }
 
     pub async fn notify_game_end(&self, game_id: &str, winner: Color, reason: String) {
+        tracing::info!(game_id = %game_id, winner = ?winner, reason = %reason, "Notifying players of game end");
         if let Some(game_lock) = self.games.get(game_id) {
             let game = game_lock.read().await;
             let msg = ServerMessage::GameEnd {

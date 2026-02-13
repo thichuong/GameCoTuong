@@ -9,7 +9,13 @@ mod ws;
 #[tokio::main]
 async fn main() {
     // initialize tracing
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("server=debug,tower_http=info")
+            }),
+        )
+        .init();
 
     let state = Arc::new(AppState::new());
     state.clone().spawn_cleanup_task();

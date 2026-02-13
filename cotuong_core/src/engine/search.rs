@@ -134,7 +134,7 @@ impl AlphaBetaEngine {
 
     fn check_time(&self) -> bool {
         if let Some(limit) = self.time_limit {
-            if self.nodes_searched % 1024 == 0 {
+            if self.nodes_searched.is_multiple_of(1024) {
                 let elapsed = Self::now() - self.start_time;
                 if elapsed > limit {
                     return true;

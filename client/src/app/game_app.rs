@@ -106,7 +106,12 @@ pub fn App() -> impl IntoView {
     // Initialize Network Client
     create_effect(move |_| {
         if let Ok(client) = NetworkClient::new(set_server_msg) {
+            leptos::logging::log!("[NET] NetworkClient initialized successfully");
             set_network_client.set(Some(client));
+        } else {
+            leptos::logging::log!(
+                "[NET] Failed to initialize NetworkClient (check console and URL)"
+            );
         }
     });
 
@@ -203,12 +208,19 @@ pub fn App() -> impl IntoView {
                     leptos::logging::log!("Opponent left the room.");
                 }
                 ServerMessage::GameEnd { winner, reason } => {
+                    leptos::logging::log!(
+                        "[GAME] GameEnd received: winner={:?}, reason='{}'",
+                        winner,
+                        reason
+                    );
                     set_online_status.set(OnlineStatus::GameEnded);
                     set_game_end_winner.set(Some(winner));
                     set_game_end_reason.set(reason);
                     set_is_ready_for_rematch.set(false);
                 }
-                ServerMessage::Error(_) => {}
+                ServerMessage::Error(e) => {
+                    leptos::logging::log!("[ERR] Server error: {}", e);
+                }
             }
         }
     });
@@ -220,6 +232,7 @@ pub fn App() -> impl IntoView {
                 if let Some(client) = network_client.get() {
                     let state = game_state.get();
                     let fen = state.board.to_fen_string(state.turn);
+                    leptos::logging::log!("[GAME] Client sending move: {:?}", m);
                     client.send(&GameMessage::MakeMove { move_data: m, fen });
                 }
             }
@@ -377,7 +390,7 @@ pub fn App() -> impl IntoView {
                 set_game_state=set_game_state
                 is_thinking=is_thinking
                 set_is_thinking=set_is_thinking
-                on_export_csv=Callback::new(move |_| export_csv(game_state.get()))
+                on_export_csv=Callback::new(move |()| export_csv(&game_state.get()))
             />
 
             <OnlineStatusPanel

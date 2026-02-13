@@ -1,8 +1,9 @@
+#![allow(clippy::too_many_lines)]
 use crate::app::{Difficulty, GameMode};
 use cotuong_core::logic::board::Color;
 use cotuong_core::logic::game::GameState;
 use leptos::{
-    component, event_target_value, view, Callback, Callable, IntoView, ReadSignal, SignalGet,
+    component, event_target_value, view, Callable, Callback, IntoView, ReadSignal, SignalGet,
     SignalSet, WriteSignal,
 };
 

@@ -1,3 +1,4 @@
+#![allow(clippy::option_option, clippy::too_many_lines)]
 use crate::app::{GameMode, OnlineStatus};
 use crate::network::NetworkClient;
 use cotuong_core::logic::board::Color;
@@ -7,6 +8,7 @@ use shared::GameMessage;
 
 #[component]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines, clippy::option_option)]
 pub fn OnlineStatusPanel(
     game_mode: ReadSignal<GameMode>,
     online_status: ReadSignal<OnlineStatus>,

@@ -6,8 +6,12 @@ use wasm_bindgen::JsCast;
 
 pub fn handle_file_upload(setter: WriteSignal<EngineConfig>) -> impl Fn(web_sys::Event) {
     move |ev: web_sys::Event| {
-        let target_el = ev.target().expect("Event should have target");
-        let input = target_el.dyn_into::<web_sys::HtmlInputElement>().expect("Target should be HtmlInputElement");
+        let Some(target_el) = ev.target() else {
+            return;
+        };
+        let Ok(input) = target_el.dyn_into::<web_sys::HtmlInputElement>() else {
+            return;
+        };
 
         if let Some(files) = input.files() {
             if let Some(file) = files.get(0) {
@@ -50,7 +54,7 @@ pub fn handle_file_upload(setter: WriteSignal<EngineConfig>) -> impl Fn(web_sys:
     }
 }
 
-pub fn export_config(config: EngineConfig, filename: &str) {
+pub fn export_config(config: &EngineConfig, filename: &str) {
     if let Ok(json) = serde_json::to_string_pretty(&config) {
         if let Ok(blob) = web_sys::Blob::new_with_str_sequence(&js_sys::Array::of1(&json.into())) {
             if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
@@ -67,7 +71,7 @@ pub fn export_config(config: EngineConfig, filename: &str) {
     }
 }
 
-pub fn export_csv(state: GameState) {
+pub fn export_csv(state: &GameState) {
     use std::fmt::Write;
 
     let mut csv = String::from("Turn,From,To,Piece,Captured,Note\n");

@@ -1,27 +1,32 @@
 use crate::game_manager::{AppState, GameSession};
 use cotuong_core::logic::board::{Board, Color};
 use shared::ServerMessage;
+use tracing;
 use uuid::Uuid;
 
 impl AppState {
     pub async fn find_match(&self, player_id: String) {
         if self.player_to_game.contains_key(&player_id) {
+            tracing::warn!(player_id = %player_id, "Player already in game, ignoring find_match");
             return;
         }
 
         let mut queue = self.matchmaking_queue.lock().await;
 
         if queue.contains(&player_id) {
+            tracing::debug!(player_id = %player_id, "Player already in queue");
             return;
         }
 
         let opponent_opt = queue.iter().next().cloned();
 
         if let Some(opponent_id) = opponent_opt {
+            tracing::info!(player_id = %player_id, opponent_id = %opponent_id, "Opponent found, starting game");
             queue.remove(&opponent_id);
             drop(queue);
             self.start_game(player_id, opponent_id).await;
         } else {
+            tracing::info!(player_id = %player_id, "No opponent found, adding to queue");
             queue.insert(player_id.clone());
             drop(queue);
 
@@ -39,6 +44,8 @@ impl AppState {
         } else {
             (p2_id.clone(), p1_id.clone())
         };
+
+        tracing::info!(game_id = %game_id, red = %red_id, black = %black_id, "Created new game session");
 
         use std::time::Instant;
         let game = GameSession {

@@ -1,10 +1,12 @@
 use crate::game_manager::{session::Player, AppState};
 use cotuong_core::logic::board::{Board, Color};
 use shared::ServerMessage;
+use tracing; // Added tracing import
 
 impl AppState {
     pub fn add_player(&self, id: String, tx: crate::game_manager::Tx) {
         use std::time::Instant;
+        tracing::info!(player_id = %id, "Player added to AppState");
         self.players.insert(
             id,
             Player {
@@ -15,14 +17,18 @@ impl AppState {
     }
 
     pub async fn remove_player(&self, id: &str) {
+        tracing::info!(player_id = %id, "Removing player from AppState");
         self.players.remove(id);
 
         {
             let mut queue = self.matchmaking_queue.lock().await;
-            queue.remove(id);
+            if queue.remove(id) {
+                tracing::info!(player_id = %id, "Player removed from matchmaking queue");
+            }
         }
 
         if let Some((_, game_id)) = self.player_to_game.remove(id) {
+            tracing::info!(player_id = %id, game_id = %game_id, "Player was in a game, cleaning up session");
             if let Some((_, game_lock)) = self.games.remove(&game_id) {
                 let game = game_lock.read().await;
                 let opponent_id = if game.red_player == id {
@@ -37,6 +43,7 @@ impl AppState {
                     Color::Red
                 };
 
+                tracing::info!(game_id = %game_id, disconnected_player = %id, opponent_id = %opponent_id, "Notifying opponent of disconnection");
                 drop(game);
 
                 if let Some(player) = self.players.get(&opponent_id) {
@@ -54,9 +61,11 @@ impl AppState {
     pub async fn handle_surrender(&self, player_id: String) {
         if let Some(game_id) = self.player_to_game.get(&player_id) {
             let game_id = game_id.value().clone();
+            tracing::info!(player_id = %player_id, game_id = %game_id, "Player surrendered");
             if let Some(game_lock) = self.games.get(&game_id) {
                 let mut game = game_lock.write().await;
                 if game.game_ended {
+                    tracing::debug!(game_id = %game_id, "Surrender ignored: game already ended");
                     return;
                 }
 
@@ -69,6 +78,7 @@ impl AppState {
 
                 drop(game);
 
+                tracing::info!(game_id = %game_id, winner = ?winner, "Game ended by surrender");
                 if let Some(p) = self.players.get(&red_id) {
                     let _ = p.tx.send(ServerMessage::GameEnd {
                         winner: Some(winner),
@@ -88,6 +98,7 @@ impl AppState {
     pub async fn handle_play_again(&self, player_id: String) {
         if let Some(game_id) = self.player_to_game.get(&player_id) {
             let game_id = game_id.value().clone();
+            tracing::info!(player_id = %player_id, game_id = %game_id, "Player requested rematch");
             if let Some(game_lock) = self.games.get(&game_id) {
                 let mut game = game_lock.write().await;
 
@@ -99,6 +110,7 @@ impl AppState {
                 }
 
                 if game.red_ready_for_rematch && game.black_ready_for_rematch {
+                    tracing::info!(game_id = %game_id, "Both players ready, restarting game");
                     let red_id = game.red_player.clone();
                     let black_id = game.black_player.clone();
 
@@ -133,12 +145,14 @@ impl AppState {
     }
 
     pub async fn leave_game(&self, player_id: &str) {
+        tracing::info!(player_id = %player_id, "Player leaving current game");
         {
             let mut queue = self.matchmaking_queue.lock().await;
             queue.remove(player_id);
         }
 
         if let Some((_, game_id)) = self.player_to_game.remove(player_id) {
+            tracing::info!(player_id = %player_id, game_id = %game_id, "Cleaning up game session for left player");
             if let Some((_, game_lock)) = self.games.remove(&game_id) {
                 let game = game_lock.read().await;
                 let opponent_id = if game.red_player == player_id {
@@ -157,6 +171,7 @@ impl AppState {
                 self.player_to_game.remove(&opponent_id);
 
                 if !game_ended {
+                    tracing::info!(game_id = %game_id, player_id = %player_id, opponent_id = %opponent_id, "In-progress game ended because player left");
                     if let Some(player) = self.players.get(&opponent_id) {
                         let _ = player.tx.send(ServerMessage::OpponentDisconnected);
                         let _ = player.tx.send(ServerMessage::GameEnd {
@@ -165,6 +180,7 @@ impl AppState {
                         });
                     }
                 } else {
+                    tracing::info!(game_id = %game_id, player_id = %player_id, opponent_id = %opponent_id, "Player left room after game ended");
                     if let Some(player) = self.players.get(&opponent_id) {
                         let _ = player.tx.send(ServerMessage::OpponentLeftGame);
                     }

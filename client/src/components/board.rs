@@ -138,6 +138,7 @@ fn draw_piece(ctx: &CanvasRenderingContext2d, x: f64, y: f64, piece: Piece, is_s
 }
 
 #[allow(deprecated)]
+#[allow(clippy::too_many_lines)]
 fn draw_board(
     ctx: &CanvasRenderingContext2d,
     ratio: f64,
@@ -373,7 +374,9 @@ pub fn BoardView(
             return;
         };
         let ratio = window.device_pixel_ratio();
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         canvas.set_width((BOARD_WIDTH * ratio) as u32);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         canvas.set_height((BOARD_HEIGHT * ratio) as u32);
 
         if let Ok(Some(ctx)) = canvas
@@ -406,7 +409,9 @@ pub fn BoardView(
             (f64::from(ev.client_y()) - rect.top()) * scale_y,
         );
 
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let mut col = ((click_x - PADDING + CELL_SIZE / 2.0) / CELL_SIZE).floor() as isize;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let row_visual = ((click_y - PADDING + CELL_SIZE / 2.0) / CELL_SIZE).floor() as isize;
         let mut row = 9 - row_visual;
 
@@ -416,6 +421,7 @@ pub fn BoardView(
         }
 
         if (0..9).contains(&col) && (0..10).contains(&row) {
+            #[allow(clippy::cast_sign_loss)]
             let (r, c) = (row as usize, col as usize);
             let state = game_state.get();
 
@@ -466,9 +472,13 @@ pub fn BoardView(
                                 set_game_state.set(new_state);
                                 if let Some(cb) = on_move.as_ref() {
                                     cb(Move {
+                                        #[allow(clippy::cast_possible_truncation)]
                                         from_row: from_row as u8,
+                                        #[allow(clippy::cast_possible_truncation)]
                                         from_col: from_col as u8,
+                                        #[allow(clippy::cast_possible_truncation)]
                                         to_row: r as u8,
+                                        #[allow(clippy::cast_possible_truncation)]
                                         to_col: c as u8,
                                         score: 0,
                                     });
@@ -488,9 +498,13 @@ pub fn BoardView(
                             set_game_state.set(new_state);
                             if let Some(cb) = on_move.as_ref() {
                                 cb(Move {
+                                    #[allow(clippy::cast_possible_truncation)]
                                     from_row: from_row as u8,
+                                    #[allow(clippy::cast_possible_truncation)]
                                     from_col: from_col as u8,
+                                    #[allow(clippy::cast_possible_truncation)]
                                     to_row: r as u8,
+                                    #[allow(clippy::cast_possible_truncation)]
                                     to_col: c as u8,
                                     score: 0,
                                 });

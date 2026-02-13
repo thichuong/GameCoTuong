@@ -20,7 +20,7 @@ pub fn ConfigPanel(
                     <div style="margin-bottom: 15px; text-align: center;">
                         <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
                         <input type="file" accept=".json" on:change=handle_file_upload(set_red_config) style="color: #ccc;" />
-                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(red_config.get(), "red_config.json")>"Export JSON"</button>
+                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(&red_config.get(), "red_config.json")>"Export JSON"</button>
                     </div>
                     {
                         move || {
@@ -58,7 +58,7 @@ pub fn ConfigPanel(
                     <div style="margin-bottom: 15px; text-align: center;">
                         <label style="display: block; margin-bottom: 5px; color: #ccc; font-size: 0.9em;">"Load JSON Config"</label>
                         <input type="file" accept=".json" on:change=handle_file_upload(set_black_config) style="color: #ccc;" />
-                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(black_config.get(), "black_config.json")>"Export JSON"</button>
+                        <button style="margin-top: 5px; font-size: 0.8em;" on:click=move |_| export_config(&black_config.get(), "black_config.json")>"Export JSON"</button>
                     </div>
                     {
                         move || {
