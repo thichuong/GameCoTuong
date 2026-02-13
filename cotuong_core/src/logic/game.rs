@@ -159,7 +159,6 @@ impl GameState {
         false
     }
 
-
     fn count_valid_moves_capped(
         &self,
         from: BoardCoordinate,
@@ -215,7 +214,6 @@ impl GameState {
             }
         }
     }
-
 
     fn count_offsets_capped(
         &self,

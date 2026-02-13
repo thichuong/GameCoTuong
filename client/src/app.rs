@@ -1060,6 +1060,9 @@ fn OnlineStatusPanel(
                                 on:click=move |_| {
                                     if let Some(client) = network_client.get() {
                                         client.send(&GameMessage::FindMatch);
+                                        set_online_status.set(OnlineStatus::Finding);
+                                    } else {
+                                        leptos::logging::log!("❌ Cannot find match: NetworkClient is not initialized (Server might be down)");
                                     }
                                 }
                             >

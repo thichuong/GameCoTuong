@@ -5,8 +5,8 @@ use crate::engine::tt::{TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
 use crate::logic::game::GameState;
-use crate::logic::rules::{is_flying_general, is_in_check};
 use crate::logic::generator::MoveGenerator;
+use crate::logic::rules::{is_flying_general, is_in_check};
 use std::sync::Arc;
 
 pub struct AlphaBetaEngine {

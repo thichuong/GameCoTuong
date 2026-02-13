@@ -90,11 +90,17 @@ impl MoveGenerator {
         }
     }
 
-    fn is_legal_move_fast(&self, board: &Board, from: BoardCoordinate, to: BoardCoordinate, turn: Color) -> bool {
-         if is_valid_move(board, from, to, turn).is_ok() {
-             return true;
-         }
-         false
+    fn is_legal_move_fast(
+        &self,
+        board: &Board,
+        from: BoardCoordinate,
+        to: BoardCoordinate,
+        turn: Color,
+    ) -> bool {
+        if is_valid_move(board, from, to, turn).is_ok() {
+            return true;
+        }
+        false
     }
 
     fn generate_piece_moves(
@@ -306,136 +312,136 @@ impl MoveGenerator {
     }
 
     fn check_general_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
-         let tables = AttackTables::get();
-         let sq = from.index();
+        let tables = AttackTables::get();
+        let sq = from.index();
 
-         for &target_sq in &tables.general_moves[sq] {
-             let (tr, tc) = Board::index_to_coord(target_sq);
-             let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
-             if self.is_legal_move_fast(board, from, to, turn) {
-                 return true;
-             }
-         }
-         false
+        for &target_sq in &tables.general_moves[sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
+            let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+            if self.is_legal_move_fast(board, from, to, turn) {
+                return true;
+            }
+        }
+        false
     }
 
     fn check_advisor_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
-         let tables = AttackTables::get();
-         let sq = from.index();
+        let tables = AttackTables::get();
+        let sq = from.index();
 
-         for &target_sq in &tables.advisor_moves[sq] {
-             let (tr, tc) = Board::index_to_coord(target_sq);
-             let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
-             if self.is_legal_move_fast(board, from, to, turn) {
-                 return true;
-             }
-         }
-         false
+        for &target_sq in &tables.advisor_moves[sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
+            let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+            if self.is_legal_move_fast(board, from, to, turn) {
+                return true;
+            }
+        }
+        false
     }
 
     fn check_elephant_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
-         let tables = AttackTables::get();
-         let sq = from.index();
+        let tables = AttackTables::get();
+        let sq = from.index();
 
-         for &(target_sq, eye_sq) in &tables.elephant_moves[sq] {
-             if board.grid[eye_sq].is_none() {
-                 let (tr, tc) = Board::index_to_coord(target_sq);
-                 let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
-                 if self.is_legal_move_fast(board, from, to, turn) {
-                     return true;
-                 }
-             }
-         }
-         false
+        for &(target_sq, eye_sq) in &tables.elephant_moves[sq] {
+            if board.grid[eye_sq].is_none() {
+                let (tr, tc) = Board::index_to_coord(target_sq);
+                let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+                if self.is_legal_move_fast(board, from, to, turn) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn check_horse_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
-         let tables = AttackTables::get();
-         let sq = from.index();
+        let tables = AttackTables::get();
+        let sq = from.index();
 
-         for &(target_sq, leg_sq) in &tables.horse_moves[sq] {
-             if board.grid[leg_sq].is_none() {
-                 let (tr, tc) = Board::index_to_coord(target_sq);
-                 let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
-                 if self.is_legal_move_fast(board, from, to, turn) {
-                     return true;
-                 }
-             }
-         }
-         false
+        for &(target_sq, leg_sq) in &tables.horse_moves[sq] {
+            if board.grid[leg_sq].is_none() {
+                let (tr, tc) = Board::index_to_coord(target_sq);
+                let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+                if self.is_legal_move_fast(board, from, to, turn) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn check_chariot_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
-         let tables = AttackTables::get();
-         let r = from.row;
-         let c = from.col;
+        let tables = AttackTables::get();
+        let r = from.row;
+        let c = from.col;
 
-         let rank_occ = board.occupied_rows[r];
-         let mut attacks = tables.get_rook_attacks(c, rank_occ, 9);
-         while attacks != 0 {
-             let col = attacks.trailing_zeros() as usize;
-             attacks &= attacks - 1;
-             let to = unsafe { BoardCoordinate::new_unchecked(r, col) };
-             if self.is_legal_move_fast(board, from, to, turn) {
-                 return true;
-             }
-         }
+        let rank_occ = board.occupied_rows[r];
+        let mut attacks = tables.get_rook_attacks(c, rank_occ, 9);
+        while attacks != 0 {
+            let col = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            let to = unsafe { BoardCoordinate::new_unchecked(r, col) };
+            if self.is_legal_move_fast(board, from, to, turn) {
+                return true;
+            }
+        }
 
-         let file_occ = board.occupied_cols[c];
-         let mut attacks = tables.get_rook_attacks(r, file_occ, 10);
-         while attacks != 0 {
-             let row = attacks.trailing_zeros() as usize;
-             attacks &= attacks - 1;
-             let to = unsafe { BoardCoordinate::new_unchecked(row, c) };
-             if self.is_legal_move_fast(board, from, to, turn) {
-                 return true;
-             }
-         }
-         false
+        let file_occ = board.occupied_cols[c];
+        let mut attacks = tables.get_rook_attacks(r, file_occ, 10);
+        while attacks != 0 {
+            let row = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            let to = unsafe { BoardCoordinate::new_unchecked(row, c) };
+            if self.is_legal_move_fast(board, from, to, turn) {
+                return true;
+            }
+        }
+        false
     }
 
     fn check_cannon_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
-         let tables = AttackTables::get();
-         let r = from.row;
-         let c = from.col;
+        let tables = AttackTables::get();
+        let r = from.row;
+        let c = from.col;
 
-         let rank_occ = board.occupied_rows[r];
-         let mut attacks = tables.get_cannon_attacks(c, rank_occ, 9);
-         while attacks != 0 {
-             let col = attacks.trailing_zeros() as usize;
-             attacks &= attacks - 1;
-             let to = unsafe { BoardCoordinate::new_unchecked(r, col) };
-             if self.is_legal_move_fast(board, from, to, turn) {
-                 return true;
-             }
-         }
+        let rank_occ = board.occupied_rows[r];
+        let mut attacks = tables.get_cannon_attacks(c, rank_occ, 9);
+        while attacks != 0 {
+            let col = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            let to = unsafe { BoardCoordinate::new_unchecked(r, col) };
+            if self.is_legal_move_fast(board, from, to, turn) {
+                return true;
+            }
+        }
 
-         let file_occ = board.occupied_cols[c];
-         let mut attacks = tables.get_cannon_attacks(r, file_occ, 10);
-         while attacks != 0 {
-             let row = attacks.trailing_zeros() as usize;
-             attacks &= attacks - 1;
-             let to = unsafe { BoardCoordinate::new_unchecked(row, c) };
-             if self.is_legal_move_fast(board, from, to, turn) {
-                 return true;
-             }
-         }
-         false
+        let file_occ = board.occupied_cols[c];
+        let mut attacks = tables.get_cannon_attacks(r, file_occ, 10);
+        while attacks != 0 {
+            let row = attacks.trailing_zeros() as usize;
+            attacks &= attacks - 1;
+            let to = unsafe { BoardCoordinate::new_unchecked(row, c) };
+            if self.is_legal_move_fast(board, from, to, turn) {
+                return true;
+            }
+        }
+        false
     }
 
     fn check_soldier_moves(&self, board: &Board, from: BoardCoordinate, turn: Color) -> bool {
-         let tables = AttackTables::get();
-         let sq = from.index();
-         let color_idx = turn.index();
+        let tables = AttackTables::get();
+        let sq = from.index();
+        let color_idx = turn.index();
 
-         for &target_sq in &tables.soldier_moves[color_idx][sq] {
-             let (tr, tc) = Board::index_to_coord(target_sq);
-             let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
-             if self.is_legal_move_fast(board, from, to, turn) {
-                 return true;
-             }
-         }
-         false
+        for &target_sq in &tables.soldier_moves[color_idx][sq] {
+            let (tr, tc) = Board::index_to_coord(target_sq);
+            let to = unsafe { BoardCoordinate::new_unchecked(tr, tc) };
+            if self.is_legal_move_fast(board, from, to, turn) {
+                return true;
+            }
+        }
+        false
     }
 
     // `offset` helper is no longer needed but we can keep it if strictly necessary,
@@ -537,7 +543,7 @@ mod tests {
         );
 
         let generator = MoveGenerator::new();
-        
+
         // Debugging: Iterate all moves to see if any are generated
         let moves = generator.generate_moves(&board, Color::Black);
         for mv in &moves {

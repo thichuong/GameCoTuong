@@ -95,6 +95,11 @@ impl AppState {
     }
 
     pub async fn find_match(&self, player_id: String) {
+        // Reject if player is still in an active game
+        if self.player_to_game.contains_key(&player_id) {
+            return;
+        }
+
         let mut queue = self.matchmaking_queue.lock().await;
 
         if queue.contains(&player_id) {
@@ -497,8 +502,53 @@ impl AppState {
         }
     }
 
+    /// Player leaves current game but stays connected.
+    /// Unlike remove_player(), this preserves the WebSocket connection
+    /// so the player can find a new match.
+    pub async fn leave_game(&self, player_id: &str) {
+        // Remove from matchmaking queue (in case they were searching)
+        {
+            let mut queue = self.matchmaking_queue.lock().await;
+            queue.remove(player_id);
+        }
+
+        // Cleanup game session
+        if let Some((_, game_id)) = self.player_to_game.remove(player_id) {
+            // Remove game session first to avoid DashMap deadlock (get() holds Ref shard lock)
+            if let Some((_, game_lock)) = self.games.remove(&game_id) {
+                let game = game_lock.read().await;
+                let opponent_id = if game.red_player == player_id {
+                    game.black_player.clone()
+                } else {
+                    game.red_player.clone()
+                };
+                let winner = if game.red_player == player_id {
+                    Color::Black
+                } else {
+                    Color::Red
+                };
+                let game_ended = game.game_ended;
+                drop(game);
+
+                // Remove opponent mapping
+                self.player_to_game.remove(&opponent_id);
+
+                // Notify opponent only if game wasn't already ended
+                if !game_ended {
+                    if let Some(player) = self.players.get(&opponent_id) {
+                        let _ = player.tx.send(ServerMessage::OpponentDisconnected);
+                        let _ = player.tx.send(ServerMessage::GameEnd {
+                            winner: Some(winner),
+                            reason: "Opponent Left".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn handle_player_left(&self, player_id: String) {
-        self.remove_player(&player_id).await;
+        self.leave_game(&player_id).await;
     }
 }
 
