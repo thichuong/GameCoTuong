@@ -542,6 +542,12 @@ impl AppState {
                             reason: "Opponent Left".to_string(),
                         });
                     }
+                } else {
+                    // Game already ended, but opponent needs to know we left
+                    // (they might be waiting for rematch)
+                    if let Some(player) = self.players.get(&opponent_id) {
+                        let _ = player.tx.send(ServerMessage::OpponentLeftGame);
+                    }
                 }
             }
         }

@@ -40,4 +40,5 @@ pub enum ServerMessage {
     Error(String),
     WaitingForMatch,
     OpponentDisconnected,
+    OpponentLeftGame,
 }

@@ -249,6 +249,13 @@ pub fn App() -> impl IntoView {
                     set_online_status.set(OnlineStatus::OpponentDisconnected);
                     leptos::logging::log!("Opponent disconnected!");
                 }
+                ServerMessage::OpponentLeftGame => {
+                    // Opponent left after game ended (while we were waiting for rematch)
+                    set_online_status.set(OnlineStatus::None);
+                    set_game_state.set(GameState::new());
+                    set_is_ready_for_rematch.set(false);
+                    leptos::logging::log!("Opponent left the room.");
+                }
                 ServerMessage::GameEnd { winner, reason } => {
                     set_online_status.set(OnlineStatus::GameEnded);
                     set_game_end_winner.set(Some(winner));
