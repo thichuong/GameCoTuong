@@ -74,7 +74,7 @@ impl Evaluator for SimpleEvaluator {
             for &(dr, dc) in &neighbors {
                 let br = r as i32 + dr;
                 let bc = c as i32 + dc;
-                if br >= 0 && br < 10 && bc >= 0 && bc < 9 {
+                if (0..10).contains(&br) && (0..9).contains(&bc) {
                     let block_sq = Board::square_index(br as usize, bc as usize);
                     if (all_pieces & (1 << block_sq)) == 0 {
                         // Leg is free, adding "potential" mobility.
@@ -111,7 +111,7 @@ impl Evaluator for SimpleEvaluator {
             for &(dr, dc) in &neighbors {
                 let br = r as i32 + dr;
                 let bc = c as i32 + dc;
-                if br >= 0 && br < 10 && bc >= 0 && bc < 9 {
+                if (0..10).contains(&br) && (0..9).contains(&bc) {
                     let block_sq = Board::square_index(br as usize, bc as usize);
                     if (all_pieces & (1 << block_sq)) == 0 {
                         black_mobility += 2 * WEIGHT_MOBILITY_HORSE;

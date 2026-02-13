@@ -1,0 +1,15 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /home/exblackhole/Desktop/GameCoTuong/cotuong_core/Cargo.toml
+workspace: /home/exblackhole/Desktop/GameCoTuong/Cargo.toml
+    Checking server v0.1.0 (/home/exblackhole/Desktop/GameCoTuong/server)
+error[E0502]: cannot borrow `game` as immutable because it is also borrowed as mutable
+   --> server/src/game_manager.rs:341:43
+    |
+341 |                 game.board.apply_move(mv, game.turn);
+    |                 ----       ----------     ^^^^ immutable borrow occurs here
+    |                 |          |
+    |                 |          mutable borrow later used by call
+    |                 mutable borrow occurs here
+
+For more information about this error, try `rustc --explain E0502`.
+error: could not compile `server` (bin "server") due to 1 previous error

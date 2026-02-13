@@ -1,0 +1,13 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /home/exblackhole/Desktop/GameCoTuong/cotuong_core/Cargo.toml
+workspace: /home/exblackhole/Desktop/GameCoTuong/Cargo.toml
+   Compiling server v0.1.0 (/home/exblackhole/Desktop/GameCoTuong/server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.30s
+     Running unittests src/main.rs (target/debug/deps/server-0336f55d392d64f4)
+
+running 2 tests
+test game_manager::tests::test_happy_path_distributed_validation ... ok
+test game_manager::tests::test_conflict_resolution ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

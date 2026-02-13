@@ -228,7 +228,7 @@ impl GameState {
         for &(dr, dc) in offsets {
             let r = from.row as isize + dr;
             let c = from.col as isize + dc;
-            if r >= 0 && r < 10 && c >= 0 && c < 9 {
+            if (0..10).contains(&r) && (0..9).contains(&c) {
                 let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
                 if is_valid_move(&self.board, from, to, color).is_ok() {
                     count += 1;
@@ -252,7 +252,7 @@ impl GameState {
         for &(dr, dc) in dirs {
             let mut r = from.row as isize + dr;
             let mut c = from.col as isize + dc;
-            while r >= 0 && r < 10 && c >= 0 && c < 9 {
+            while (0..10).contains(&r) && (0..9).contains(&c) {
                 let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
                 if is_valid_move(&self.board, from, to, color).is_ok() {
                     count += 1;
@@ -281,7 +281,7 @@ impl GameState {
         for &(dr, dc) in dirs {
             let mut r = from.row as isize + dr;
             let mut c = from.col as isize + dc;
-            while r >= 0 && r < 10 && c >= 0 && c < 9 {
+            while (0..10).contains(&r) && (0..9).contains(&c) {
                 let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
                 if is_valid_move(&self.board, from, to, color).is_ok() {
                     count += 1;

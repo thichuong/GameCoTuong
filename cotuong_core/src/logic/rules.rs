@@ -194,19 +194,15 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
         let backward_check = if enemy_color == Color::Red { -1 } else { 1 };
 
         let fr = gr as isize + backward_check;
-        if (0..10).contains(&fr) {
-            if (enemy_soldiers & (1u128 << (fr as usize * 9 + gc))) != 0 {
-                return true;
-            }
+        if (0..10).contains(&fr) && (enemy_soldiers & (1u128 << (fr as usize * 9 + gc))) != 0 {
+            return true;
         }
 
         // Side attacks
         for dc in [-1, 1] {
             let sc = gc as isize + dc;
-            if (0..9).contains(&sc) {
-                if (enemy_soldiers & (1u128 << (gr * 9 + sc as usize))) != 0 {
-                    return true;
-                }
+            if (0..9).contains(&sc) && (enemy_soldiers & (1u128 << (gr * 9 + sc as usize))) != 0 {
+                return true;
             }
         }
     }

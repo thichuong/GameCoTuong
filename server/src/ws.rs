@@ -1,4 +1,4 @@
-use crate::game_manager::GameManager;
+use crate::game_manager::AppState;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -8,12 +8,8 @@ use axum::{
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use shared::GameMessage;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::mpsc;
-
-pub struct AppState {
-    pub game_manager: Mutex<GameManager>,
-}
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -29,9 +25,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     // Spawn a task to forward messages from the channel to the WebSocket
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            let json = serde_json::to_string(&msg).unwrap();
-            if sender.send(Message::Text(json)).await.is_err() {
-                break;
+            if let Ok(json) = serde_json::to_string(&msg) {
+                if sender.send(Message::Text(json)).await.is_err() {
+                    break;
+                }
             }
         }
     });
@@ -40,29 +37,28 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let player_id = uuid::Uuid::new_v4().to_string();
 
     // Add player to manager
-    {
-        let mut gm = state.game_manager.lock().unwrap();
-        gm.add_player(player_id.clone(), tx);
-    }
+    state.add_player(player_id.clone(), tx);
 
     while let Some(Ok(msg)) = receiver.next().await {
         if let Message::Text(text) = msg {
             if let Ok(game_msg) = serde_json::from_str::<GameMessage>(&text) {
-                let mut gm = state.game_manager.lock().unwrap();
                 match game_msg {
-                    GameMessage::FindMatch => gm.find_match(player_id.clone()),
+                    GameMessage::FindMatch => state.find_match(player_id.clone()).await,
                     GameMessage::MakeMove { move_data, fen } => {
-                        gm.handle_move(player_id.clone(), move_data, fen)
+                        state.handle_move(player_id.clone(), move_data, fen).await
                     }
                     GameMessage::VerifyMove { fen, is_valid } => {
-                        gm.handle_verify_move(player_id.clone(), fen, is_valid)
+                        state
+                            .handle_verify_move(player_id.clone(), fen, is_valid)
+                            .await
                     }
                     GameMessage::CancelFindMatch => {
-                        gm.matchmaking_queue.remove(&player_id);
+                        let mut queue = state.matchmaking_queue.lock().await;
+                        queue.remove(&player_id);
                     }
-                    GameMessage::Surrender => gm.handle_surrender(player_id.clone()),
-                    GameMessage::PlayAgain => gm.handle_play_again(player_id.clone()),
-                    GameMessage::PlayerLeft => gm.handle_player_left(player_id.clone()),
+                    GameMessage::Surrender => state.handle_surrender(player_id.clone()).await,
+                    GameMessage::PlayAgain => state.handle_play_again(player_id.clone()).await,
+                    GameMessage::PlayerLeft => state.handle_player_left(player_id.clone()).await,
                     _ => {}
                 }
             }
@@ -70,8 +66,5 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     }
 
     // Client disconnected
-    {
-        let mut gm = state.game_manager.lock().unwrap();
-        gm.remove_player(&player_id);
-    }
+    state.remove_player(&player_id).await;
 }

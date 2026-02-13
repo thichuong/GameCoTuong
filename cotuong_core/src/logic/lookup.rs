@@ -203,7 +203,7 @@ fn compute_advisor_moves(sq: usize) -> Vec<usize> {
         if let Some(target) = to_sq(r + dr, c + dc) {
             let tr = r + dr;
             let tc = c + dc;
-            let in_palace = (tc >= 3 && tc <= 5) && ((tr >= 0 && tr <= 2) || (tr >= 7 && tr <= 9));
+            let in_palace = (3..=5).contains(&tc) && ((0..=2).contains(&tr) || (7..=9).contains(&tr));
             if in_palace {
                 moves.push(target);
             }
@@ -220,7 +220,7 @@ fn compute_general_moves(sq: usize) -> Vec<usize> {
         if let Some(target) = to_sq(r + dr, c + dc) {
             let tr = r + dr;
             let tc = c + dc;
-            let in_palace = (tc >= 3 && tc <= 5) && ((tr >= 0 && tr <= 2) || (tr >= 7 && tr <= 9));
+            let in_palace = (3..=5).contains(&tc) && ((0..=2).contains(&tr) || (7..=9).contains(&tr));
             if in_palace {
                 moves.push(target);
             }

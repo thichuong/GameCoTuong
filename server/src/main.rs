@@ -1,10 +1,7 @@
 use axum::{routing::get, Router};
-use game_manager::GameManager;
-use std::{
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
-use ws::{ws_handler, AppState};
+use game_manager::AppState;
+use std::{net::SocketAddr, sync::Arc};
+use ws::ws_handler;
 
 mod game_manager;
 mod ws;
@@ -14,9 +11,7 @@ async fn main() {
     // initialize tracing
     tracing_subscriber::fmt::init();
 
-    let state = Arc::new(AppState {
-        game_manager: Mutex::new(GameManager::new()),
-    });
+    let state = Arc::new(AppState::new());
 
     // build our application with a route
     let app = Router::new()
@@ -26,6 +21,10 @@ async fn main() {
     // run our app with hyper
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     tracing::debug!("listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind to address");
+    axum::serve(listener, app)
+        .await
+        .expect("Failed to start server");
 }
