@@ -141,7 +141,7 @@ let wasm_bindgen = (function(exports) {
             },
             __wbindgen_cast_0000000000000002: function(arg0, arg1) {
                 // Cast intrinsic for `Closure(Closure { dtor_idx: 11, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 12, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
-                const ret = makeClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h5ba6edbea7e8932d, wasm_bindgen__convert__closures_____invoke__h94744380b688ba19);
+                const ret = makeClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h5ba6edbea7e8932d, wasm_bindgen__convert__closures_____invoke__h76e210c7f0146e4e);
                 return ret;
             },
             __wbindgen_init_externref_table: function() {
@@ -164,8 +164,8 @@ let wasm_bindgen = (function(exports) {
         wasm.wasm_bindgen__convert__closures_____invoke__h116bef0ee0bbf7e2(arg0, arg1, arg2);
     }
 
-    function wasm_bindgen__convert__closures_____invoke__h94744380b688ba19(arg0, arg1, arg2) {
-        wasm.wasm_bindgen__convert__closures_____invoke__h94744380b688ba19(arg0, arg1, arg2);
+    function wasm_bindgen__convert__closures_____invoke__h76e210c7f0146e4e(arg0, arg1, arg2) {
+        wasm.wasm_bindgen__convert__closures_____invoke__h76e210c7f0146e4e(arg0, arg1, arg2);
     }
 
     function addToExternrefTable0(obj) {
