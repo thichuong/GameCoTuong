@@ -14,6 +14,7 @@ This skill covers modifications to files in `cotuong_core/src/logic/`:
 - [rules.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/logic/rules.rs) – Move validation, check, flying general
 - [lookup.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/logic/lookup.rs) – AttackTables (precomputed moves)
 - [eval_constants.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/logic/eval_constants.rs) – Piece values, PST, weights
+- [opening.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/logic/opening.rs) – Opening book (FEN-based)
 
 ## Architecture Context
 
@@ -47,7 +48,7 @@ is_valid_move(board, from, to, turn)
   - Returns: 10-bit attack mask
 - **Non-sliding pieces**: Precomputed target arrays for each of 90 squares
   - Horse: `[(target_sq, leg_blocker_sq)]`
-  - Elephant: `[(target_sq, eye_blocker_sq)]`  
+  - Elephant: `[(target_sq, eye_blocker_sq)]`
   - Advisor/General/Soldier: `[target_sq]`
 
 ### Xiangqi-Specific Rules
@@ -73,6 +74,7 @@ is_valid_move(board, from, to, turn)
 2. Generated moves are checked with `is_valid_move()` which includes self-check validation.
 3. `has_legal_moves()` is optimized for early-return (used in mate/stalemate detection).
 4. `can_piece_make_any_legal_move()` checks if a specific piece has any legal move.
+5. **Note**: `logic/generator.rs` (`MoveGenerator`) is for game logic. `engine/movegen.rs` (`EngineMoveGen`) is the engine-specific variant with move scoring — see `xiangqi_engine_tuning` skill.
 
 ### GameState Management
 1. `GameState` holds: `board`, `turn`, `status`, `move_history`, `position_history` (for repetition), `move_generator`.
@@ -92,7 +94,8 @@ is_valid_move(board, from, to, turn)
 2. Update `validate_piece_logic()` match arm
 3. Add move generation in `generator.rs` (both `generate_*_moves()` and `check_*_moves()`)
 4. If needed, add precomputed data in `lookup.rs`
-5. Test with specific board positions
+5. Update `EngineMoveGen` in `engine/movegen.rs` if engine-specific generation is affected
+6. Test with specific board positions
 
 ### Modifying board representation
 1. Update `Board` struct in `board.rs`
@@ -104,5 +107,6 @@ is_valid_move(board, from, to, turn)
 ### Adding a new game end condition
 1. Add variant to `GameStatus` enum in `game.rs`
 2. Update `GameState::update_status()` detection logic
-3. Update server `game_manager.rs` to handle new status
-4. Update client `app.rs` to display new condition
+3. Update server `game_manager/move_handler.rs` / `game_manager/lifecycle.rs` to handle new status
+4. Update client `app/game_app.rs` to display new condition
+5. Update client `app/online.rs` if it affects online mode

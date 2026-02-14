@@ -10,9 +10,11 @@ description: Guidelines for modifying the Xiangqi AI engine – search algorithm
 This skill covers modifications to files in `cotuong_core/src/engine/`:
 - [search.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/search.rs) – AlphaBetaEngine (Negamax + pruning)
 - [eval.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/eval.rs) – SimpleEvaluator
+- [movegen.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/movegen.rs) – EngineMoveGen (engine-specific move generation with scoring)
 - [config.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/config.rs) – EngineConfig (tunable parameters)
 - [tt.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/tt.rs) – TranspositionTable
 - [move_list.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/move_list.rs) – Stack-allocated move storage
+- [zobrist.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/zobrist.rs) – ZobristKeys (position hashing)
 
 ## Architecture Context
 
@@ -22,6 +24,15 @@ This skill covers modifications to files in `cotuong_core/src/engine/`:
    - TT probe → NMP → ProbCut → Singular Extension → LMR
 3. `quiescence()` → Captures only (horizon effect prevention)
 4. Move ordering: TT move → Captures (MVV-LVA) → Killers → History
+
+### Engine Move Generation (`movegen.rs`)
+- **`EngineMoveGen`**: Separate from `logic/generator.rs` `MoveGenerator`. Handles engine-specific move generation with scoring.
+- Uses `AttackTables` for move generation + `EngineConfig` for scoring weights.
+- **`MoveGenContext`**: Holds board state, move list, config, and history table reference during generation.
+- Methods: `generate_moves()` (all moves with scoring), `generate_captures()` (captures only for quiescence).
+- Piece-specific generators: `gen_rook_moves`, `gen_cannon_moves`, `gen_horse_moves`, `gen_elephant_moves`, `gen_advisor_moves`, `gen_king_moves`, `gen_pawn_moves`.
+- `add_move()`: Assigns score based on TT move → MVV-LVA captures → Killer moves → History heuristic.
+- `get_piece_value()`: Returns configurable piece values for MVV-LVA scoring.
 
 ### Key Data Structures
 - `MoveList`: `[Move; 128]` on stack – **NEVER** use `Vec<Move>` in search loop
@@ -45,9 +56,10 @@ This skill covers modifications to files in `cotuong_core/src/engine/`:
 4. **Check time sparingly**: `check_time()` uses `self.stats.nodes % 4096 == 0` to avoid syscall overhead.
 
 ### Move Ordering Tuning
-- `add_move()` in search.rs assigns scores based on: TT move (900000), MVV-LVA captures, killer moves (800000-799999), history heuristic
-- History table: `[[[i32; 9]; 10]; 2]` indexed by `[color][to_row][to_col]`
+- `add_move()` in `movegen.rs` assigns scores based on: TT move (hash_move score), MVV-LVA captures, killer moves, history heuristic
+- History table: `[[i32; 90]; 2]` indexed by `[color][to_index]`
 - Killer moves: 2 slots per ply `[[Option<Move>; 2]; 64]`
+- `EngineMoveGen` uses `EngineConfig` values for all scoring thresholds
 
 ### Evaluation Tuning
 - All weights are in `EngineConfig` and `eval_constants.rs`
@@ -70,6 +82,12 @@ This skill covers modifications to files in `cotuong_core/src/engine/`:
 4. Update `precompute_*` if precomputed data needed
 5. Test with mate positions to ensure no search instability
 
+### Modifying move ordering/scoring
+1. Edit `add_move()` in `movegen.rs` to change scoring logic
+2. Edit `generate_moves_internal()` for generation order changes
+3. Adjust `EngineConfig` scoring constants if needed
+4. Benchmark with `bench_test.rs` to verify NPS impact
+
 ### Tuning piece values
 1. Modify constants in `eval_constants.rs` OR add config overrides in `EngineConfig`
 2. The `evaluate()` function in `SimpleEvaluator` uses incremental scores from `Board` for material+PST
@@ -77,6 +95,6 @@ This skill covers modifications to files in `cotuong_core/src/engine/`:
 
 ### Adding a new evaluation term
 1. Add weight constant to `eval_constants.rs`
-2. Implement computation in `SimpleEvaluator::evaluate()` 
+2. Implement computation in `SimpleEvaluator::evaluate()`
 3. Add config parameter to `EngineConfig` if tunable
 4. Ensure the computation is efficient (avoid heap allocation, complex iteration)

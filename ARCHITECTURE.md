@@ -55,8 +55,9 @@ cotuong_core/src/
 ├── engine/
 │   ├── mod.rs          # Traits: Evaluator, Searcher; Structs: Move, SearchLimit, SearchStats
 │   ├── config.rs       # EngineConfig – JSON-configurable parameters
-│   ├── search.rs       # AlphaBetaEngine – Negamax search (1316 lines)
-│   ├── eval.rs         # SimpleEvaluator – Board evaluation (423 lines)
+│   ├── search.rs       # AlphaBetaEngine – Negamax search (~900 lines)
+│   ├── eval.rs         # SimpleEvaluator – Board evaluation (~420 lines)
+│   ├── movegen.rs      # EngineMoveGen – Engine-specific move generation with scoring
 │   ├── tt.rs           # TranspositionTable – Hash-indexed cache
 │   ├── zobrist.rs      # ZobristKeys – Position hashing (XorShift64 RNG)
 │   ├── move_list.rs    # MoveList – Stack-allocated [Move; 128]
@@ -136,7 +137,7 @@ flowchart TD
         SE["Singular Extension<br/>(Skip excluded move)"]
     end
 
-    Pruning --> MoveGen["generate_moves()<br/>Move Ordering:<br/>1. TT Move<br/>2. Captures (MVV-LVA)<br/>3. Killer Moves<br/>4. History Heuristic"]
+    Pruning --> MoveGen["EngineMoveGen<br/>generate_moves()<br/>Move Ordering:<br/>1. TT Move<br/>2. Captures (MVV-LVA)<br/>3. Killer Moves<br/>4. History Heuristic"]
 
     MoveGen --> Recurse["Recursive α-β"]
     Recurse --> QS["quiescence()<br/>Captures only"]
@@ -165,7 +166,19 @@ flowchart TD
 | Repetition Detection | History hash tracking |
 | Opening Book | FEN-based lookup (hardcoded starting positions) |
 
-### 2.4. Evaluation – `SimpleEvaluator`
+### 2.4. `EngineMoveGen` – Engine Move Generation
+
+Module chuyên biệt cho engine, tách riêng khỏi `MoveGenerator` trong `logic/`:
+
+| Feature | Description |
+|---|---|
+| `MoveGenContext` | Struct chứa board state + move list + config cho quá trình sinh nước đi |
+| `EngineMoveGen` | Wrapper sử dụng `AttackTables` + `EngineConfig` để sinh và **chấm điểm** nước đi |
+| Move Scoring | Hash move → MVV-LVA captures → Killer moves → History heuristic |
+| Piece-specific | `gen_rook_moves`, `gen_cannon_moves`, `gen_horse_moves`, `gen_elephant_moves`, `gen_advisor_moves`, `gen_king_moves`, `gen_pawn_moves` |
+| `generate_captures` | Chỉ sinh nước ăn quân – dùng cho quiescence search |
+
+### 2.5. Evaluation – `SimpleEvaluator`
 
 | Component | Description |
 |---|---|
@@ -176,7 +189,7 @@ flowchart TD
 | Structure | Bonus cho Tượng/Sĩ liên kết |
 | Incremental | Score cơ bản (material + PST) được cập nhật incremental trong Board |
 
-### 2.5. Move Generation
+### 2.6. Move Generation (`logic/generator.rs`)
 
 - **`MoveGenerator`**: Sinh tất cả nước đi hợp lệ cho 1 bên, sử dụng `AttackTables` lookup.
 - **`AttackTables`**: Precomputed tại startup (`OnceLock`):
@@ -187,7 +200,7 @@ flowchart TD
 - **`MoveList`**: Stack-allocated `[Move; 128]`, zero-alloc trong hot path.
 - **`has_legal_moves()`**: Early-return kiểm tra nhanh có nước đi hợp lệ (dùng cho mate detection).
 
-### 2.6. Web Worker (`worker.rs`)
+### 2.7. Web Worker (`worker.rs`)
 
 `GameWorker` implement `gloo_worker::Worker` – chạy AI search trên background thread (WASM):
 - **Input**: `ComputeMove(GameState, SearchLimit, EngineConfig, Vec<Move>)`
@@ -204,6 +217,7 @@ flowchart TD
 | HTTP/WS | Axum 0.7 + WebSocket upgrade |
 | Async Runtime | Tokio (full features) |
 | Concurrency | `DashMap` (lock-free) + `tokio::sync::RwLock` / `Mutex` |
+| Logging | `tracing` + `tracing-subscriber` (structured logging, env-filter) |
 | Serialization | serde_json |
 
 ### 3.2. Architecture
@@ -215,33 +229,62 @@ flowchart LR
 
     subgraph Server
         WS["ws.rs<br/>WebSocket Handler"]
-        GM["game_manager.rs<br/>AppState"]
 
-        subgraph AppState
-            Players["players: DashMap<br/>id → Tx channel"]
-            Games["games: DashMap<br/>game_id → GameSession"]
-            PG["player_games: DashMap<br/>player_id → game_id"]
-            Queue["matchmaking_queue:<br/>Mutex<HashSet>"]
+        subgraph AppState["game_manager/mod.rs"]
+            Players["players: DashMap<br/>id → Player"]
+            Games["games: DashMap<br/>game_id → RwLock-GameSession"]
+            PTG["player_to_game: DashMap<br/>player_id → game_id"]
+            Queue["matchmaking_queue:<br/>Mutex-HashSet"]
+        end
+
+        subgraph Modules["game_manager/"]
+            LC["lifecycle.rs<br/>Player lifecycle"]
+            MM["matchmaking.rs<br/>Queue + pairing"]
+            MH["move_handler.rs<br/>Move validation"]
+            SS["session.rs<br/>Structs"]
+            TS["tests.rs"]
         end
     end
 
     P1 <-->|GameMessage| WS
     P2 <-->|GameMessage| WS
-    WS --> GM
+    WS --> AppState
+    AppState --> Modules
 
-    style GM fill:#1d3557,color:#fff
+    style AppState fill:#1d3557,color:#fff
+```
+
+### 3.3. Module Map
+
+```
+server/src/
+├── main.rs                     # Entry point: tracing init, cleanup task, Axum router
+├── ws.rs                       # WebSocket upgrade, message routing, rate limiting
+└── game_manager/
+    ├── mod.rs                  # AppState struct (DashMap-based), check_rate_limit()
+    ├── session.rs              # Player, GameSession structs, Tx type, has_any_valid_move()
+    ├── lifecycle.rs            # add_player, remove_player, handle_surrender,
+    │                           # handle_play_again, leave_game, handle_player_left,
+    │                           # spawn_cleanup_task
+    ├── matchmaking.rs          # find_match, start_game (random color assignment)
+    ├── move_handler.rs         # handle_move, handle_verify_move, resolve_conflict,
+    │                           # notify_game_end
+    └── tests.rs                # Unit tests for game manager logic
 ```
 
 | Component | Responsibility |
 |---|---|
-| `ws.rs` | WebSocket upgrade, message routing (deserialize `GameMessage` → dispatch) |
-| `AppState` | Stateful game manager – DashMap-based concurrent access |
-| `GameSession` | Per-game state: Board, turn, players, pending moves, move history |
-| Matchmaking | Queue-based: `FindMatch` → pair 2 players → `start_game()` |
-| Move Validation | Distributed validation: sender validates → opponent cross-validates → resolve conflicts |
+| `ws.rs` | WebSocket upgrade, message routing (deserialize `GameMessage` → dispatch), rate limiting |
+| `AppState` | Stateful game manager – DashMap-based concurrent access, rate limiting per player |
+| `GameSession` | Per-game state: Board, turn, players, pending moves, rematch readiness, last activity |
+| `Player` | WebSocket sender channel (`Tx`) + last message timestamp (rate limiting) |
+| Matchmaking | Queue-based: `FindMatch` → pair 2 players → `start_game()` (random color) |
+| Move Validation | Distributed: sender submits → relay to opponent → opponent cross-validates → resolve conflicts |
 | Game End | Checkmate detection, surrender, disconnect, draw |
+| Lifecycle | Player cleanup on disconnect, stale game cleanup task, rematch handling |
+| Cleanup Task | Background `spawn_cleanup_task()` – tự động xóa game sessions không hoạt động |
 
-### 3.3. Message Flow
+### 3.4. Message Flow
 
 ```mermaid
 sequenceDiagram
@@ -261,6 +304,17 @@ sequenceDiagram
     S->>P2: VerifyMove(fen)
     P2->>S: VerifyMove(fen, is_valid)
     Note over S: If conflict → resolve_conflict()
+
+    Note over P1,P2: Game End
+    S->>P1: GameEnd(winner, reason)
+    S->>P2: GameEnd(winner, reason)
+    P1->>S: PlayAgain
+    P2->>S: PlayAgain
+    Note over S: Both ready → start new game
+
+    Note over P1,P2: Player leaves after game
+    P1->>S: PlayerLeft
+    S->>P2: OpponentLeftGame
 ```
 
 ---
@@ -281,30 +335,57 @@ sequenceDiagram
 
 ```
 client/src/
-├── main.rs             # Entry point: mount App component
-├── app.rs              # Main App component (1529 lines)
-│                       # Game modes: HvC, CvC, HvH, Online
-│                       # Sub-components: ControlsArea, LogPanel,
-│                       # ThinkingIndicator, OnlineStatusPanel,
-│                       # ConfigPanel, Slider, Dropdown, etc.
-├── network.rs          # NetworkClient (WebSocket wrapper)
+├── main.rs                 # Entry point: mount App component
+├── network.rs              # NetworkClient (WebSocket wrapper)
+├── app/
+│   ├── mod.rs              # Shared enums: Difficulty (5 levels), GameMode, OnlineStatus
+│   ├── game_app.rs         # Main App component (~444 lines) – orchestrates all game modes
+│   ├── controls.rs         # ControlsArea – mode/side/difficulty selectors, action buttons
+│   ├── config.rs           # ConfigPanel, Slider, Dropdown, FloatSlider – AI parameter tuning
+│   ├── export.rs           # handle_file_upload, export_config (JSON), export_csv
+│   ├── log.rs              # LogPanel (move history), ThinkingIndicator
+│   ├── online.rs           # OnlineStatusPanel – online mode UI & matchmaking controls
+│   └── styles.rs           # GAME_STYLES – embedded CSS constants
 ├── components/
 │   ├── mod.rs
-│   └── board.rs        # BoardView – Canvas rendering (19KB)
+│   └── board.rs            # BoardView – Canvas rendering
 └── bin/
-    └── worker.rs       # Web Worker entry point
+    └── worker.rs           # Web Worker entry point
 ```
 
-### 4.3. Game Modes
+### 4.3. Game Modes & Difficulty
 
 | Mode | Description |
 |---|---|
 | `HumanVsComputer` | Người chơi vs AI (Web Worker) |
-| `ComputerVsComputer` | AI vs AI (tự động) |
+| `ComputerVsComputer` | AI vs AI (tự động, có nút Pause/Resume) |
 | `HumanVsHuman` | 2 người chơi local (hotseat) |
 | `Online` | Multiplayer qua WebSocket |
 
-### 4.4. Rendering Pipeline
+| Difficulty | Time Limit |
+|---|---|
+| Level 1 | 1 giây |
+| Level 2 | 2 giây |
+| Level 3 | 5 giây |
+| Level 4 | 10 giây |
+| Level 5 | 20 giây |
+
+### 4.4. Online Status Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Finding : FindMatch
+    Finding --> None : CancelFindMatch
+    Finding --> MatchFound : MatchFound
+    MatchFound --> Playing : GameStart
+    Playing --> GameEnded : GameEnd
+    Playing --> OpponentDisconnected : OpponentDisconnected
+    GameEnded --> None : PlayerLeft / OpponentLeftGame
+    OpponentDisconnected --> None : cleanup
+```
+
+### 4.5. Rendering Pipeline
 
 Board được render trên HTML Canvas:
 1. Vẽ grid 10×9 với các đường kẻ, sông, cung
@@ -327,20 +408,21 @@ Chứa 2 enum được serialize/deserialize qua JSON:
 | `VerifyMove { fen, is_valid }` | Xác nhận nước đi đối thủ |
 | `Surrender` | Đầu hàng |
 | `RequestDraw` / `AcceptDraw` | Đề nghị / chấp nhận hòa |
-| `PlayAgain` | Chơi lại |
-| `PlayerLeft` | Rời trận |
+| `PlayAgain` | Chơi lại (rematch) |
+| `PlayerLeft` | Rời trận sau khi game kết thúc |
 
 ### `ServerMessage` (Server → Client)
 | Variant | Purpose |
 |---|---|
 | `MatchFound { opponent_id, your_color, game_id }` | Đã ghép trận |
-| `GameStart(Board)` | Bắt đầu game |
+| `GameStart(Box<Board>)` | Bắt đầu game (Board được Box để giảm stack size) |
 | `OpponentMove { move_data, fen }` | Đối thủ đi |
 | `GameStateCorrection { fen, turn }` | Sửa state khi conflict |
 | `GameEnd { winner, reason }` | Kết thúc game |
 | `Error(String)` | Lỗi |
 | `WaitingForMatch` | Đang chờ đối thủ |
-| `OpponentDisconnected` | Đối thủ mất kết nối |
+| `OpponentDisconnected` | Đối thủ mất kết nối (during game) |
+| `OpponentLeftGame` | Đối thủ rời trận (after game ended) |
 
 ---
 
@@ -358,18 +440,22 @@ flowchart TD
     subgraph Core["cotuong_core"]
         GS["GameState"]
         Engine["AlphaBetaEngine"]
+        EMG["EngineMoveGen"]
         Board["Board"]
         MG["MoveGenerator"]
     end
 
     subgraph Srv["Server"]
-        WS["WebSocket Handler"]
+        WS["WebSocket Handler<br/>+ Rate Limiting"]
         GM["AppState<br/>(DashMap)"]
+        LC["Lifecycle<br/>Manager"]
+        MM["Matchmaking"]
     end
 
     UI --> Canvas
     UI -->|"Trigger AI"| Worker
     Worker --> Engine
+    Engine --> EMG
     Engine --> GS
     GS --> Board
     GS --> MG
@@ -378,6 +464,8 @@ flowchart TD
     UI -->|"Online mode"| Net
     Net <-->|"JSON"| WS
     WS --> GM
+    GM --> LC
+    GM --> MM
     GM -->|"validate"| Board
 
     style Engine fill:#2d6a4f,color:#fff
@@ -391,7 +479,7 @@ flowchart TD
 
 | Target | Command | Notes |
 |---|---|---|
-| Server | `cargo run -p server` | Listens on `127.0.0.1:3000` |
+| Server | `cargo run -p server` | Mặc định `127.0.0.1:3000` (cấu hình qua `HOST`/`PORT` env vars) |
 | Client | `trunk serve` (trong `client/`) | Cần `trunk` + `wasm32-unknown-unknown` target |
 | Tests | `./test_all.sh` hoặc `cargo test --workspace` | Bao gồm unit + integration tests |
 | Release | Profile: `lto = "fat"`, `codegen-units = 1`, `panic = "abort"` | Tối ưu size & performance |
@@ -408,3 +496,7 @@ flowchart TD
 6. **Incremental Evaluation**: Board cập nhật hash + score khi move/undo → tránh recompute.
 7. **Precomputed Lookup Tables**: `AttackTables` + `ZobristKeys` dùng `OnceLock` singleton → tính 1 lần dùng mãi.
 8. **Distributed Move Validation**: Server yêu cầu cả 2 player validate → tăng bảo mật, giảm tải server.
+9. **Modular Server Architecture**: `game_manager` tách thành `lifecycle`, `matchmaking`, `move_handler`, `session` → dễ bảo trì.
+10. **Structured Logging**: Server dùng `tracing` với env-filter → debug hiệu quả, không ảnh hưởng performance.
+11. **Rate Limiting**: Server giới hạn 10 messages/giây/player → chống spam, bảo vệ server.
+12. **Separated Engine MoveGen**: `EngineMoveGen` tách riêng khỏi `MoveGenerator` logic → engine có move scoring, logic chỉ sinh nước hợp lệ.
