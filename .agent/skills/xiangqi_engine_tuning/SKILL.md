@@ -7,94 +7,69 @@ description: Guidelines for modifying the Xiangqi AI engine – search algorithm
 
 ## Scope
 
-This skill covers modifications to files in `cotuong_core/src/engine/`:
-- [search.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/search.rs) – AlphaBetaEngine (Negamax + pruning)
-- [eval.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/eval.rs) – SimpleEvaluator
-- [movegen.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/movegen.rs) – EngineMoveGen (engine-specific move generation with scoring)
-- [config.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/config.rs) – EngineConfig (tunable parameters)
-- [tt.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/tt.rs) – TranspositionTable
-- [move_list.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/move_list.rs) – Stack-allocated move storage
-- [zobrist.rs](file:///home/exblackhole/Desktop/GameCoTuong/cotuong_core/src/engine/zobrist.rs) – ZobristKeys (position hashing)
+This skill covers modifications to files in `cotuong_core/src/engine/` and its configuration UI:
+- `cotuong_core/src/engine/mod.rs` – Traits (`Evaluator`, `Searcher`) and structs (`Move`, `SearchLimit`, `SearchStats`)
+- `cotuong_core/src/engine/search.rs` – `AlphaBetaEngine` (Iterative Deepening Negamax + pruning)
+- `cotuong_core/src/engine/eval.rs` – `SimpleEvaluator` (material, PST, mobility, king safety, structure)
+- `cotuong_core/src/engine/movegen.rs` – `EngineMoveGen` (engine-specific move generation with scoring)
+- `cotuong_core/src/engine/config.rs` – `EngineConfig` (tunable parameters & JSON deserialization)
+- `cotuong_core/src/engine/tt.rs` – `TranspositionTable` (Zobrist hash table)
+- `cotuong_core/src/engine/move_list.rs` – `MoveList` (stack-allocated `[Move; 128]`)
+- `cotuong_core/src/engine/zobrist.rs` – `ZobristKeys` (XorShift64 position hashing)
+- `cotuong_core/src/wasm.rs` – `WasmEngine` wrapper exposing search and config updates to JS/WASM
+- `src/components/ConfigModal.tsx` & `src/types/game.ts` – Frontend UI for tuning Red/Black AI configs
 
 ## Architecture Context
 
 ### Search Pipeline
-1. `search()` → Iterative Deepening (depth 1 → `max_depth`)
-2. `alpha_beta()` → Negamax with α-β pruning
-   - TT probe → NMP → ProbCut → Singular Extension → LMR
-3. `quiescence()` → Captures only (horizon effect prevention)
-4. Move ordering: TT move → Captures (MVV-LVA) → Killers → History
+1. `search()` → Iterative Deepening (depth 1 → `max_depth`, with Aspiration Windows)
+2. `alpha_beta()` → Negamax with α-β pruning & PVS (Principal Variation Search)
+   - TT probe → Razoring → Futility Pruning → Null-Move Pruning (NMP) → ProbCut → Singular Extension → Late Move Reductions (LMR) / Dynamic Limiting
+3. `quiescence()` → Captures-only search to mitigate the horizon effect
+4. Move ordering: TT move → Captures (MVV-LVA) → Killer moves → Countermove → History heuristic
 
 ### Engine Move Generation (`movegen.rs`)
-- **`EngineMoveGen`**: Separate from `logic/generator.rs` `MoveGenerator`. Handles engine-specific move generation with scoring.
-- Uses `AttackTables` for move generation + `EngineConfig` for scoring weights.
-- **`MoveGenContext`**: Holds board state, move list, config, and history table reference during generation.
-- Methods: `generate_moves()` (all moves with scoring), `generate_captures()` (captures only for quiescence).
+- **`EngineMoveGen`**: Dedicated engine move generator with inline move scoring (separate from `logic/generator.rs`).
+- Uses `AttackTables` for fast bitboard/lookup generation + `EngineConfig` for scoring weights.
+- **`MoveGenContext`**: Holds board state, `MoveList`, config, killer moves, countermove, and history table reference during generation.
+- Methods: `generate_moves()` (all pseudo-legal/legal moves with scores), `generate_captures()` (captures only for quiescence).
 - Piece-specific generators: `gen_rook_moves`, `gen_cannon_moves`, `gen_horse_moves`, `gen_elephant_moves`, `gen_advisor_moves`, `gen_king_moves`, `gen_pawn_moves`.
-- `add_move()`: Assigns score based on TT move → MVV-LVA captures → Killer moves → History heuristic.
-- `get_piece_value()`: Returns configurable piece values for MVV-LVA scoring.
 
 ### Key Data Structures
-- `MoveList`: `[Move; 128]` on stack – **NEVER** use `Vec<Move>` in search loop
+- `MoveList`: `[Move; 128]` on stack – **NEVER** use `Vec<Move>` in the search loop
 - `TranspositionTable`: Power-of-2 hash table with `TTEntry { key, best_move, score, depth, flag }`
-- `AlphaBetaEngine` fields: `killer_moves`, `history_table`, `lmr_table`, `mate_scores`, `move_limits`
-- All precomputed tables are initialized in `new()` — use `precompute_*` methods
+- `AlphaBetaEngine` fields: `killer_moves`, `history_table`, `countermove_table`, `lmr_table`, `mate_scores`, `move_limits`
+- All precomputed tables are initialized in `new()` via `precompute_*` methods
 
-### Evaluation Components
-- Material counting (incremental via `Board.incremental_score`)
-- Piece-Square Tables (PST) defined in `eval_constants.rs`
-- Mobility (capped move counting for Rook, Horse, Cannon, Pawn)
-- King safety (cannon mount penalty, exposed king)
-- Structure bonus (connected advisors/elephants)
+### Evaluation Components (`eval.rs` & `eval_constants.rs`)
+- Base Material & Piece-Square Tables (PST): Updated incrementally in `Board.incremental_score`
+- Custom Piece Value Scaling: Applied dynamically when `EngineConfig` piece values differ from defaults
+- Mobility: Capped move counting for Chariot (Rook), Horse, Cannon, and Soldier (Pawn)
+- King Safety: Exposed general penalty, cannon threat with 0 or 1 screen (mount) along the general's file/rank
+- Defensive Structure: Bonus for connected Advisors and Elephants
+- Hanging Piece Penalty: Penalty for undefended attacked pieces
 
 ## Rules
 
 ### Performance (Critical)
-1. **Zero allocation in hot paths**: `alpha_beta()`, `quiescence()`, `generate_moves_internal()` must NEVER allocate heap memory.
-2. **Use `MoveList`** (stack-allocated `[Move; 128]`) instead of `Vec<Move>` for move generation inside the engine.
-3. **Incremental updates**: Board hash and scores are updated incrementally. Never call `calculate_initial_hash()` or `calculate_initial_score()` during search.
-4. **Check time sparingly**: `check_time()` uses `self.stats.nodes % 4096 == 0` to avoid syscall overhead.
-
-### Move Ordering Tuning
-- `add_move()` in `movegen.rs` assigns scores based on: TT move (hash_move score), MVV-LVA captures, killer moves, history heuristic
-- History table: `[[i32; 90]; 2]` indexed by `[color][to_index]`
-- Killer moves: 2 slots per ply `[[Option<Move>; 2]; 64]`
-- `EngineMoveGen` uses `EngineConfig` values for all scoring thresholds
-
-### Evaluation Tuning
-- All weights are in `EngineConfig` and `eval_constants.rs`
-- Piece values: Pawn=30, Advisor=120, Elephant=120, Horse=270, Cannon=285, Rook=600, King=6000
-- PST tables: `[[i32; 9]; 10]` for each piece type. Red-centric, flipped for Black via `9 - row`.
-- Config supports JSON loading via `load_from_json()` with scaling factors
+1. **Zero allocation in hot paths**: `alpha_beta()`, `quiescence()`, and `EngineMoveGen` must NEVER allocate heap memory.
+2. **Use `MoveList`** (stack-allocated `[Move; 128]`) instead of `Vec<Move>` inside the engine.
+3. **Incremental updates**: Board Zobrist hash and material+PST scores are updated incrementally in `Board::apply_move()` and `Board::undo_move()`. Never recompute from scratch during search.
+4. **Check time sparingly**: `check_time()` checks elapsed time every 4096 nodes (`self.stats.nodes & 4095 == 0`) to avoid timer call overhead.
 
 ### Testing & Verification
-1. Run `cargo test -p cotuong_core` after any engine change
-2. Check `bench_test.rs` for NPS (nodes-per-second) regression
-3. Check `mate_test.rs` for checkmate detection correctness
-4. Always verify: `cargo fmt && cargo check && cargo clippy`
+1. Run `cargo test -p cotuong_core` after any engine change (includes `mate_test` and `tests/mate_solving.rs`).
+2. Run `cargo test --release -p cotuong_core -- engine::bench_test --nocapture` to check NPS (nodes-per-second).
+3. Always verify both native and WASM targets:
+   - `cargo fmt --check`
+   - `cargo clippy --workspace --all-targets -- -D warnings`
+   - `cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings`
 
 ## Common Tasks
 
-### Adding a new pruning technique
-1. Add method to `AlphaBetaEngine` (e.g., `fn futility_pruning(...)`)
-2. Call it within `alpha_beta()` at the appropriate point in the search tree
-3. Add config parameters to `EngineConfig` if tunable
-4. Update `precompute_*` if precomputed data needed
-5. Test with mate positions to ensure no search instability
-
-### Modifying move ordering/scoring
-1. Edit `add_move()` in `movegen.rs` to change scoring logic
-2. Edit `generate_moves_internal()` for generation order changes
-3. Adjust `EngineConfig` scoring constants if needed
-4. Benchmark with `bench_test.rs` to verify NPS impact
-
-### Tuning piece values
-1. Modify constants in `eval_constants.rs` OR add config overrides in `EngineConfig`
-2. The `evaluate()` function in `SimpleEvaluator` uses incremental scores from `Board` for material+PST
-3. Non-incremental components (mobility, king safety) are computed fresh each call
-
-### Adding a new evaluation term
-1. Add weight constant to `eval_constants.rs`
-2. Implement computation in `SimpleEvaluator::evaluate()`
-3. Add config parameter to `EngineConfig` if tunable
-4. Ensure the computation is efficient (avoid heap allocation, complex iteration)
+### Adding a new tunable EngineConfig parameter
+1. Add the field and default value to `EngineConfig` in `cotuong_core/src/engine/config.rs`
+2. Wire the parameter into `AlphaBetaEngine` (`search.rs`), `SimpleEvaluator` (`eval.rs`), or `EngineMoveGen` (`movegen.rs`)
+3. Add the field to `EngineConfig` and `DEFAULT_ENGINE_CONFIG` in `src/types/game.ts`
+4. Add a `Slider` or selector control in `src/components/ConfigModal.tsx` if user-facing
+5. Rebuild WASM (`npm run build:wasm`) and run `./test_all.sh`

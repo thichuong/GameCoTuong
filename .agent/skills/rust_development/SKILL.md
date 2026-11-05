@@ -1,50 +1,48 @@
 ---
 name: rust_development
-description: Senior-level guidelines for high-performance Rust development (Xiangqi Engine), covering optimization, memory safety, and testing.
+description: Senior-level guidelines for high-performance Rust & WebAssembly development (Xiangqi Engine), covering optimization, memory safety, and testing.
 ---
 
 # Development Requirements & Skills
 
 ## 1. Code Quality & Idiomatic Rust
-- **Strict Linting**: Treat warnings as errors. Run `cargo clippy` frequently.
-    - *Constraint*: Resolve complexity lints (e.g., `too_many_lines`) by architectural refactoring, not by ignoring logic.
-    - Workspace-level lints deny: `warnings`, `clippy::all`, `clippy::pedantic`, `clippy::nursery`, `clippy::unwrap_used`, `clippy::expect_used`, `clippy::indexing_slicing`.
+- **Strict Linting**: Treat warnings as errors. Run `cargo clippy` for both native and `wasm32-unknown-unknown` targets.
+  - *Constraint*: Resolve complexity lints (e.g., `too_many_lines`) by architectural refactoring, not by ignoring logic.
+  - Workspace-level lints deny: `warnings`, `clippy::all`, `clippy::pedantic`, `clippy::nursery`, `clippy::unwrap_used`, `clippy::expect_used`, `clippy::indexing_slicing`.
 - **Formatting**: Use `cargo fmt` to maintain standard styling.
 - **Error Handling**:
-    - Avoid `.unwrap()` or `.expect()` in runtime logic (especially in `server` and `cotuong_core`). Use `Result` propagation or `Option` handling.
-    - *Exception*: Tests and static initialization constants allowed.
-    - Use `if let` / `match` / `?` operator for error handling. Prefer `if let` for single-case pattern matching.
-- **No unnecessary `.clone()` on `String`**: Use `&str` slices for function parameters. Use `String::with_capacity()` when building strings in loops.
+  - Never use `.unwrap()` or `.expect()` in production runtime logic (`cotuong_core/src/`). Use `Result` propagation or `Option` handling.
+  - *Exception*: Unit/integration tests (`#[cfg(test)]`, `tests/`) and static initialization constants.
+  - Across the WASM boundary (`cotuong_core/src/wasm.rs`), convert errors into `JsValue` via `.map_err(|e| JsValue::from_str(...))`.
+- **No unnecessary `.clone()` on `String`**: Use `&str` slices for function parameters.
 
 ## 2. Performance & Engine Optimization (Critical)
 - **Zero-Cost Abstractions**: Prefer iterators and closures that compile down to optimized loops over manual indexing where possible, unless benchmarking proves otherwise.
 - **Allocation-Free Hot Paths**:
-    - **Forbidden**: Do NOT perform heap allocations (e.g., `Vec::new`, `String::clone`) inside the `search` loop or `evaluate` function.
-    - **Alternative**: Use pre-allocated buffers, `Box<[T]>` created at startup, or stack-based arrays (e.g., `[Option<Move>; 64]`).
+  - **Forbidden**: Do NOT perform heap allocations (e.g., `Vec::new`, `String::clone`) inside `alpha_beta()`, `quiescence()`, `evaluate()`, or `EngineMoveGen`.
+  - **Alternative**: Use stack-allocated `MoveList` (`[Move; 128]`) and precomputed lookup tables (`OnceLock`).
 - **Inlining**: Use `#[inline]` for small, frequently called helper functions (e.g., bitboard operations, coordinate converters).
-- **Data Types**: Use generic integers (`u8`, `i16`) appropriate for the domain to save memory bandwidth. Use `usize` for array indexing.
+- **Data Types**: Use compact integers (`u8`, `i16`, `i32`, `u128` for bitboards) to minimize cache footprint.
 
-## 3. Safety & Unsafe Code
-- **Unsafe Guidelines**:
-    - Only use `unsafe` for proven performance bottlenecks (e.g., array access without bounds checking in `MoveGen`).
-    - *Requirement*: Every `unsafe` block MUST have a `// SAFETY:` comment explaining why the invariant holds.
-- **Panic Freedom**: The engine must never panic during a search. Verify array bounds explicitly if not using iterators.
-- **Nesting Limit**: Avoid deep nesting (max 2-3 levels of `if/else`). Extract complex logic into helper functions.
+## 3. Safety & Panic Freedom
+- **Panic Freedom**: The engine and WASM bindings must never panic during gameplay or search. Use safe indexing (`.get()`, `.get_mut()`) or iterators to comply with `clippy::indexing_slicing = "deny"`.
+- **Nesting Limit**: Avoid deep nesting (max 2–3 levels of `if/else`). Extract complex logic into helper functions.
 
 ## 4. Testing & Verification
-- **Unit Tests**: Focus on logic verification for `Board` rules and `Evaluator` scoring.
-- **Integration Tests**: Run `./test_all.sh` before submission.
-- **Benchmarking**: When modifying `search.rs`, `eval.rs`, or `movegen.rs`, verify that nodes-per-second (NPS) has not degraded.
-- **Mandatory Checks**: After any code change, always run:
-  1. `cargo fmt` – auto-format
-  2. `cargo check --workspace` – compilation check
-  3. `cargo clippy --workspace` – lint check
+- **Unit & Mate Tests**: Verify `Board` rules, repetition detection, `SimpleEvaluator` scoring, and checkmate solving (`cotuong_core/tests/mate_solving.rs`).
+- **Benchmarking**: When modifying `search.rs`, `eval.rs`, or `movegen.rs`, run `cargo test --release -p cotuong_core -- engine::bench_test --nocapture` to verify that nodes-per-second (NPS) has not degraded.
+- **Full Suite Verification**: Run `./test_all.sh` to execute:
+  1. `cargo fmt --check`
+  2. `cargo clippy --workspace --all-targets -- -D warnings`
+  3. `cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings`
+  4. `cargo test --workspace`
+  5. `npm run build` (`tsc && vite build`)
 
 ## 5. Context Optimization
-- **Ignored Paths**: Do not read `dist/`, `client/dist/`, `*.lock`, or binary assets to save context tokens.
+- **Ignored Paths**: Do not read `dist/`, `target/`, `cotuong_core/target_test/`, `node_modules/`, `*.lock`, or binary `.wasm` / `.mp3` assets to save context tokens.
 
 ## 6. Module Architecture Guidelines
-- **Server modules**: `game_manager/` split by responsibility: `lifecycle.rs`, `matchmaking.rs`, `move_handler.rs`, `session.rs`.
-- **Client modules**: `app/` split by UI concern: `game_app.rs`, `controls.rs`, `config.rs`, `export.rs`, `log.rs`, `online.rs`, `styles.rs`.
-- **Engine modules**: Separate logic (`logic/generator.rs`) from engine-specific (`engine/movegen.rs`) move generation.
-- When adding new functionality, place it in the appropriate existing module or create a new focused module rather than expanding existing large files.
+- **Core Logic (`cotuong_core/src/logic/`)**: Pure Xiangqi rules, board state, FEN parsing, opening book, and legal move generation (`MoveGenerator`).
+- **AI Engine (`cotuong_core/src/engine/`)**: Search (`AlphaBetaEngine`), evaluation (`SimpleEvaluator`), scored move generation (`EngineMoveGen`), transposition table (`tt.rs`), and Zobrist hashing (`zobrist.rs`).
+- **WASM Bridge (`cotuong_core/src/wasm.rs`)**: `#[wasm_bindgen]` wrappers (`WasmGameState`, `WasmEngine`) compiled to `src/wasm/` via `npm run build:wasm`.
+- **React Frontend (`src/`)**: Modular UI components (`src/components/`), Web Worker (`src/workers/ai.worker.ts`), utilities (`src/utils/`), and strong TypeScript interfaces (`src/types/game.ts`).
