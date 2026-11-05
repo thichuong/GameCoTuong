@@ -36,6 +36,10 @@ export class WasmGameState {
      */
     static from_fen(fen: string): WasmGameState;
     /**
+     * Load game state from JSON string, preserving full move history
+     */
+    static from_json(json_str: string): WasmGameState;
+    /**
      * Return all 90 board squares
      */
     get_board(): any;
@@ -76,6 +80,10 @@ export class WasmGameState {
      */
     to_fen(): string;
     /**
+     * Export entire game state to JSON string
+     */
+    to_json(): string;
+    /**
      * Current side to move ("red" or "black")
      */
     turn(): string;
@@ -96,6 +104,7 @@ export interface InitOutput {
     readonly wasmengine_update_config: (a: number, b: number, c: number) => [number, number];
     readonly wasmgamestate_annotate_last_move: (a: number, b: number, c: number) => void;
     readonly wasmgamestate_from_fen: (a: number, b: number) => [number, number, number];
+    readonly wasmgamestate_from_json: (a: number, b: number) => [number, number, number];
     readonly wasmgamestate_get_board: (a: number) => [number, number, number];
     readonly wasmgamestate_get_book_move: (a: number) => [number, number, number];
     readonly wasmgamestate_get_history: (a: number) => [number, number, number];
@@ -106,6 +115,7 @@ export interface InitOutput {
     readonly wasmgamestate_new: () => number;
     readonly wasmgamestate_status: (a: number) => [number, number, number];
     readonly wasmgamestate_to_fen: (a: number) => [number, number];
+    readonly wasmgamestate_to_json: (a: number) => [number, number, number, number];
     readonly wasmgamestate_turn: (a: number) => [number, number];
     readonly wasmgamestate_undo_move: (a: number) => number;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

@@ -296,6 +296,19 @@ impl WasmGameState {
     pub fn history_len(&self) -> usize {
         self.inner.history.len()
     }
+
+    /// Export entire game state to JSON string
+    pub fn to_json(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.inner)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
+    }
+
+    /// Load game state from JSON string, preserving full move history
+    pub fn from_json(json_str: &str) -> Result<WasmGameState, JsValue> {
+        let state: GameState = serde_json::from_str(json_str)
+            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {e}")))?;
+        Ok(Self { inner: state })
+    }
 }
 
 impl Default for WasmGameState {

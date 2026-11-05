@@ -791,8 +791,12 @@ impl Searcher for AlphaBetaEngine {
         let board = &mut board;
         let turn = game_state.turn;
 
-        // Initialize history stack
+        // Initialize history stack with initial board state and all historical moves
         self.history_stack.clear();
+        let initial_hash = Board::new().zobrist_hash;
+        if !game_state.history.is_empty() {
+            self.history_stack.push(initial_hash);
+        }
         for record in &game_state.history {
             self.history_stack.push(record.hash);
         }
@@ -854,7 +858,7 @@ impl Searcher for AlphaBetaEngine {
                     });
                 }
 
-                // Filter for legal moves immediately to handle single-move exception
+                // Filter for legal moves immediately to handle checks and flying generals
                 moves.retain(|mv| {
                     let captured = board.get_piece(unsafe {
                         BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
@@ -866,36 +870,46 @@ impl Searcher for AlphaBetaEngine {
                     legal
                 });
 
-                let is_single_move = moves.len() == 1;
+                // Filter out repetition moves at root so the engine never sees illegal repetition moves
+                if moves.len() > 1 {
+                    let non_repetition_moves: Vec<Move> = moves
+                        .iter()
+                        .filter(|mv| {
+                            let captured = board.get_piece(unsafe {
+                                BoardCoordinate::new_unchecked(
+                                    mv.to_row as usize,
+                                    mv.to_col as usize,
+                                )
+                            });
+                            board.apply_move(mv, turn);
+                            let next_hash = board.zobrist_hash;
+                            let rep_count = self
+                                .history_stack
+                                .iter()
+                                .filter(|&&h| h == next_hash)
+                                .count();
+                            board.undo_move(mv, captured, turn);
+                            rep_count < 2
+                        })
+                        .copied()
+                        .collect();
+
+                    if !non_repetition_moves.is_empty() {
+                        moves.retain(|mv| non_repetition_moves.contains(mv));
+                    }
+                }
 
                 if self.check_time() {
                     break;
                 }
 
                 let mut time_out = false;
-                let mut moves_searched = 0;
 
-                for mv in moves {
+                for (moves_searched, mv) in moves.into_iter().enumerate() {
                     let captured = board.get_piece(unsafe {
                         BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
                     });
                     board.apply_move(&mv, turn);
-
-                    if !is_single_move {
-                        // 3-Fold Repetition Check at Root
-                        // Check if this position has occurred 2 times before (so this is the 3rd)
-                        let mut rep_count = 0;
-                        for &h in &self.history_stack {
-                            if h == board.zobrist_hash {
-                                rep_count += 1;
-                            }
-                        }
-
-                        if rep_count >= 2 {
-                            board.undo_move(&mv, captured, turn);
-                            continue;
-                        }
-                    }
 
                     // Absolute Checkmate Detection at Root - REMOVED for performance
                     // Trust the search to find mates.
@@ -947,7 +961,6 @@ impl Searcher for AlphaBetaEngine {
                         time_out = true;
                         break;
                     }
-                    moves_searched += 1;
                 }
 
                 if time_out {

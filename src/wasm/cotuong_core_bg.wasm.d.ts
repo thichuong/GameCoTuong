@@ -8,6 +8,7 @@ export const wasmengine_search: (a: number, b: number, c: bigint, d: number) => 
 export const wasmengine_update_config: (a: number, b: number, c: number) => [number, number];
 export const wasmgamestate_annotate_last_move: (a: number, b: number, c: number) => void;
 export const wasmgamestate_from_fen: (a: number, b: number) => [number, number, number];
+export const wasmgamestate_from_json: (a: number, b: number) => [number, number, number];
 export const wasmgamestate_get_board: (a: number) => [number, number, number];
 export const wasmgamestate_get_book_move: (a: number) => [number, number, number];
 export const wasmgamestate_get_history: (a: number) => [number, number, number];
@@ -18,6 +19,7 @@ export const wasmgamestate_make_move: (a: number, b: number, c: number, d: numbe
 export const wasmgamestate_new: () => number;
 export const wasmgamestate_status: (a: number) => [number, number, number];
 export const wasmgamestate_to_fen: (a: number) => [number, number];
+export const wasmgamestate_to_json: (a: number) => [number, number, number, number];
 export const wasmgamestate_turn: (a: number) => [number, number];
 export const wasmgamestate_undo_move: (a: number) => number;
 export const __wbindgen_malloc: (a: number, b: number) => number;

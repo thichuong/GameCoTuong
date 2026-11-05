@@ -204,6 +204,7 @@ export const App: React.FC = () => {
     worker.addEventListener('message', handleWorkerMessage);
     worker.postMessage({
       type: 'SEARCH',
+      stateJson: state.to_json(),
       fen: state.to_fen(),
       timeLimitMs,
       configJson: JSON.stringify(config),

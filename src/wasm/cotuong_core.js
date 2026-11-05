@@ -103,6 +103,20 @@ export class WasmGameState {
         return WasmGameState.__wrap(ret[0]);
     }
     /**
+     * Load game state from JSON string, preserving full move history
+     * @param {string} json_str
+     * @returns {WasmGameState}
+     */
+    static from_json(json_str) {
+        const ptr0 = passStringToWasm0(json_str, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmgamestate_from_json(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return WasmGameState.__wrap(ret[0]);
+    }
+    /**
      * Return all 90 board squares
      * @returns {any}
      */
@@ -213,6 +227,28 @@ export class WasmGameState {
             return getStringFromWasm0(ret[0], ret[1]);
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Export entire game state to JSON string
+     * @returns {string}
+     */
+    to_json() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmgamestate_to_json(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
     }
     /**

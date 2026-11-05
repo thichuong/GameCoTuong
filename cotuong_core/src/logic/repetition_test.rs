@@ -79,3 +79,64 @@ fn test_engine_excludes_moves() {
             || next_best.to_col != best_move.to_col
     );
 }
+
+#[test]
+fn test_engine_filters_repetition_move_at_root() {
+    use crate::engine::config::EngineConfig;
+    use crate::engine::search::AlphaBetaEngine;
+    use crate::engine::{SearchLimit, Searcher};
+    use std::sync::Arc;
+
+    let mut game = GameState::new();
+    let m = |r, c| BoardCoordinate::new(r, c).unwrap();
+
+    // 0. Start: Hash A (Count 1)
+    // 1. Red (0,0) -> (1,0)
+    assert!(game.make_move(m(0, 0), m(1, 0)).is_ok());
+    // 2. Black (9,0) -> (8,0)
+    assert!(game.make_move(m(9, 0), m(8, 0)).is_ok());
+    // 3. Red (1,0) -> (0,0)
+    assert!(game.make_move(m(1, 0), m(0, 0)).is_ok());
+    // 4. Black (8,0) -> (9,0) - Hash A (Count 2)
+    assert!(game.make_move(m(8, 0), m(9, 0)).is_ok());
+    // 5. Red (0,0) -> (1,0)
+    assert!(game.make_move(m(0, 0), m(1, 0)).is_ok());
+    // 6. Black (9,0) -> (8,0)
+    assert!(game.make_move(m(9, 0), m(8, 0)).is_ok());
+    // 7. Red (1,0) -> (0,0)
+    assert!(game.make_move(m(1, 0), m(0, 0)).is_ok());
+
+    // Now it's Black's turn. Moving (8,0) -> (9,0) would repeat Hash A for the 3rd time.
+    let config = Arc::new(EngineConfig::default());
+    let mut engine = AlphaBetaEngine::new(config);
+
+    let (best_move, _) = engine.search(&game, SearchLimit::Depth(2), &[]).unwrap();
+
+    // Verify engine did NOT choose the illegal repetition move (8,0) -> (9,0)
+    let is_repetition_move = best_move.from_row == 8
+        && best_move.from_col == 0
+        && best_move.to_row == 9
+        && best_move.to_col == 0;
+
+    assert!(
+        !is_repetition_move,
+        "Engine must filter out 3-fold repetition move at root"
+    );
+
+    // Verify making the best move chosen by AI succeeds without repetition error
+    let from =
+        BoardCoordinate::new(best_move.from_row as usize, best_move.from_col as usize).unwrap();
+    let to = BoardCoordinate::new(best_move.to_row as usize, best_move.to_col as usize).unwrap();
+    assert!(game.make_move(from, to).is_ok());
+
+    // Verify GameState JSON serialization preserves move history and hashes
+    let json = serde_json::to_string(&game).unwrap();
+    let restored: GameState = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.history.len(), game.history.len());
+    assert_eq!(restored.board.zobrist_hash, game.board.zobrist_hash);
+    for (orig, rest) in game.history.iter().zip(restored.history.iter()) {
+        assert_eq!(orig.hash, rest.hash);
+        assert_eq!(orig.from, rest.from);
+        assert_eq!(orig.to, rest.to);
+    }
+}
