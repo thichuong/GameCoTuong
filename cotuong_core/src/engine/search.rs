@@ -45,6 +45,19 @@ impl AlphaBetaEngine {
         }
     }
 
+    pub fn with_weights(
+        config: Arc<EngineConfig>,
+        weights: Arc<crate::engine::nnue::NnueWeights>,
+    ) -> Self {
+        let mut engine = Self::new(config.clone());
+        engine.evaluator = SimpleEvaluator::with_weights(config, weights);
+        engine
+    }
+
+    pub fn set_eval_weights(&mut self, weights: Option<Arc<crate::engine::nnue::NnueWeights>>) {
+        self.evaluator.set_weights(weights);
+    }
+
     pub fn update_config(&mut self, config: Arc<EngineConfig>) {
         if config.tt_size_mb != self.config.tt_size_mb {
             self.tt = TranspositionTable::new(config.tt_size_mb);

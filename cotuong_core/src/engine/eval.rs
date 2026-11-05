@@ -1,4 +1,5 @@
 use crate::engine::config::EngineConfig;
+use crate::engine::nnue::{evaluate_nnue_with_weights, NnueWeights};
 use crate::engine::Evaluator;
 use crate::logic::board::Board;
 use std::sync::Arc;
@@ -6,11 +7,26 @@ use std::sync::Arc;
 pub struct SimpleEvaluator {
     #[allow(dead_code)]
     config: Arc<EngineConfig>,
+    weights: Option<Arc<NnueWeights>>,
 }
 
 impl SimpleEvaluator {
     pub const fn new(config: Arc<EngineConfig>) -> Self {
-        Self { config }
+        Self {
+            config,
+            weights: None,
+        }
+    }
+
+    pub fn with_weights(config: Arc<EngineConfig>, weights: Arc<NnueWeights>) -> Self {
+        Self {
+            config,
+            weights: Some(weights),
+        }
+    }
+
+    pub fn set_weights(&mut self, weights: Option<Arc<NnueWeights>>) {
+        self.weights = weights;
     }
 
     #[must_use]
@@ -285,13 +301,19 @@ impl Evaluator for SimpleEvaluator {
         let mode = self.config.eval_mode;
         if mode == 0 {
             self.evaluate_handcrafted(board)
-        } else if mode == 2 {
-            crate::engine::nnue::evaluate_nnue(board)
         } else {
-            let hc = self.evaluate_handcrafted(board);
-            let nn = crate::engine::nnue::evaluate_nnue(board);
-            let w = self.config.nnue_weight.clamp(0, 100);
-            ((100 - w) * hc + w * nn) / 100
+            let nnue_weights = self
+                .weights
+                .as_deref()
+                .unwrap_or_else(|| NnueWeights::get());
+            let nn = evaluate_nnue_with_weights(board, nnue_weights);
+            if mode == 2 {
+                nn
+            } else {
+                let hc = self.evaluate_handcrafted(board);
+                let w = self.config.nnue_weight.clamp(0, 100);
+                ((100 - w) * hc + w * nn) / 100
+            }
         }
     }
 }

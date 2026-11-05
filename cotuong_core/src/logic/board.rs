@@ -485,10 +485,14 @@ impl Board {
             return;
         };
 
+        let weights = NnueWeights::get();
+        let k_red = crate::engine::nnue::get_red_king_palace_idx(self);
+        let k_black = crate::engine::nnue::get_black_king_palace_idx(self);
+        let is_general = piece.piece_type == PieceType::General;
+
         // Remove from source
         self.remove_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
-        self.remove_piece_nnue(piece, from.index());
 
         // Update Score (Remove from source)
         let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
@@ -503,7 +507,8 @@ impl Board {
             self.remove_piece(to, captured.piece_type, captured.color);
             self.zobrist_hash ^=
                 keys.get_piece_key(captured.piece_type, captured.color, to_row, to_col);
-            self.remove_piece_nnue(captured, to.index());
+            self.nnue_acc
+                .remove_piece(captured, to.index(), k_red, k_black, weights);
 
             // Update Score (Remove captured)
             let cap_val = get_piece_value(captured.piece_type);
@@ -521,7 +526,32 @@ impl Board {
         // 3. Place piece at destination
         self.add_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
-        self.add_piece_nnue(piece, to.index());
+
+        // Update NNUE accumulator
+        if is_general {
+            if piece.color == Color::Red {
+                let new_k_red = crate::engine::nnue::palace_index(to.index());
+                self.nnue_acc.refresh_red(&self.grid, new_k_red, weights);
+                self.nnue_acc
+                    .remove_piece(piece, from.index(), k_red, k_black, weights);
+                self.nnue_acc
+                    .add_piece(piece, to.index(), k_red, k_black, weights);
+            } else {
+                let flipped_to = 89_usize.saturating_sub(to.index());
+                let new_k_black = crate::engine::nnue::palace_index(flipped_to);
+                self.nnue_acc
+                    .refresh_black(&self.grid, new_k_black, weights);
+                self.nnue_acc
+                    .remove_piece(piece, from.index(), k_red, k_black, weights);
+                self.nnue_acc
+                    .add_piece(piece, to.index(), k_red, k_black, weights);
+            }
+        } else {
+            self.nnue_acc
+                .remove_piece(piece, from.index(), k_red, k_black, weights);
+            self.nnue_acc
+                .add_piece(piece, to.index(), k_red, k_black, weights);
+        }
 
         // Update Score (Add to dest)
         let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
@@ -563,10 +593,14 @@ impl Board {
             return;
         };
 
+        let weights = NnueWeights::get();
+        let k_red = crate::engine::nnue::get_red_king_palace_idx(self);
+        let k_black = crate::engine::nnue::get_black_king_palace_idx(self);
+        let is_general = piece.piece_type == PieceType::General;
+
         // Remove from destination
         self.remove_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
-        self.remove_piece_nnue(piece, to.index());
 
         // Update Score (Remove from dest)
         let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
@@ -579,7 +613,6 @@ impl Board {
         // Place back at source
         self.add_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
-        self.add_piece_nnue(piece, from.index());
 
         // Update Score (Add to source)
         let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
@@ -593,7 +626,6 @@ impl Board {
         if let Some(cap) = captured {
             self.add_piece(to, cap.piece_type, cap.color);
             self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
-            self.add_piece_nnue(cap, to.index());
 
             // Update Score (Restore captured)
             let cap_val = get_piece_value(cap.piece_type);
@@ -607,24 +639,53 @@ impl Board {
                 self.black_pst += cap_pst;
             }
         }
+
+        // 1. Update NNUE accumulator
+        if is_general {
+            if piece.color == Color::Red {
+                let new_k_red = crate::engine::nnue::palace_index(from.index());
+                self.nnue_acc.refresh_red(&self.grid, new_k_red, weights);
+                self.nnue_acc
+                    .remove_piece(piece, to.index(), new_k_red, k_black, weights);
+                self.nnue_acc
+                    .add_piece(piece, from.index(), new_k_red, k_black, weights);
+                if let Some(cap) = captured {
+                    self.nnue_acc
+                        .add_piece(cap, to.index(), new_k_red, k_black, weights);
+                }
+            } else {
+                let flipped_from = 89_usize.saturating_sub(from.index());
+                let new_k_black = crate::engine::nnue::palace_index(flipped_from);
+                self.nnue_acc
+                    .refresh_black(&self.grid, new_k_black, weights);
+                self.nnue_acc
+                    .remove_piece(piece, to.index(), k_red, new_k_black, weights);
+                self.nnue_acc
+                    .add_piece(piece, from.index(), k_red, new_k_black, weights);
+                if let Some(cap) = captured {
+                    self.nnue_acc
+                        .add_piece(cap, to.index(), k_red, new_k_black, weights);
+                }
+            }
+        } else {
+            self.nnue_acc
+                .remove_piece(piece, to.index(), k_red, k_black, weights);
+            self.nnue_acc
+                .add_piece(piece, from.index(), k_red, k_black, weights);
+            if let Some(cap) = captured {
+                self.nnue_acc
+                    .add_piece(cap, to.index(), k_red, k_black, weights);
+            }
+        }
     }
 
     #[inline]
     pub fn refresh_nnue(&mut self) {
         let weights = NnueWeights::get();
-        self.nnue_acc.refresh(&self.grid, weights);
-    }
-
-    #[inline]
-    pub fn add_piece_nnue(&mut self, piece: Piece, sq: usize) {
-        let weights = NnueWeights::get();
-        self.nnue_acc.add_piece(piece, sq, weights);
-    }
-
-    #[inline]
-    pub fn remove_piece_nnue(&mut self, piece: Piece, sq: usize) {
-        let weights = NnueWeights::get();
-        self.nnue_acc.remove_piece(piece, sq, weights);
+        let k_red = crate::engine::nnue::get_red_king_palace_idx(self);
+        let k_black = crate::engine::nnue::get_black_king_palace_idx(self);
+        self.nnue_acc.refresh_red(&self.grid, k_red, weights);
+        self.nnue_acc.refresh_black(&self.grid, k_black, weights);
     }
 }
 
