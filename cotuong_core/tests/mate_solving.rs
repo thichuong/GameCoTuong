@@ -17,8 +17,10 @@ fn game_from_fen(fen: &str) -> GameState {
 }
 
 pub fn solve_mate(fen: &str, mate_d: u8, name: &str) {
-    let mut config = EngineConfig::default();
-    config.mate_score = 30000;
+    let config = EngineConfig {
+        mate_score: 30000,
+        ..Default::default()
+    };
 
     // Create game state
     let game_state = game_from_fen(fen);
@@ -74,8 +76,10 @@ fn test_mate_in_one_pawn_move() {
 
     let fen = "4k4/9/2N1P1N2/9/9/9/9/9/9/4K4 w - - 0 1";
     let game_state = game_from_fen(fen);
-    let mut config = EngineConfig::default();
-    config.mate_score = 30000;
+    let config = EngineConfig {
+        mate_score: 30000,
+        ..Default::default()
+    };
     let mut engine = AlphaBetaEngine::new(Arc::new(config));
 
     // Mate in 1 should be found at depth 2

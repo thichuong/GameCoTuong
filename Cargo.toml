@@ -2,9 +2,6 @@
 resolver = "2"
 members = [
     "cotuong_core",
-    "client",
-    "server",
-    "shared",
 ]
 
 [workspace.lints.rust]

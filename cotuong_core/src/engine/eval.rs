@@ -288,8 +288,10 @@ mod tests {
 
     #[test]
     fn test_king_exposed_penalty() {
-        let mut config = EngineConfig::default();
-        config.king_exposed_cannon_penalty = 100; // Use a large penalty for clarity
+        let config = EngineConfig {
+            king_exposed_cannon_penalty: 100, // Use a large penalty for clarity
+            ..Default::default()
+        };
         let evaluator = SimpleEvaluator::new(Arc::new(config));
 
         // 1. Setup Red King exposed to Black Cannon (1 piece between) - Check

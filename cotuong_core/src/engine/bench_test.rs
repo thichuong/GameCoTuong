@@ -109,8 +109,10 @@ mod tests {
     #[test]
     fn bench_dynamic_limiting() {
         println!("--- Benchmarking Dynamic Limiting (Method 0) ---");
-        let mut config = EngineConfig::default();
-        config.pruning_method = 0; // Dynamic Limiting
+        let config = EngineConfig {
+            pruning_method: 0, // Dynamic Limiting
+            ..Default::default()
+        };
         let config = Arc::new(config);
         let mut engine = AlphaBetaEngine::new(config);
 
@@ -141,8 +143,10 @@ mod tests {
     #[test]
     fn bench_aggressive() {
         println!("--- Benchmarking Aggressive Pruning (Method 2) ---");
-        let mut config = EngineConfig::default();
-        config.pruning_method = 2; // Both (Aggressive)
+        let config = EngineConfig {
+            pruning_method: 2, // Both (Aggressive)
+            ..Default::default()
+        };
         let config = Arc::new(config);
         let mut engine = AlphaBetaEngine::new(config);
 
@@ -173,8 +177,10 @@ mod tests {
     #[test]
     fn bench_lmr() {
         println!("--- Benchmarking LMR (Method 1) ---");
-        let mut config = EngineConfig::default();
-        config.pruning_method = 1; // LMR
+        let config = EngineConfig {
+            pruning_method: 1, // LMR
+            ..Default::default()
+        };
         let config = Arc::new(config);
         let mut engine = AlphaBetaEngine::new(config);
 

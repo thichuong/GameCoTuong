@@ -598,6 +598,30 @@ impl Board {
     }
 }
 
+pub struct BitboardIterator {
+    bb: u128,
+}
+
+impl BitboardIterator {
+    pub const fn new(bb: u128) -> Self {
+        Self { bb }
+    }
+}
+
+impl Iterator for BitboardIterator {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.bb == 0 {
+            None
+        } else {
+            let lsb = self.bb.trailing_zeros() as usize;
+            self.bb &= self.bb - 1;
+            Some(lsb)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,29 +676,5 @@ mod tests {
             .unwrap();
         assert_eq!(piece.piece_type, PieceType::Soldier);
         assert_eq!(piece.color, Color::Red);
-    }
-}
-
-pub struct BitboardIterator {
-    bb: u128,
-}
-
-impl BitboardIterator {
-    pub const fn new(bb: u128) -> Self {
-        Self { bb }
-    }
-}
-
-impl Iterator for BitboardIterator {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.bb == 0 {
-            None
-        } else {
-            let lsb = self.bb.trailing_zeros() as usize;
-            self.bb &= self.bb - 1;
-            Some(lsb)
-        }
     }
 }
