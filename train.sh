@@ -51,6 +51,7 @@ fi
 
 # Giá trị mặc định
 OUTPUT="cotuong_core/assets/default.nnue"
+mkdir -p checkpoints engines
 
 echo "================================================================================"
 echo " 🧠 Bắt đầu Huấn Luyện AI Cờ Tướng (NNUE HalfKP Master Dataset & External Engine)"

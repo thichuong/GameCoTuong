@@ -21,3 +21,12 @@ Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+
+# External Xiangqi Engines (Pikafish, Fairy-Stockfish, Eleeye, etc.)
+/engines/
+engines/*
+
+# Training Checkpoints (Intermediate NNUE checkpoints per epoch)
+/checkpoints/
+checkpoints/*
+

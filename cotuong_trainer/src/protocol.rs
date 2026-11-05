@@ -1,31 +1,63 @@
 use cotuong_core::engine::Move;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EngineProtocol {
     #[default]
-    Ucci,
     Uci,
+    Ucci,
 }
 
 pub struct ExternalEngineClient {
     child: Child,
     stdin: ChildStdin,
-    reader: BufReader<ChildStdout>,
+    rx: Receiver<String>,
     protocol: EngineProtocol,
 }
 
 impl ExternalEngineClient {
     /// Launches an external engine process and performs the initial protocol handshake.
     pub fn spawn(engine_path: &str, protocol: EngineProtocol) -> Result<Self, String> {
-        let mut child = Command::new(engine_path)
+        let raw_path = std::path::Path::new(engine_path);
+        let abs_path = if raw_path.is_absolute() {
+            raw_path.to_path_buf()
+        } else if let Ok(canon) = std::fs::canonicalize(raw_path) {
+            canon
+        } else if let Ok(cwd) = std::env::current_dir() {
+            cwd.join(raw_path)
+        } else {
+            raw_path.to_path_buf()
+        };
+
+        if !abs_path.exists() {
+            return Err(format!(
+                "Engine executable not found at '{}' (resolved to '{}')",
+                engine_path,
+                abs_path.display()
+            ));
+        }
+
+        let mut cmd = Command::new(&abs_path);
+        if let Some(parent) = abs_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                cmd.current_dir(parent);
+            }
+        }
+
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("Failed to start engine process '{engine_path}': {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to start engine process '{engine_path}' (at '{}'): {e}",
+                    abs_path.display()
+                )
+            })?;
 
         let stdin = child
             .stdin
@@ -35,12 +67,26 @@ impl ExternalEngineClient {
             .stdout
             .take()
             .ok_or_else(|| "Failed to capture stdout of engine process".to_string())?;
-        let reader = BufReader::new(stdout);
+
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line_res in reader.lines() {
+                match line_res {
+                    Ok(l) => {
+                        if tx.send(l).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
 
         let mut client = Self {
             child,
             stdin,
-            reader,
+            rx,
             protocol,
         };
 
@@ -48,14 +94,26 @@ impl ExternalEngineClient {
         Ok(client)
     }
 
-    /// Performs the handshake according to protocol (UCCI or UCI).
+    /// Performs the handshake according to protocol (UCCI or UCI) with non-blocking fallback.
     fn handshake(&mut self) -> Result<(), String> {
         match self.protocol {
             EngineProtocol::Ucci => {
                 self.send_line("ucci")?;
-                self.wait_for_token("ucciok", Duration::from_secs(5))?;
-                self.send_line("isready")?;
-                self.wait_for_token("readyok", Duration::from_secs(5))?;
+                match self.wait_for_token("ucciok", Duration::from_secs(2)) {
+                    Ok(_) => {
+                        self.send_line("isready")?;
+                        self.wait_for_token("readyok", Duration::from_secs(5))?;
+                    }
+                    Err(_) => {
+                        // Fallback automatically to UCI protocol if engine does not support UCCI
+                        self.protocol = EngineProtocol::Uci;
+                        self.send_line("uci")?;
+                        self.wait_for_token("uciok", Duration::from_secs(5))?;
+                        let _ = self.send_line("setoption name UCI_Variant value xiangqi");
+                        self.send_line("isready")?;
+                        self.wait_for_token("readyok", Duration::from_secs(5))?;
+                    }
+                }
             }
             EngineProtocol::Uci => {
                 self.send_line("uci")?;
@@ -78,29 +136,33 @@ impl ExternalEngineClient {
             .map_err(|e| format!("Failed to flush engine stdin: {e}"))
     }
 
-    /// Reads output lines until finding a line that contains the specified token or matches prefix.
+    /// Reads output lines non-blockingly until finding a token or timeout.
     fn wait_for_token(&mut self, token: &str, timeout: Duration) -> Result<String, String> {
         let start = Instant::now();
-        let mut line = String::new();
 
         loop {
-            if start.elapsed() > timeout {
+            let elapsed = start.elapsed();
+            if elapsed > timeout {
                 return Err(format!("Timeout waiting for engine token: '{token}'"));
             }
+            let remaining = timeout - elapsed;
 
-            line.clear();
-            let bytes_read = self
-                .reader
-                .read_line(&mut line)
-                .map_err(|e| format!("Error reading from engine: {e}"))?;
-
-            if bytes_read == 0 {
-                return Err("Engine process closed its stdout unexpectedly".to_string());
-            }
-
-            let trimmed = line.trim();
-            if trimmed.contains(token) || trimmed.starts_with(token) {
-                return Ok(trimmed.to_string());
+            match self.rx.recv_timeout(remaining) {
+                Ok(line) => {
+                    let trimmed = line.trim();
+                    if trimmed.contains(token) || trimmed.starts_with(token) {
+                        return Ok(trimmed.to_string());
+                    }
+                    if trimmed.contains("Unknown command") {
+                        return Err(format!("Unknown command error: {trimmed}"));
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    return Err(format!("Timeout waiting for engine token: '{token}'"));
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err("Engine process closed its stdout unexpectedly".to_string());
+                }
             }
         }
     }
@@ -117,60 +179,61 @@ impl ExternalEngineClient {
         self.send_line(&format!("go depth {depth}"))?;
 
         let start = Instant::now();
-        let mut line = String::new();
         let mut last_eval_cp = 0.0f32;
         let mut best_move: Option<Move> = None;
 
         loop {
-            if start.elapsed() > timeout {
+            let elapsed = start.elapsed();
+            if elapsed > timeout {
                 let _ = self.send_line("stop");
                 break;
             }
+            let remaining = timeout - elapsed;
 
-            line.clear();
-            let bytes = self
-                .reader
-                .read_line(&mut line)
-                .map_err(|e| format!("Error reading engine eval output: {e}"))?;
+            match self.rx.recv_timeout(remaining) {
+                Ok(line) => {
+                    let trimmed = line.trim();
 
-            if bytes == 0 {
-                break;
-            }
-
-            let trimmed = line.trim();
-
-            // Parse score from info line: e.g. "info depth 8 score cp 45 ..." or "score 45"
-            if trimmed.starts_with("info") {
-                if let Some(cp_idx) = trimmed.find("score cp ") {
-                    let sub = &trimmed[cp_idx + 9..];
-                    if let Some(val_str) = sub.split_whitespace().next() {
-                        if let Ok(val) = val_str.parse::<f32>() {
-                            last_eval_cp = val;
+                    if trimmed.starts_with("info") {
+                        if let Some(cp_idx) = trimmed.find("score cp ") {
+                            let sub = &trimmed[cp_idx + 9..];
+                            if let Some(val_str) = sub.split_whitespace().next() {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    last_eval_cp = val;
+                                }
+                            }
+                        } else if let Some(score_idx) = trimmed.find("score ") {
+                            let sub = &trimmed[score_idx + 6..];
+                            if let Some(val_str) = sub.split_whitespace().next() {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    last_eval_cp = val;
+                                }
+                            }
+                        } else if let Some(mate_idx) = trimmed.find("score mate ") {
+                            let sub = &trimmed[mate_idx + 11..];
+                            if let Some(val_str) = sub.split_whitespace().next() {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    last_eval_cp = if val > 0.0 { 10000.0 } else { -10000.0 };
+                                }
+                            }
                         }
                     }
-                } else if let Some(score_idx) = trimmed.find("score ") {
-                    let sub = &trimmed[score_idx + 6..];
-                    if let Some(val_str) = sub.split_whitespace().next() {
-                        if let Ok(val) = val_str.parse::<f32>() {
-                            last_eval_cp = val;
+
+                    if trimmed.starts_with("bestmove") {
+                        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                        if parts.len() >= 2 && parts[1] != "nobestmove" && parts[1] != "(none)" {
+                            best_move = Move::from_uci(parts[1]).ok();
                         }
-                    }
-                } else if let Some(mate_idx) = trimmed.find("score mate ") {
-                    let sub = &trimmed[mate_idx + 11..];
-                    if let Some(val_str) = sub.split_whitespace().next() {
-                        if let Ok(val) = val_str.parse::<f32>() {
-                            last_eval_cp = if val > 0.0 { 10000.0 } else { -10000.0 };
-                        }
+                        break;
                     }
                 }
-            }
-
-            if trimmed.starts_with("bestmove") {
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                if parts.len() >= 2 && parts[1] != "nobestmove" && parts[1] != "(none)" {
-                    best_move = Move::from_uci(parts[1]).ok();
+                Err(RecvTimeoutError::Timeout) => {
+                    let _ = self.send_line("stop");
+                    break;
                 }
-                break;
+                Err(RecvTimeoutError::Disconnected) => {
+                    break;
+                }
             }
         }
 
@@ -197,31 +260,33 @@ impl ExternalEngineClient {
         self.send_line(&format!("go depth {depth}"))?;
 
         let start = Instant::now();
-        let mut line = String::new();
 
         loop {
-            if start.elapsed() > timeout {
+            let elapsed = start.elapsed();
+            if elapsed > timeout {
                 let _ = self.send_line("stop");
                 return Ok(None);
             }
+            let remaining = timeout - elapsed;
 
-            line.clear();
-            let bytes = self
-                .reader
-                .read_line(&mut line)
-                .map_err(|e| format!("Error reading bestmove from engine: {e}"))?;
-
-            if bytes == 0 {
-                return Ok(None);
-            }
-
-            let trimmed = line.trim();
-            if trimmed.starts_with("bestmove") {
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                if parts.len() >= 2 && parts[1] != "nobestmove" && parts[1] != "(none)" {
-                    return Ok(Move::from_uci(parts[1]).ok());
+            match self.rx.recv_timeout(remaining) {
+                Ok(line) => {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("bestmove") {
+                        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                        if parts.len() >= 2 && parts[1] != "nobestmove" && parts[1] != "(none)" {
+                            return Ok(Move::from_uci(parts[1]).ok());
+                        }
+                        return Ok(None);
+                    }
                 }
-                return Ok(None);
+                Err(RecvTimeoutError::Timeout) => {
+                    let _ = self.send_line("stop");
+                    return Ok(None);
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Ok(None);
+                }
             }
         }
     }

@@ -650,6 +650,7 @@ fn run_dataset_training(
     dataset_path: &str,
     epochs: usize,
     output_path: &str,
+    checkpoint_dir: Option<&str>,
     lr: f32,
     eval_games: usize,
 ) {
@@ -753,6 +754,14 @@ fn run_dataset_training(
             } else {
                 println!("    💾 Đã xuất trọng số mới sang: {output_path}");
             }
+
+            if let Some(cp_dir) = checkpoint_dir {
+                let _ = std::fs::create_dir_all(cp_dir);
+                let cp_path = format!("{cp_dir}/dataset_epoch_{epoch}.nnue");
+                if champion_model.export_quantized(&cp_path).is_ok() {
+                    println!("    📁 Đã lưu checkpoint: {cp_path}");
+                }
+            }
         } else {
             println!(
                 "    🛡️ [GIỮ NGUYÊN CHAMPION] Candidate ({:.1}%) chưa vượt qua ({:.0}%). Giữ lại mô hình cũ.",
@@ -764,6 +773,7 @@ fn run_dataset_training(
 }
 
 /// Runs Teacher Distillation: Uses external engine (Pikafish / Fairy-Stockfish) to label positions.
+#[allow(clippy::too_many_arguments)]
 fn run_teacher_distillation(
     engine_path: &str,
     protocol: EngineProtocol,
@@ -771,6 +781,7 @@ fn run_teacher_distillation(
     depth: u8,
     epochs: usize,
     output_path: &str,
+    checkpoint_dir: Option<&str>,
     lr: f32,
 ) {
     println!("\n▶ Khởi động Engine Sư Phụ ({engine_path:?}, protocol: {protocol:?}) ...");
@@ -828,6 +839,14 @@ fn run_teacher_distillation(
             "  • Epoch {epoch}/{epochs}: Sai số với Engine sư phụ (MAE) = {:.4}",
             avg_loss
         );
+
+        if let Some(cp_dir) = checkpoint_dir {
+            let _ = std::fs::create_dir_all(cp_dir);
+            let cp_path = format!("{cp_dir}/teacher_epoch_{epoch}.nnue");
+            if model.export_quantized(&cp_path).is_ok() {
+                println!("    📁 Đã lưu checkpoint: {cp_path}");
+            }
+        }
     }
 
     if let Err(e) = model.export_quantized(output_path) {
@@ -947,6 +966,7 @@ fn run_selfplay_training(
     epochs: usize,
     eval_games: usize,
     output_path: &str,
+    checkpoint_dir: Option<&str>,
     lr: f32,
 ) {
     let overall_start = Instant::now();
@@ -1059,6 +1079,14 @@ fn run_selfplay_training(
             } else {
                 println!("    💾 Đã xuất trọng số mới sang: {output_path}");
             }
+
+            if let Some(cp_dir) = checkpoint_dir {
+                let _ = std::fs::create_dir_all(cp_dir);
+                let cp_path = format!("{cp_dir}/selfplay_epoch_{epoch}.nnue");
+                if champion_model.export_quantized(&cp_path).is_ok() {
+                    println!("    📁 Đã lưu checkpoint: {cp_path}");
+                }
+            }
         } else {
             println!(
                 "    🛡️ [GIỮ NGUYÊN CHAMPION] Candidate chưa đạt ngưỡng ({:.1}% < {:.0}%). Giữ lại mô hình vô địch.",
@@ -1110,13 +1138,13 @@ fn main() {
         .position(|a| a == "--engine-proto" || a == "--proto")
         .and_then(|idx| args.get(idx + 1))
         .map(|s| {
-            if s.to_lowercase() == "uci" {
-                EngineProtocol::Uci
-            } else {
+            if s.to_lowercase() == "ucci" {
                 EngineProtocol::Ucci
+            } else {
+                EngineProtocol::Uci
             }
         })
-        .unwrap_or(EngineProtocol::Ucci);
+        .unwrap_or(EngineProtocol::Uci);
 
     let engine_depth = args
         .iter()
@@ -1159,6 +1187,13 @@ fn main() {
         .and_then(|idx| args.get(idx + 1))
         .map_or("cotuong_core/assets/default.nnue", |s| s.as_str());
 
+    let checkpoint_dir = args
+        .iter()
+        .position(|a| a == "--checkpoint-dir" || a == "--checkpoints")
+        .and_then(|idx| args.get(idx + 1))
+        .map(String::as_str)
+        .or(Some("checkpoints"));
+
     println!("================================================================================");
     println!(" 🧠 Xiangqi AI Trainer (Master Dataset & External UCCI/UCI Engine Integration)  ");
     println!("================================================================================");
@@ -1167,6 +1202,9 @@ fn main() {
     println!("  • Số Epochs                : {epochs}");
     println!("  • Tốc độ học (LR)          : {lr}");
     println!("  • Đường dẫn trọng số đích : {output_path}");
+    if let Some(cp) = checkpoint_dir {
+        println!("  • Thư mục Checkpoint       : {cp}");
+    }
 
     match mode.as_str() {
         "dataset" | "sl" => {
@@ -1175,7 +1213,14 @@ fn main() {
             println!(
                 "================================================================================"
             );
-            run_dataset_training(dataset_path, epochs, output_path, lr, eval_games);
+            run_dataset_training(
+                dataset_path,
+                epochs,
+                output_path,
+                checkpoint_dir,
+                lr,
+                eval_games,
+            );
         }
         "teacher" | "distill" => {
             let engine = engine_path.unwrap_or("pikafish");
@@ -1192,6 +1237,7 @@ fn main() {
                 engine_depth,
                 epochs,
                 output_path,
+                checkpoint_dir,
                 lr,
             );
         }
@@ -1211,7 +1257,14 @@ fn main() {
             println!(
                 "================================================================================"
             );
-            run_selfplay_training(num_games, epochs, eval_games, output_path, lr);
+            run_selfplay_training(
+                num_games,
+                epochs,
+                eval_games,
+                output_path,
+                checkpoint_dir,
+                lr,
+            );
         }
         unknown => {
             eprintln!("❌ Chế độ không hợp lệ: '{unknown}'. Hỗ trợ: 'dataset', 'teacher', 'sparring', 'selfplay'.");
