@@ -342,9 +342,9 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#14110F] text-[#F5EFE6] flex flex-col justify-between px-3 py-4 sm:px-6 sm:py-5">
+    <div className="min-h-screen bg-[#14110F] text-[#F5EFE6] flex flex-col justify-between py-4 sm:py-5">
       {/* Top Bar */}
-      <header className="w-full max-w-[760px] mx-auto flex items-center justify-between gap-4 pb-3 mb-3 border-b border-stone-800/80">
+      <header className="w-full max-w-[760px] mx-auto px-3 sm:px-6 flex items-center justify-between gap-4 pb-3 mb-3 border-b border-stone-800/80">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-gradient-to-br from-red-700 to-red-950 border border-amber-400/50 flex items-center justify-center font-display-serif font-bold text-lg text-amber-100 shadow-md shrink-0">
             帥
@@ -395,25 +395,27 @@ export const App: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col items-center justify-center gap-4 w-full max-w-[760px] mx-auto">
-        <ControlsArea
-          gameMode={gameMode}
-          setGameMode={setGameMode}
-          playerSide={playerSide}
-          setPlayerSide={setPlayerSide}
-          difficulty={difficulty}
-          setDifficulty={setDifficulty}
-          isPaused={isPaused}
-          setIsPaused={setIsPaused}
-          onNewGame={handleNewGame}
-          onUndo={handleUndo}
-          onExportCsv={() => exportCsv(history)}
-          onOpenConfig={() => setIsConfigOpen(true)}
-          onToggleLog={() => setIsLogOpen((prev) => !prev)}
-          moveCount={history.length}
-          isThinking={isThinking}
-          canUndo={history.length > 0}
-        />
+      <main className="flex-1 flex flex-col items-center justify-center gap-4 w-full mx-auto">
+        <div className="w-full px-3 sm:px-6">
+          <ControlsArea
+            gameMode={gameMode}
+            setGameMode={setGameMode}
+            playerSide={playerSide}
+            setPlayerSide={setPlayerSide}
+            difficulty={difficulty}
+            setDifficulty={setDifficulty}
+            isPaused={isPaused}
+            setIsPaused={setIsPaused}
+            onNewGame={handleNewGame}
+            onUndo={handleUndo}
+            onExportCsv={() => exportCsv(history)}
+            onOpenConfig={() => setIsConfigOpen(true)}
+            onToggleLog={() => setIsLogOpen((prev) => !prev)}
+            moveCount={history.length}
+            isThinking={isThinking}
+            canUndo={history.length > 0}
+          />
+        </div>
 
         {/* Board Container with Overview Overlays */}
         <div className="relative flex flex-col items-center justify-center my-1">

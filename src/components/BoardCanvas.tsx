@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { Piece, PieceColor, PieceType, Square } from '../types/game.js';
 
 interface BoardCanvasProps {
@@ -12,10 +12,13 @@ interface BoardCanvasProps {
   children?: React.ReactNode;
 }
 
-const CELL_SIZE = 54.0;
+const BOARD_SIZE = 554.0;
 const PADDING = 34.0;
-const BOARD_WIDTH = 8 * CELL_SIZE + PADDING * 2; // 500
-const BOARD_HEIGHT = 9 * CELL_SIZE + PADDING * 2; // 554
+const GRID_SIZE = BOARD_SIZE - PADDING * 2; // 486.0
+const CELL_WIDTH = GRID_SIZE / 8; // 60.75
+const CELL_HEIGHT = GRID_SIZE / 9; // 54.0
+const BOARD_WIDTH = BOARD_SIZE;
+const BOARD_HEIGHT = BOARD_SIZE;
 
 const FIDUCIAL_POINTS: [number, number][] = [
   // Cannons
@@ -72,8 +75,8 @@ function getVisualCoords(
   }
 
   return {
-    x: visCol * CELL_SIZE + PADDING,
-    y: visRow * CELL_SIZE + PADDING,
+    x: visCol * CELL_WIDTH + PADDING,
+    y: visRow * CELL_HEIGHT + PADDING,
   };
 }
 
@@ -82,17 +85,17 @@ function getLogicCoords(
   y: number,
   side: PieceColor
 ): [number, number] | null {
-  const visCol = Math.round((x - PADDING) / CELL_SIZE);
-  const visRow = Math.round((y - PADDING) / CELL_SIZE);
+  const visCol = Math.round((x - PADDING) / CELL_WIDTH);
+  const visRow = Math.round((y - PADDING) / CELL_HEIGHT);
 
   if (visCol < 0 || visCol > 8 || visRow < 0 || visRow > 9) {
     return null;
   }
 
-  const snapX = visCol * CELL_SIZE + PADDING;
-  const snapY = visRow * CELL_SIZE + PADDING;
+  const snapX = visCol * CELL_WIDTH + PADDING;
+  const snapY = visRow * CELL_HEIGHT + PADDING;
   const dist = Math.hypot(x - snapX, y - snapY);
-  if (dist > CELL_SIZE * 0.48) {
+  if (dist > Math.min(CELL_WIDTH, CELL_HEIGHT) * 0.48) {
     return null;
   }
 
@@ -167,6 +170,20 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   children,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [boardSize, setBoardSize] = useState<number>(() =>
+    typeof window !== 'undefined'
+      ? Math.max(200, Math.min(window.innerWidth, window.innerHeight))
+      : BOARD_SIZE
+  );
+
+  useEffect(() => {
+    const updateSize = () => {
+      setBoardSize(Math.max(200, Math.min(window.innerWidth, window.innerHeight)));
+    };
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
 
   const drawBoard = useCallback(() => {
     const canvas = canvasRef.current;
@@ -175,13 +192,15 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== BOARD_WIDTH * dpr || canvas.height !== BOARD_HEIGHT * dpr) {
-      canvas.width = BOARD_WIDTH * dpr;
-      canvas.height = BOARD_HEIGHT * dpr;
+    const pixelSize = Math.round(boardSize * dpr);
+    if (canvas.width !== pixelSize || canvas.height !== pixelSize) {
+      canvas.width = pixelSize;
+      canvas.height = pixelSize;
     }
 
     ctx.save();
-    ctx.scale(dpr, dpr);
+    const scale = pixelSize / BOARD_SIZE;
+    ctx.scale(scale, scale);
 
     // Rich handcrafted Rosewood / Hinoki board gradient
     const boardGrad = ctx.createLinearGradient(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
@@ -197,45 +216,50 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     ctx.strokeRect(
       PADDING - 8,
       PADDING - 8,
-      8 * CELL_SIZE + 16,
-      9 * CELL_SIZE + 16
+      8 * CELL_WIDTH + 16,
+      9 * CELL_HEIGHT + 16
     );
 
     // Inner grid hairline frame
     ctx.strokeStyle = '#6B4226';
     ctx.lineWidth = 1.6;
-    ctx.strokeRect(PADDING, PADDING, 8 * CELL_SIZE, 9 * CELL_SIZE);
+    ctx.strokeRect(PADDING, PADDING, 8 * CELL_WIDTH, 9 * CELL_HEIGHT);
 
     // Subtle river band shading
     ctx.fillStyle = 'rgba(107, 66, 38, 0.06)';
-    ctx.fillRect(PADDING + 1, PADDING + 4 * CELL_SIZE + 1, 8 * CELL_SIZE - 2, CELL_SIZE - 2);
+    ctx.fillRect(
+      PADDING + 1,
+      PADDING + 4 * CELL_HEIGHT + 1,
+      8 * CELL_WIDTH - 2,
+      CELL_HEIGHT - 2
+    );
 
     // Draw 10 horizontal lines
     for (let r = 0; r < 10; r++) {
-      const y = r * CELL_SIZE + PADDING;
+      const y = r * CELL_HEIGHT + PADDING;
       ctx.beginPath();
       ctx.moveTo(PADDING, y);
-      ctx.lineTo(PADDING + 8 * CELL_SIZE, y);
+      ctx.lineTo(PADDING + 8 * CELL_WIDTH, y);
       ctx.stroke();
     }
 
     // Draw 9 vertical lines (broken at the river between r=4 and r=5)
     for (let c = 0; c < 9; c++) {
-      const x = c * CELL_SIZE + PADDING;
+      const x = c * CELL_WIDTH + PADDING;
       if (c === 0 || c === 8) {
         ctx.beginPath();
         ctx.moveTo(x, PADDING);
-        ctx.lineTo(x, PADDING + 9 * CELL_SIZE);
+        ctx.lineTo(x, PADDING + 9 * CELL_HEIGHT);
         ctx.stroke();
       } else {
         ctx.beginPath();
         ctx.moveTo(x, PADDING);
-        ctx.lineTo(x, PADDING + 4 * CELL_SIZE);
+        ctx.lineTo(x, PADDING + 4 * CELL_HEIGHT);
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.moveTo(x, PADDING + 5 * CELL_SIZE);
-        ctx.lineTo(x, PADDING + 9 * CELL_SIZE);
+        ctx.moveTo(x, PADDING + 5 * CELL_HEIGHT);
+        ctx.lineTo(x, PADDING + 9 * CELL_HEIGHT);
         ctx.stroke();
       }
     }
@@ -246,10 +270,10 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
       ctx.strokeStyle = '#6B4226';
       ctx.lineWidth = 1.4;
       ctx.beginPath();
-      ctx.moveTo(PADDING + 3 * CELL_SIZE, PADDING + startVisRow * CELL_SIZE);
-      ctx.lineTo(PADDING + 5 * CELL_SIZE, PADDING + (startVisRow + 2) * CELL_SIZE);
-      ctx.moveTo(PADDING + 5 * CELL_SIZE, PADDING + startVisRow * CELL_SIZE);
-      ctx.lineTo(PADDING + 3 * CELL_SIZE, PADDING + (startVisRow + 2) * CELL_SIZE);
+      ctx.moveTo(PADDING + 3 * CELL_WIDTH, PADDING + startVisRow * CELL_HEIGHT);
+      ctx.lineTo(PADDING + 5 * CELL_WIDTH, PADDING + (startVisRow + 2) * CELL_HEIGHT);
+      ctx.moveTo(PADDING + 5 * CELL_WIDTH, PADDING + startVisRow * CELL_HEIGHT);
+      ctx.lineTo(PADDING + 3 * CELL_WIDTH, PADDING + (startVisRow + 2) * CELL_HEIGHT);
       ctx.stroke();
       ctx.restore();
     };
@@ -270,13 +294,13 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     ctx.fillStyle = '#5C381E';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const riverY = PADDING + 4.5 * CELL_SIZE;
+    const riverY = PADDING + 4.5 * CELL_HEIGHT;
     if (playerSide === 'red') {
-      ctx.fillText('楚 河', PADDING + 2 * CELL_SIZE, riverY);
-      ctx.fillText('漢 界', PADDING + 6 * CELL_SIZE, riverY);
+      ctx.fillText('楚 河', PADDING + 2 * CELL_WIDTH, riverY);
+      ctx.fillText('漢 界', PADDING + 6 * CELL_WIDTH, riverY);
     } else {
-      ctx.fillText('漢 界', PADDING + 2 * CELL_SIZE, riverY);
-      ctx.fillText('楚 河', PADDING + 6 * CELL_SIZE, riverY);
+      ctx.fillText('漢 界', PADDING + 2 * CELL_WIDTH, riverY);
+      ctx.fillText('楚 河', PADDING + 6 * CELL_WIDTH, riverY);
     }
     ctx.restore();
 
@@ -340,7 +364,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     });
 
     ctx.restore();
-  }, [board, playerSide, selectedSquare, legalMoves, lastMove]);
+  }, [board, playerSide, selectedSquare, legalMoves, lastMove, boardSize]);
 
   useEffect(() => {
     drawBoard();
@@ -365,15 +389,22 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   };
 
   return (
-    <div className="relative inline-flex items-center justify-center p-2.5 sm:p-3.5 rounded-2xl bg-gradient-to-b from-[#2B1D14] to-[#1D130D] border border-[#4A3222] shadow-[0_20px_50px_rgba(0,0,0,0.75)]">
+    <div
+      style={{
+        width: `${boardSize}px`,
+        height: `${boardSize}px`,
+      }}
+      className="relative inline-flex items-center justify-center aspect-square rounded-2xl bg-gradient-to-b from-[#2B1D14] to-[#1D130D] border border-[#4A3222] shadow-[0_20px_50px_rgba(0,0,0,0.75)] box-border overflow-hidden shrink-0"
+    >
       <canvas
         ref={canvasRef}
         onClick={handleCanvasClick}
         style={{
-          width: `${BOARD_WIDTH}px`,
-          height: `${BOARD_HEIGHT}px`,
+          width: `${boardSize}px`,
+          height: `${boardSize}px`,
+          aspectRatio: '1 / 1',
         }}
-        className={`rounded-xl block max-w-full h-auto transition-opacity ${
+        className={`rounded-xl block w-full h-full aspect-square transition-opacity ${
           disabled ? 'cursor-not-allowed' : 'cursor-pointer'
         }`}
       />
