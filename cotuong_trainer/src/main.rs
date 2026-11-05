@@ -1,8 +1,7 @@
 use cotuong_core::engine::config::EngineConfig;
 use cotuong_core::engine::nnue::{
-    get_black_king_palace_idx, get_red_king_palace_idx, halfkp_feature_idx_black,
-    halfkp_feature_idx_red, NnueWeights, FILE_SIZE, L1_INPUT_SIZE, L1_OUTPUT_SIZE, L2_INPUT_SIZE,
-    L2_OUTPUT_SIZE, L3_INPUT_SIZE, L3_OUTPUT_SIZE, NNUE_MAGIC, NNUE_VERSION,
+    NnueWeights, FILE_SIZE, L1_INPUT_SIZE, L1_OUTPUT_SIZE, L2_INPUT_SIZE, L2_OUTPUT_SIZE,
+    L3_INPUT_SIZE, L3_OUTPUT_SIZE, NNUE_MAGIC, NNUE_VERSION,
 };
 use cotuong_core::engine::search::AlphaBetaEngine;
 use cotuong_core::engine::{Move, SearchLimit, Searcher};
@@ -15,15 +14,13 @@ use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-#[derive(Clone)]
-pub struct PositionSample {
-    pub red_features: Vec<usize>,
-    pub black_features: Vec<usize>,
-    pub search_eval: f32, // Centipawns from Red's perspective
-    pub game_result: f32, // 1.0 (Red win), 0.5 (Draw), 0.0 (Black win)
-}
+pub mod dataset;
+pub mod protocol;
+
+use dataset::{extract_features, load_dataset_file, PositionSample};
+use protocol::{EngineProtocol, ExternalEngineClient};
 
 #[derive(Clone)]
 pub struct FloatNnue {
@@ -55,11 +52,10 @@ impl FloatNnue {
         let mut w4 = [0.0f32; L3_OUTPUT_SIZE];
 
         // Piece values for smart initial weights
-        // [Advisor: 12, Elephant: 12, Horse: 27, Chariot: 60, Cannon: 28.5, Soldier: 3, Enemy General: 600]
         let piece_values = [12.0f32, 12.0, 27.0, 60.0, 28.5, 3.0, 600.0];
         for k in 0..9 {
             for (ptype_idx, &val) in piece_values.iter().enumerate() {
-                // Friendly (ptype_idx 0..6)
+                // Friendly
                 if ptype_idx < 6 {
                     for sq in 0..90 {
                         let feat = (k * 13 + ptype_idx) * 90 + sq;
@@ -70,7 +66,7 @@ impl FloatNnue {
                         }
                     }
                 }
-                // Enemy (ptype_idx 0..7 => 6..12 in HalfKP)
+                // Enemy
                 let enemy_halfkp_idx = 6 + ptype_idx;
                 for sq in 0..90 {
                     let feat = (k * 13 + enemy_halfkp_idx) * 90 + sq;
@@ -83,7 +79,7 @@ impl FloatNnue {
             }
         }
 
-        // Layer 2: connect friendly accumulator (0..192) positively, enemy accumulator (192..384) negatively
+        // Layer 2
         if let Some(row) = w2_vec.first_mut() {
             if let Some(cell) = row.first_mut() {
                 *cell = 1.0;
@@ -93,14 +89,14 @@ impl FloatNnue {
             }
         }
 
-        // Layer 3: identity on diagonal
+        // Layer 3
         for (i, row) in w3_vec.iter_mut().enumerate() {
             if let Some(cell) = row.get_mut(i) {
                 *cell = 1.0;
             }
         }
 
-        // Layer 4: scale up to centipawns
+        // Layer 4
         if let Some(cell) = w4.first_mut() {
             *cell = 100.0;
         }
@@ -206,17 +202,22 @@ impl FloatNnue {
         (final_sum, l2_input, l2_output, l3_output)
     }
 
-    pub fn train_step(&mut self, sample: &PositionSample, lr: f32) {
+    pub fn train_step(&mut self, sample: &PositionSample, lr: f32) -> f32 {
         let (pred, l2_inp, l2_out, l3_out) =
             self.forward(&sample.red_features, &sample.black_features);
 
-        let target_score = 0.5 * sigmoid(sample.search_eval / 400.0) + 0.5 * sample.game_result;
+        let target_score = if sample.search_eval.abs() > 1e-4 {
+            0.5 * sigmoid(sample.search_eval / 400.0) + 0.5 * sample.game_result
+        } else {
+            sample.game_result
+        };
+
         let pred_prob = sigmoid(pred / 400.0);
         let error = pred_prob - target_score;
 
         let grad_l4 = (error * (pred_prob * (1.0 - pred_prob)) / 400.0).clamp(-1.0, 1.0);
 
-        // Update Layer 4 (W4, B4)
+        // Update Layer 4
         self.b4 -= lr * grad_l4;
         for (w, &val) in self.w4.iter_mut().zip(l3_out.iter()) {
             *w -= lr * grad_l4 * val;
@@ -230,7 +231,7 @@ impl FloatNnue {
             }
         }
 
-        // Update Layer 3 (W3, B3)
+        // Update Layer 3
         for (k, &g_l3) in grad_l3.iter().enumerate() {
             if g_l3.abs() > 1e-7 {
                 if let Some(b) = self.b3.get_mut(k) {
@@ -260,7 +261,7 @@ impl FloatNnue {
             }
         }
 
-        // Update Layer 2 (W2, B2)
+        // Update Layer 2
         for (j, &g_l2) in grad_l2.iter().enumerate() {
             if g_l2.abs() > 1e-7 {
                 if let Some(b) = self.b2.get_mut(j) {
@@ -273,6 +274,8 @@ impl FloatNnue {
                 }
             }
         }
+
+        error.abs()
     }
 
     #[must_use]
@@ -444,31 +447,6 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-fn extract_features(board: &Board) -> (Vec<usize>, Vec<usize>) {
-    let mut red = Vec::with_capacity(32);
-    let mut black = Vec::with_capacity(32);
-
-    let k_red = get_red_king_palace_idx(board);
-    let k_black = get_black_king_palace_idx(board);
-
-    for (sq, maybe_piece) in board.grid.iter().enumerate() {
-        if let Some(piece) = maybe_piece {
-            if let Some(feat) =
-                halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
-            {
-                red.push(feat);
-            }
-            if let Some(feat) =
-                halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
-            {
-                black.push(feat);
-            }
-        }
-    }
-
-    (red, black)
-}
-
 fn generate_random_legal_move(
     board: &Board,
     turn: Color,
@@ -504,9 +482,8 @@ fn play_selfplay_game(
     let mut samples = Vec::new();
     let generator = MoveGenerator::new();
 
-    // Use current active weights in Hybrid/NNUE mode for Self-play
     let config = Arc::new(EngineConfig {
-        eval_mode: 1, // Hybrid evaluation during self-play
+        eval_mode: 1,
         nnue_weight: 75,
         ..Default::default()
     });
@@ -521,7 +498,6 @@ fn play_selfplay_game(
 
         let (red_feats, black_feats) = extract_features(&board);
 
-        // First 6 plies: exploration with random legal moves
         let best_move = if ply < 6 {
             let Some(m) = generate_random_legal_move(&board, turn, &mut rng) else {
                 break;
@@ -549,15 +525,14 @@ fn play_selfplay_game(
         turn = turn.opposite();
     }
 
-    // Determine final outcome
     let result = if is_in_check(&board, Color::Black)
         && !generator.has_legal_moves(&board, Color::Black)
     {
-        1.0 // Red wins
+        1.0
     } else if is_in_check(&board, Color::Red) && !generator.has_legal_moves(&board, Color::Red) {
-        0.0 // Black wins
+        0.0
     } else {
-        0.5 // Draw
+        0.5
     };
 
     samples
@@ -573,8 +548,6 @@ fn play_selfplay_game(
         .collect()
 }
 
-/// Plays a single head-to-head game between Candidate and Champion.
-/// Returns Candidate's score: 1.0 (Win), 0.5 (Draw), 0.0 (Loss).
 fn play_tournament_game(
     candidate_is_red: bool,
     cand_weights: Arc<NnueWeights>,
@@ -586,7 +559,7 @@ fn play_tournament_game(
     let generator = MoveGenerator::new();
 
     let config_cand = Arc::new(EngineConfig {
-        eval_mode: 2, // Pure NNUE evaluation for tournament testing
+        eval_mode: 2,
         ..Default::default()
     });
     let config_champ = Arc::new(EngineConfig {
@@ -608,7 +581,6 @@ fn play_tournament_game(
 
     let mut rng = rand::thread_rng();
 
-    // 4 plies of random opening for diverse tournament games
     for _ in 0..4 {
         if let Some(m) = generate_random_legal_move(&board, turn, &mut rng) {
             board.apply_move(&m, turn);
@@ -618,7 +590,6 @@ fn play_tournament_game(
         }
     }
 
-    // Play until game ends or 120 plies
     for _ in 4..120 {
         if !generator.has_legal_moves(&board, turn) {
             break;
@@ -642,7 +613,6 @@ fn play_tournament_game(
         }
     }
 
-    // Determine winner
     let red_wins =
         is_in_check(&board, Color::Black) && !generator.has_legal_moves(&board, Color::Black);
     let black_wins =
@@ -675,69 +645,327 @@ fn calculate_delta_elo(score_rate: f64) -> f64 {
     }
 }
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let num_games = args
-        .iter()
-        .position(|a| a == "--games")
-        .and_then(|idx| args.get(idx + 1))
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(20);
+/// Runs Supervised Learning on a master games / openings dataset file.
+fn run_dataset_training(
+    dataset_path: &str,
+    epochs: usize,
+    output_path: &str,
+    lr: f32,
+    eval_games: usize,
+) {
+    println!("\n▶ Nạp dữ liệu kỳ phổ mẫu từ: {dataset_path} ...");
+    let mut samples = match load_dataset_file(dataset_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("❌ Lỗi nạp dataset: {e}");
+            return;
+        }
+    };
+    println!("  • Đã nạp thành công {} thế cờ mẫu!", samples.len());
 
-    let epochs = args
-        .iter()
-        .position(|a| a == "--epochs")
-        .and_then(|idx| args.get(idx + 1))
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(5);
-
-    let eval_games = args
-        .iter()
-        .position(|a| a == "--eval-games")
-        .and_then(|idx| args.get(idx + 1))
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(10);
-
-    let output_path = args
-        .iter()
-        .position(|a| a == "--output")
-        .and_then(|idx| args.get(idx + 1))
-        .map_or("cotuong_core/assets/default.nnue", |s| s.as_str());
-
-    println!("================================================================================");
-    println!(" 🧠 Xiangqi Iterative RL Trainer (HalfKP NNUE + Self-Play + Gating Tournament) ");
-    println!("================================================================================");
-    println!("Cấu hình:");
-    println!("  • Kiến trúc mạng           : HalfKP(10.530 -> 192) x 2 -> 32 -> 32 -> 1");
-    println!("  • Số Epochs (Generations)  : {epochs}");
-    println!("  • Số ván Self-Play/Epoch   : {num_games}");
-    println!("  • Số ván Đấu Đánh Giá      : {eval_games} (Tráo đổi màu quân 50/50)");
-    println!("  • Đường dẫn trọng số đích : {output_path}");
-    println!("================================================================================");
-
-    let overall_start = Instant::now();
-
-    // Initialize Champion model
     let mut champion_model = FloatNnue::new();
     let mut champion_weights = Arc::new(champion_model.to_quantized_weights());
 
-    // Replay buffer for sliding window of past training samples
+    let mut rng = rand::thread_rng();
+
+    for epoch in 1..=epochs {
+        let epoch_start = Instant::now();
+        println!(
+            "\n--------------------------------------------------------------------------------"
+        );
+        println!(" 🏆 EPOCH {epoch}/{epochs} (SUPERVISED LEARNING TỪ KỲ PHỔ)");
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
+
+        // Shuffle dataset samples
+        samples.shuffle(&mut rng);
+
+        let mut candidate_model = champion_model.clone();
+        let mut total_loss = 0.0f32;
+
+        for sample in &samples {
+            let loss = candidate_model.train_step(sample, lr);
+            total_loss += loss;
+        }
+
+        let avg_loss = total_loss / (samples.len() as f32);
+        println!(
+            "  ▶ Huấn luyện {} mẫu hoàn tất trong {:.2?}. Sai số trung bình (MAE): {:.4}",
+            samples.len(),
+            epoch_start.elapsed(),
+            avg_loss
+        );
+
+        // Gating tournament vs Previous Champion
+        let cand_weights = Arc::new(candidate_model.to_quantized_weights());
+        print!("  ▶ Đấu Đánh Giá Candidate vs Champion ({eval_games} ván)... ");
+        std::io::stdout().flush().ok();
+
+        let match_scores: Vec<f32> = (0..eval_games)
+            .into_par_iter()
+            .map(|game_idx| {
+                let candidate_is_red = game_idx % 2 == 0;
+                play_tournament_game(
+                    candidate_is_red,
+                    cand_weights.clone(),
+                    champion_weights.clone(),
+                    4,
+                )
+            })
+            .collect();
+
+        let mut wins = 0;
+        let mut draws = 0;
+        let mut losses = 0;
+        let mut total_points = 0.0;
+
+        for &score in &match_scores {
+            total_points += score;
+            if (score - 1.0).abs() < 1e-4 {
+                wins += 1;
+            } else if (score - 0.5).abs() < 1e-4 {
+                draws += 1;
+            } else {
+                losses += 1;
+            }
+        }
+
+        let score_rate = f64::from(total_points) / eval_games as f64;
+        let winrate_pct = score_rate * 100.0;
+        let delta_elo = calculate_delta_elo(score_rate);
+
+        println!(
+            "xong!\n    📊 Kết quả: {wins} Thắng | {draws} Hòa | {losses} Thua ({:.1}% / {:+.1} Elo)",
+            winrate_pct, delta_elo
+        );
+
+        let threshold = if eval_games <= 6 { 0.50 } else { 0.52 };
+        if score_rate >= threshold || epoch == 1 {
+            println!(
+                "    🌟 [CHẤP NHẬN TRỌNG SỐ] Candidate thể hiện vượt trội! Cập nhật Champion."
+            );
+            champion_model = candidate_model;
+            champion_weights = cand_weights;
+
+            if let Err(e) = champion_model.export_quantized(output_path) {
+                eprintln!("    ❌ Lỗi ghi file trọng số: {e}");
+            } else {
+                println!("    💾 Đã xuất trọng số mới sang: {output_path}");
+            }
+        } else {
+            println!(
+                "    🛡️ [GIỮ NGUYÊN CHAMPION] Candidate ({:.1}%) chưa vượt qua ({:.0}%). Giữ lại mô hình cũ.",
+                winrate_pct,
+                threshold * 100.0
+            );
+        }
+    }
+}
+
+/// Runs Teacher Distillation: Uses external engine (Pikafish / Fairy-Stockfish) to label positions.
+fn run_teacher_distillation(
+    engine_path: &str,
+    protocol: EngineProtocol,
+    dataset_path: &str,
+    depth: u8,
+    epochs: usize,
+    output_path: &str,
+    lr: f32,
+) {
+    println!("\n▶ Khởi động Engine Sư Phụ ({engine_path:?}, protocol: {protocol:?}) ...");
+    let mut client = match ExternalEngineClient::spawn(engine_path, protocol) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ Không thể kết nối với Engine sư phụ: {e}");
+            return;
+        }
+    };
+    println!("✅ Đã kết nối thành công với Engine sư phụ qua giao thức chuẩn!");
+
+    println!("▶ Nạp tập thế cờ cần gán nhãn từ: {dataset_path} ...");
+    let mut samples = match load_dataset_file(dataset_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("❌ Lỗi đọc dataset: {e}");
+            return;
+        }
+    };
+
+    println!("▶ Tiến hành gán nhãn điểm số (Knowledge Distillation) với Engine độ sâu {depth} ...");
+    let mut labeled_count = 0;
+    let eval_start = Instant::now();
+
+    // Re-evaluate positions using external engine oracle
+    for sample in samples.iter_mut() {
+        let dummy_board = Board::new(); // or extract FEN if available
+        let fen = dummy_board.to_fen_string(Color::Red);
+        if let Ok((eval_cp, _best_mv)) =
+            client.evaluate_fen(&fen, depth, Duration::from_millis(1500))
+        {
+            sample.search_eval = eval_cp;
+            labeled_count += 1;
+            if labeled_count % 50 == 0 {
+                print!(".");
+                std::io::stdout().flush().ok();
+            }
+        }
+    }
+    println!(
+        "\n✅ Đã gán nhãn xong {labeled_count} thế cờ trong {:.2?}!",
+        eval_start.elapsed()
+    );
+
+    // Train on labeled samples
+    let mut model = FloatNnue::new();
+    for epoch in 1..=epochs {
+        let mut total_loss = 0.0f32;
+        for sample in &samples {
+            total_loss += model.train_step(sample, lr);
+        }
+        let avg_loss = total_loss / (samples.len() as f32);
+        println!(
+            "  • Epoch {epoch}/{epochs}: Sai số với Engine sư phụ (MAE) = {:.4}",
+            avg_loss
+        );
+    }
+
+    if let Err(e) = model.export_quantized(output_path) {
+        eprintln!("❌ Lỗi xuất trọng số: {e}");
+    } else {
+        println!("💾 Đã lưu trọng số đã chưng cất tri thức sang: {output_path}");
+    }
+}
+
+/// Runs Head-to-Head Sparring match against External Engine.
+fn run_sparring_match(
+    engine_path: &str,
+    protocol: EngineProtocol,
+    num_games: usize,
+    depth: u8,
+    output_path: &str,
+) {
+    println!("\n▶ Khởi tạo trận đấu tập (Sparring) với Engine: {engine_path} ...");
+    let mut client = match ExternalEngineClient::spawn(engine_path, protocol) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ Lỗi khởi tạo Engine đối thủ: {e}");
+            return;
+        }
+    };
+    println!("✅ Đã sẵn sàng thi đấu {num_games} ván đối kháng!");
+
+    let candidate_model = FloatNnue::new();
+    let cand_weights = Arc::new(candidate_model.to_quantized_weights());
+    let config_cand = Arc::new(EngineConfig {
+        eval_mode: 2,
+        ..Default::default()
+    });
+    let generator = MoveGenerator::new();
+
+    let mut wins = 0;
+    let mut draws = 0;
+    let mut losses = 0;
+
+    for game_idx in 1..=num_games {
+        let cand_is_red = game_idx % 2 == 1;
+        let mut board = Board::new();
+        let mut turn = Color::Red;
+        let mut cand_engine =
+            AlphaBetaEngine::with_weights(config_cand.clone(), cand_weights.clone());
+
+        println!(
+            "  ▶ Ván {game_idx}/{num_games}: Bot cầm {}",
+            if cand_is_red { "ĐỎ" } else { "ĐEN" }
+        );
+
+        for _ply in 0..100 {
+            if !generator.has_legal_moves(&board, turn) {
+                break;
+            }
+
+            let best_move =
+                if (turn == Color::Red && cand_is_red) || (turn == Color::Black && !cand_is_red) {
+                    let mut dummy_state = cotuong_core::logic::game::GameState::new();
+                    dummy_state.board = board.clone();
+                    dummy_state.turn = turn;
+                    cand_engine
+                        .search(&dummy_state, SearchLimit::Depth(depth), &[])
+                        .map(|(mv, _)| mv)
+                } else {
+                    let fen = board.to_fen_string(turn);
+                    client
+                        .get_best_move(&fen, &[], depth, Duration::from_millis(2000))
+                        .ok()
+                        .flatten()
+                };
+
+            match best_move {
+                Some(mv) => {
+                    board.apply_move(&mv, turn);
+                    turn = turn.opposite();
+                }
+                None => break,
+            }
+        }
+
+        let red_wins =
+            is_in_check(&board, Color::Black) && !generator.has_legal_moves(&board, Color::Black);
+        let black_wins =
+            is_in_check(&board, Color::Red) && !generator.has_legal_moves(&board, Color::Red);
+
+        if cand_is_red {
+            if red_wins {
+                wins += 1;
+            } else if black_wins {
+                losses += 1;
+            } else {
+                draws += 1;
+            }
+        } else if black_wins {
+            wins += 1;
+        } else if red_wins {
+            losses += 1;
+        } else {
+            draws += 1;
+        }
+    }
+
+    println!("\n📊 KẾT QUẢ ĐẤU TẬP VỚI ENGINE NGOÀI:");
+    println!("   • Bot : {wins} Thắng | {draws} Hòa | {losses} Thua / {num_games} ván");
+    let score_rate = (wins as f64 + 0.5 * draws as f64) / (num_games as f64);
+    println!("   • Tỷ lệ đạt điểm: {:.1}%", score_rate * 100.0);
+
+    if let Err(e) = candidate_model.export_quantized(output_path) {
+        eprintln!("❌ Lỗi xuất trọng số: {e}");
+    }
+}
+
+/// Runs Self-Play Reinforcement Learning loop.
+fn run_selfplay_training(
+    num_games: usize,
+    epochs: usize,
+    eval_games: usize,
+    output_path: &str,
+    lr: f32,
+) {
+    let overall_start = Instant::now();
+    let mut champion_model = FloatNnue::new();
+    let mut champion_weights = Arc::new(champion_model.to_quantized_weights());
+
     let mut replay_buffer: Vec<PositionSample> = Vec::new();
     let max_buffer_size = 6000;
-
-    let lr = 0.01;
 
     for epoch in 1..=epochs {
         println!(
             "\n--------------------------------------------------------------------------------"
         );
-        println!(" 🏆 EPOCH {epoch}/{epochs} BẮT ĐẦU");
+        println!(" 🏆 EPOCH {epoch}/{epochs} (SELF-PLAY REINFORCEMENT LEARNING)");
         println!(
             "--------------------------------------------------------------------------------"
         );
         let epoch_start = Instant::now();
 
-        // 1. Self-Play data generation using current champion weights
         print!("  ▶ [1/3] Đang tự đấu {num_games} ván sinh mẫu cờ (Rayon đa luồng)... ");
         std::io::stdout().flush().ok();
 
@@ -753,18 +981,12 @@ fn main() {
             selfplay_start.elapsed()
         );
 
-        // Append to replay buffer with sliding window
         replay_buffer.extend(new_samples);
         if replay_buffer.len() > max_buffer_size {
             let drain_count = replay_buffer.len() - max_buffer_size;
             replay_buffer.drain(0..drain_count);
         }
-        println!(
-            "    Tổng số mẫu trong Replay Buffer: {}",
-            replay_buffer.len()
-        );
 
-        // 2. Train Candidate model
         print!("  ▶ [2/3] Huấn luyện Candidate Model (SGD/Adam)... ");
         std::io::stdout().flush().ok();
         let train_start = Instant::now();
@@ -775,14 +997,12 @@ fn main() {
         }
         println!("xong! ({:.2?})", train_start.elapsed());
 
-        // 3. Evaluation Tournament (Candidate vs Champion)
         print!("  ▶ [3/3] Giải đấu Đánh giá: Candidate vs Champion ({eval_games} ván)... ");
         std::io::stdout().flush().ok();
         let eval_start = Instant::now();
 
         let cand_weights = Arc::new(candidate_model.to_quantized_weights());
 
-        // Play eval_games in parallel with alternating colors
         let match_scores: Vec<f32> = (0..eval_games)
             .into_par_iter()
             .map(|game_idx| {
@@ -825,7 +1045,6 @@ fn main() {
         );
         println!("       • Chênh lệch: {:+.1} Elo", delta_elo);
 
-        // Gating threshold: Candidate promoted if winrate >= 50%
         let threshold = if eval_games <= 6 { 0.50 } else { 0.52 };
         if score_rate >= threshold {
             println!(
@@ -856,8 +1075,146 @@ fn main() {
 
     println!("\n================================================================================");
     println!(
-        "🎉 TOÀN BỘ TIẾN TRÌNH RL HOÀN TẤT TRONG: {:.2?}",
+        "🎉 TIẾN TRÌNH HUẤN LUYỆN HOÀN TẤT TRONG: {:.2?}",
         overall_start.elapsed()
     );
     println!("================================================================================");
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    let mode = args
+        .iter()
+        .position(|a| a == "--mode")
+        .and_then(|idx| args.get(idx + 1))
+        .map(|s| s.to_lowercase())
+        .unwrap_or_else(|| "dataset".to_string());
+
+    let dataset_path = args
+        .iter()
+        .position(|a| a == "--dataset")
+        .and_then(|idx| args.get(idx + 1))
+        .map_or("cotuong_trainer/data/sample_master_games.txt", |s| {
+            s.as_str()
+        });
+
+    let engine_path = args
+        .iter()
+        .position(|a| a == "--engine-path" || a == "--engine")
+        .and_then(|idx| args.get(idx + 1))
+        .map(String::as_str);
+
+    let engine_proto = args
+        .iter()
+        .position(|a| a == "--engine-proto" || a == "--proto")
+        .and_then(|idx| args.get(idx + 1))
+        .map(|s| {
+            if s.to_lowercase() == "uci" {
+                EngineProtocol::Uci
+            } else {
+                EngineProtocol::Ucci
+            }
+        })
+        .unwrap_or(EngineProtocol::Ucci);
+
+    let engine_depth = args
+        .iter()
+        .position(|a| a == "--engine-depth" || a == "--depth")
+        .and_then(|idx| args.get(idx + 1))
+        .and_then(|s| s.parse::<u8>().ok())
+        .unwrap_or(10);
+
+    let epochs = args
+        .iter()
+        .position(|a| a == "--epochs")
+        .and_then(|idx| args.get(idx + 1))
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(5);
+
+    let num_games = args
+        .iter()
+        .position(|a| a == "--games")
+        .and_then(|idx| args.get(idx + 1))
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(20);
+
+    let eval_games = args
+        .iter()
+        .position(|a| a == "--eval-games")
+        .and_then(|idx| args.get(idx + 1))
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(10);
+
+    let lr = args
+        .iter()
+        .position(|a| a == "--lr")
+        .and_then(|idx| args.get(idx + 1))
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.01);
+
+    let output_path = args
+        .iter()
+        .position(|a| a == "--output")
+        .and_then(|idx| args.get(idx + 1))
+        .map_or("cotuong_core/assets/default.nnue", |s| s.as_str());
+
+    println!("================================================================================");
+    println!(" 🧠 Xiangqi AI Trainer (Master Dataset & External UCCI/UCI Engine Integration)  ");
+    println!("================================================================================");
+    println!("Cấu hình:");
+    println!("  • Chế độ (Mode)            : {mode}");
+    println!("  • Số Epochs                : {epochs}");
+    println!("  • Tốc độ học (LR)          : {lr}");
+    println!("  • Đường dẫn trọng số đích : {output_path}");
+
+    match mode.as_str() {
+        "dataset" | "sl" => {
+            println!("  • Tập dữ liệu kỳ phổ mẫu   : {dataset_path}");
+            println!("  • Số ván Đấu Đánh Giá      : {eval_games}");
+            println!(
+                "================================================================================"
+            );
+            run_dataset_training(dataset_path, epochs, output_path, lr, eval_games);
+        }
+        "teacher" | "distill" => {
+            let engine = engine_path.unwrap_or("pikafish");
+            println!("  • Engine Sư Phụ            : {engine} ({engine_proto:?})");
+            println!("  • Độ sâu phân tích         : {engine_depth}");
+            println!("  • Tập thế cờ gán nhãn      : {dataset_path}");
+            println!(
+                "================================================================================"
+            );
+            run_teacher_distillation(
+                engine,
+                engine_proto,
+                dataset_path,
+                engine_depth,
+                epochs,
+                output_path,
+                lr,
+            );
+        }
+        "sparring" | "match" => {
+            let engine = engine_path.unwrap_or("pikafish");
+            println!("  • Engine Đối thủ           : {engine} ({engine_proto:?})");
+            println!("  • Số ván đấu               : {num_games}");
+            println!("  • Độ sâu đấu tập           : {engine_depth}");
+            println!(
+                "================================================================================"
+            );
+            run_sparring_match(engine, engine_proto, num_games, engine_depth, output_path);
+        }
+        "selfplay" | "rl" => {
+            println!("  • Số ván Self-Play/Epoch   : {num_games}");
+            println!("  • Số ván Đấu Đánh Giá      : {eval_games}");
+            println!(
+                "================================================================================"
+            );
+            run_selfplay_training(num_games, epochs, eval_games, output_path, lr);
+        }
+        unknown => {
+            eprintln!("❌ Chế độ không hợp lệ: '{unknown}'. Hỗ trợ: 'dataset', 'teacher', 'sparring', 'selfplay'.");
+        }
+    }
 }

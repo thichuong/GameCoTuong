@@ -24,6 +24,69 @@ pub struct Move {
     pub score: i32,
 }
 
+impl Move {
+    /// Converts a move to a 4-character UCI coordinate string (e.g., "b2e2", "h0g2").
+    #[must_use]
+    pub fn to_uci(&self) -> String {
+        let from_file = (b'a' + self.from_col) as char;
+        let from_rank = (b'0' + self.from_row) as char;
+        let to_file = (b'a' + self.to_col) as char;
+        let to_rank = (b'0' + self.to_row) as char;
+        format!("{from_file}{from_rank}{to_file}{to_rank}")
+    }
+
+    /// Parses a 4-character UCI coordinate string (e.g., "b2e2") into a Move.
+    pub fn from_uci(uci: &str) -> Result<Self, &'static str> {
+        let bytes = uci.as_bytes();
+        if bytes.len() != 4 {
+            return Err("UCI move string must be exactly 4 characters");
+        }
+        let from_col = bytes[0].wrapping_sub(b'a');
+        let from_row = bytes[1].wrapping_sub(b'0');
+        let to_col = bytes[2].wrapping_sub(b'a');
+        let to_row = bytes[3].wrapping_sub(b'0');
+
+        if from_col > 8 || from_row > 9 || to_col > 8 || to_row > 9 {
+            return Err("UCI move coordinates out of Xiangqi board bounds");
+        }
+
+        Ok(Self {
+            from_row,
+            from_col,
+            to_row,
+            to_col,
+            score: 0,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uci_move_conversion() {
+        let mv = Move {
+            from_row: 2,
+            from_col: 1,
+            to_row: 2,
+            to_col: 4,
+            score: 0,
+        };
+        assert_eq!(mv.to_uci(), "b2e2");
+
+        let parsed = Move::from_uci("b2e2").expect("Valid UCI move");
+        assert_eq!(parsed.from_row, 2);
+        assert_eq!(parsed.from_col, 1);
+        assert_eq!(parsed.to_row, 2);
+        assert_eq!(parsed.to_col, 4);
+
+        assert!(Move::from_uci("b2").is_err());
+        assert!(Move::from_uci("z2e2").is_err());
+        assert!(Move::from_uci("a9a:").is_err());
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub enum SearchLimit {

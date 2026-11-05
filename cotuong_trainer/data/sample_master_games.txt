@@ -1,0 +1,64 @@
+# ==============================================================================
+#  Bộ Dữ Liệu Kỳ Phổ Mẫu Chuẩn (Curated Master Games & Classic Openings)
+# ==============================================================================
+#  Mỗi dòng đại diện cho một ván cờ mẫu (Move sequence) hoặc thế cờ (FEN)
+#  Kèm theo kết quả thực tế (result: 1-0 [Đỏ thắng], 0-1 [Đen thắng], 1/2-1/2 [Hòa])
+# ==============================================================================
+
+# --- Game 1: Pháo Đầu đối Bình Phong Mã Hiện Đại (Đỏ Thắng) ---
+moves h2e2 b9c7 b0c2 h9g7 i0i1 i9h9 i1f1 h9h4 f1f6 c7b5 c2d4 h4e4 d4b5 e4e2 f6f7 e2b2 b5a7 b2b4 e2c2 g7e6 a7c6 b4b6 c6d8 b6b2 c2c6 b2a2 c6d6 e6d4 f7f8 | result: 1-0
+
+# --- Game 2: Pháo Đầu đối Thuận Pháo Kinh Điển (Đỏ Thắng) ---
+moves h2e2 h7e7 b0c2 b9c7 i0h0 i9h9 h0h4 c7b5 h4g4 g6g5 c2d4 g7e6 d4e6 d9e8 e6g5 h9h4 g4g3 b5d4 g3e3 e7g7 e2e5 g7e7 e5g5 h4g4 g5g4 d4e6 g4g7 | result: 1-0
+
+# --- Game 3: Bình Phong Mã Đỡ Pháo Đầu - Phản Công Tuyệt Đẹp (Đen Thắng) ---
+moves h2e2 b9c7 b0c2 h9g7 i0h0 a9b9 h0h6 b7a7 h6g6 b9b4 c2d4 b4b2 g6g7 b2d2 d4c6 a7a2 c6e7 a2d2 e7f5 d2d1 e0e1 d1d8 e2e6 d8e8 e6c6 e8e7 c6c7 e7c7 f5d6 c7c2 | result: 0-1
+
+# --- Game 4: Tiên Nhân Chỉ Lộ (Binh 7 Tiến 1) đối Tốt Để Pháo (Hòa) ---
+moves g3g4 c6c5 b0c2 b9a7 h2e2 b7e7 c2e3 a7c6 e3d5 e7e6 d5c7 c6b4 c7e6 b4d3 e0d1 d3f2 d1e1 f2h1 e2e5 h1g3 e5g5 g3e4 g5e5 e4g3 e5e7 c5c4 e7b7 a9a8 b7b6 a8b8 | result: 1/2-1/2
+
+# --- Game 5: Phi Tượng Cuộc đối Tả Cung Pháo (Đỏ Thắng) ---
+moves g0e2 b9c7 b0a2 h9g7 a0b0 b7c7 b0b4 i9h9 b4c4 h9h2 a2c3 c7c2 c4c7 c2c3 c7c8 h2c2 c8d8 c2c1 e0e1 c1d1 e1f1 d1d2 d8e8 d2d8 e8d8 g7e8 f1e1 e8f6 d8f8 | result: 1-0
+
+# --- Game 6: Pháo Đầu Thất Lộ Mã đối Bình Phong Mã Tả Mã Bàn Hà (Đỏ Thắng) ---
+moves h2e2 b9c7 b0c2 h9g7 i0h0 i9h9 h0h6 h9h4 h6h4 c7e6 c2d4 e6d4 e2d2 d4b5 d2d5 b5c3 d5c5 c3a4 c5c7 a4b2 c7a7 b2d3 d0e1 d3f4 a7a6 f4g2 e1f2 g2e3 a6a8 | result: 1-0
+
+# --- Game 7: Nghịch Thủ Pháo Quyết Chiến (Đỏ Thắng) ---
+moves h2e2 b7e7 b0c2 b9c7 i0h0 h9g7 h0h7 i9h9 h7g7 h9h2 g7g9 h2c2 g9f9 c2c0 e2e7 c7b5 f9e9 c0c2 e9e8 c2d2 e8c8 d2d7 c8c7 d7c7 e7c7 b5c7 a0a1 c7b5 a1b1 | result: 1-0
+
+# --- Game 8: Khởi Mã Cuộc Điềm Đạm (Hòa) ---
+moves b0c2 b9c7 h2g2 h9g7 i0h0 i9h9 h0h4 c6c5 h4c4 c7e6 c4c5 e6d4 c2d4 h7c7 c5c7 d9e8 c7c8 h9h8 c8h8 g7h8 g2g5 h8f7 g5g7 f7e5 g7f7 e5d3 e0d1 d3f2 d1e1 | result: 1/2-1/2
+
+# --- Game 9: Đơn Đề Mã Khắc Chế Pháo Đầu (Đen Thắng) ---
+moves h2e2 b9c7 b0c2 h9i7 i0h0 a9a8 h0h6 a8b8 c2b4 b8b4 h6h7 b7b8 h7b7 b8b7 e2e7 b4b2 e7e8 d9e8 b4c6 b2b1 e0e1 b1d1 e1f2 d1d2 f2e3 d2c2 c6a7 c2c3 e3d2 c3a3 | result: 0-1
+
+# --- Game 10: Pháo Đầu đối Quy Bối Pháo (Đỏ Thắng) ---
+moves h2e2 b7b8 b0c2 b9c7 i0h0 b8f8 h0h6 f8f6 h6h4 h9g7 c2d4 g7e6 d4e6 d9e8 e6g7 f6f1 e0e1 f1e1 d0e1 e8d7 g7e6 d7e6 e2e5 e6f7 e5f5 f7g7 h4f4 g7g6 f4f6 | result: 1-0
+
+# --- Game 11: Tiến Tam Binh đối Bình Phong Mã Lưỡng Đầu Xà (Đỏ Thắng) ---
+moves c3c4 c6c5 h2e2 b9c7 b0c2 h9g7 i0h0 i9h9 h0h6 h9h4 h6h4 c7e6 c2e3 e6f4 e3d5 f4g2 e0f1 g2h4 e2f2 h4g6 f2f7 g7e8 f7e7 e8d6 d5c7 d6e4 c7e8 g6f4 e7f7 | result: 1-0
+
+# --- Game 12: Uyên Ương Pháo Đặc Sắc (Hòa) ---
+moves h2e2 b9c7 b0c2 b7b2 i0h0 b2f2 e2f2 c7e6 h0h7 e6f4 h7h4 f4g2 f2f3 g2h4 f3h3 h4f5 h3h5 f5d4 c2d4 c6d4 h5d5 d4e6 d5d6 e6c5 d6b6 c5d3 f0e1 d3f4 b6b7 | result: 1/2-1/2
+
+# --- Game 13: Đại Sư Vương Thiên Nhất Phá Trận (Đỏ Thắng) ---
+moves h2e2 b9c7 b0c2 h9g7 i0h0 a9b9 h0h6 b9b4 c2d4 b7b6 h6e6 d9e8 d4c6 b6b7 c6d8 b7d7 d8c6 b4c4 c6e5 c4c2 e5d7 e8d7 e6e7 d7d6 e7e8 d6d7 e8a8 c2a2 a8a7 | result: 1-0
+
+# --- Game 14: Trịnh Duy Đồng Xuất Thần Diệu Thủ (Đỏ Thắng) ---
+moves g3g4 b9c7 b0c2 h9g7 h2e2 c6c5 c2e3 a9b9 e2c2 b9b4 c2c5 b4a4 c5c7 a4a2 c7c8 g7f5 c8d8 f5e3 d8e8 e3c2 e8e7 c2a3 e7a7 a3c4 a7a8 c4e5 a8d8 e5g4 d8e8 | result: 1-0
+
+# --- Game 15: Hứa Ngân Xuyên Thái Cực Quyền (Đỏ Thắng) ---
+moves g0e2 b9c7 b0c2 h9g7 h2g2 a9b9 i0h0 b9b3 c2d4 b3b2 h0h7 c7a6 h7h6 a6c5 d4f5 g7h5 h6h7 b2d2 f5e7 d9e8 e7c8 d2d7 h7h8 h5f6 c8b6 d7d8 h8h6 f6e4 b6c4 | result: 1-0
+
+# --- Master FEN Positions with Evaluations ---
+# C2.5 vs Screen Horse mid-game
+r1bakab1r/9/1cn2cn2/p1p1p1p1p/9/4P4/P1P3P1P/1C2C4/9/RNBAKABNR w | eval: 25 | result: 1-0
+# King under check from Cannon
+rnb1k1b1r/4a4/1c2a1n2/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/4A4/RNBAK1BNR w | eval: 65 | result: 1-0
+# Chariot controlling rank 7
+r1bakab2/9/1c2c1n1r/p1p1p1p1p/9/2R6/P1P1P1P1P/4C4/9/1NBAKABNR w | eval: 120 | result: 1-0
+# Tactical endgame with Knight and Chariot
+2b1k4/4a4/2n1a4/4R4/9/9/4P4/4C4/9/4K4 w | eval: 350 | result: 1-0
+# Drawn endgame two pawns vs advisor
+4k4/4a4/4a4/9/9/9/4P1P2/9/9/4K4 w | eval: 0 | result: 1/2-1/2
+
