@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "build:wasm": "cargo build -p cotuong_core --target wasm32-unknown-unknown --release && wasm-bindgen --target web --out-dir src/wasm target/wasm32-unknown-unknown/release/cotuong_core.wasm"
+    "build:wasm": "cargo build -p cotuong_core --target wasm32-unknown-unknown --release && wasm-bindgen --target web --out-dir src/wasm target/wasm32-unknown-unknown/release/cotuong_core.wasm",
+    "train": "bash train.sh"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.4",

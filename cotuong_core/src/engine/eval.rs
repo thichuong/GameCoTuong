@@ -12,10 +12,9 @@ impl SimpleEvaluator {
     pub const fn new(config: Arc<EngineConfig>) -> Self {
         Self { config }
     }
-}
 
-impl Evaluator for SimpleEvaluator {
-    fn evaluate(&self, board: &Board) -> i32 {
+    #[must_use]
+    pub fn evaluate_handcrafted(&self, board: &Board) -> i32 {
         use crate::logic::eval_constants::*;
 
         // 1. Material & PST (Base)
@@ -278,6 +277,22 @@ impl Evaluator for SimpleEvaluator {
         score -= red_danger - black_danger; // Danger is bad
 
         score
+    }
+}
+
+impl Evaluator for SimpleEvaluator {
+    fn evaluate(&self, board: &Board) -> i32 {
+        let mode = self.config.eval_mode;
+        if mode == 0 {
+            self.evaluate_handcrafted(board)
+        } else if mode == 2 {
+            crate::engine::nnue::evaluate_nnue(board)
+        } else {
+            let hc = self.evaluate_handcrafted(board);
+            let nn = crate::engine::nnue::evaluate_nnue(board);
+            let w = self.config.nnue_weight.clamp(0, 100);
+            ((100 - w) * hc + w * nn) / 100
+        }
     }
 }
 

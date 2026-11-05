@@ -42,6 +42,11 @@ pub struct EngineConfig {
 
     // Transposition Table
     pub tt_size_mb: usize,
+
+    // Evaluation mode (0: Handcrafted, 1: Hybrid, 2: Pure NNUE)
+    pub eval_mode: i32,
+    // NNUE weight in Hybrid mode (0..=100)
+    pub nnue_weight: i32,
 }
 
 impl Default for EngineConfig {
@@ -76,6 +81,8 @@ impl Default for EngineConfig {
             mate_score: 300_000, // Increased to be higher than score_capture_base (200,000)
 
             tt_size_mb: 256,
+            eval_mode: 0,
+            nnue_weight: 50,
         }
     }
 }
@@ -112,6 +119,9 @@ struct EngineConfigJson {
     mate_score: Option<i32>,
 
     tt_size_mb: Option<usize>,
+
+    eval_mode: Option<i32>,
+    nnue_weight: Option<i32>,
 }
 
 impl EngineConfig {
@@ -171,6 +181,9 @@ impl EngineConfig {
             mate_score: json_config.mate_score.unwrap_or(default.mate_score),
 
             tt_size_mb: json_config.tt_size_mb.unwrap_or(default.tt_size_mb),
+
+            eval_mode: json_config.eval_mode.unwrap_or(default.eval_mode),
+            nnue_weight: json_config.nnue_weight.unwrap_or(default.nnue_weight),
         })
     }
 }

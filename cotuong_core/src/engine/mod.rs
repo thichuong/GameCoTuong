@@ -6,6 +6,7 @@ pub mod config;
 pub mod eval;
 pub mod move_list;
 pub mod movegen;
+pub mod nnue;
 pub mod search;
 pub mod tt;
 pub mod zobrist;

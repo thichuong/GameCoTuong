@@ -349,6 +349,43 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               />
             </div>
           </section>
+
+          <section>
+            <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
+              04. Lượng giá Mạng Nơ-ron (NNUE & RL)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label
+                  className="text-xs font-medium text-stone-300"
+                  htmlFor="eval-mode-select"
+                >
+                  Chế độ lượng giá AI
+                </label>
+                <select
+                  id="eval-mode-select"
+                  value={currentConfig.eval_mode ?? 0}
+                  onChange={(e) =>
+                    handleSliderChange('eval_mode', Number(e.target.value))
+                  }
+                  className="bg-[#26201C] text-[#F5EFE6] text-xs font-medium rounded-lg px-3 py-2 border border-stone-700 focus:border-amber-400 focus:outline-none"
+                >
+                  <option value={0}>0 - Cổ điển (Handcrafted SimpleEvaluator)</option>
+                  <option value={1}>1 - Kết hợp (Hybrid: Handcrafted + NNUE)</option>
+                  <option value={2}>2 - Thuần Mạng Nơ-ron (Pure NNUE 1260→2x256→32→1)</option>
+                </select>
+              </div>
+
+              <Slider
+                label="Tỷ trọng NNUE trong chế độ Hybrid (%)"
+                value={currentConfig.nnue_weight ?? 50}
+                min={0}
+                max={100}
+                step={5}
+                onChange={(v) => handleSliderChange('nnue_weight', v)}
+              />
+            </div>
+          </section>
         </div>
 
         {/* Footer */}

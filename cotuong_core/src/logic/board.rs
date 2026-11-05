@@ -1,3 +1,4 @@
+use crate::engine::nnue::{NnueAccumulator, NnueWeights};
 use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
 use crate::logic::eval_constants::{get_piece_value, get_pst_value};
@@ -97,6 +98,8 @@ pub struct Board {
     pub black_material: i32,
     pub red_pst: i32,
     pub black_pst: i32,
+    #[serde(skip)]
+    pub nnue_acc: NnueAccumulator,
 }
 
 impl Board {
@@ -214,6 +217,7 @@ impl Board {
             board.zobrist_hash ^= keys.side_key;
         }
         board.calculate_initial_score();
+        board.refresh_nnue();
 
         Ok((board, turn))
     }
@@ -239,10 +243,12 @@ impl Board {
             black_material: 0,
             red_pst: 0,
             black_pst: 0,
+            nnue_acc: NnueAccumulator::default(),
         };
         board.setup_initial_position();
         board.zobrist_hash = board.calculate_initial_hash();
         board.calculate_initial_score();
+        board.refresh_nnue();
         board
     }
 
@@ -482,6 +488,7 @@ impl Board {
         // Remove from source
         self.remove_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
+        self.remove_piece_nnue(piece, from.index());
 
         // Update Score (Remove from source)
         let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
@@ -496,6 +503,7 @@ impl Board {
             self.remove_piece(to, captured.piece_type, captured.color);
             self.zobrist_hash ^=
                 keys.get_piece_key(captured.piece_type, captured.color, to_row, to_col);
+            self.remove_piece_nnue(captured, to.index());
 
             // Update Score (Remove captured)
             let cap_val = get_piece_value(captured.piece_type);
@@ -513,6 +521,7 @@ impl Board {
         // 3. Place piece at destination
         self.add_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
+        self.add_piece_nnue(piece, to.index());
 
         // Update Score (Add to dest)
         let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
@@ -557,6 +566,7 @@ impl Board {
         // Remove from destination
         self.remove_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
+        self.remove_piece_nnue(piece, to.index());
 
         // Update Score (Remove from dest)
         let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
@@ -569,6 +579,7 @@ impl Board {
         // Place back at source
         self.add_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
+        self.add_piece_nnue(piece, from.index());
 
         // Update Score (Add to source)
         let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
@@ -582,6 +593,7 @@ impl Board {
         if let Some(cap) = captured {
             self.add_piece(to, cap.piece_type, cap.color);
             self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
+            self.add_piece_nnue(cap, to.index());
 
             // Update Score (Restore captured)
             let cap_val = get_piece_value(cap.piece_type);
@@ -595,6 +607,24 @@ impl Board {
                 self.black_pst += cap_pst;
             }
         }
+    }
+
+    #[inline]
+    pub fn refresh_nnue(&mut self) {
+        let weights = NnueWeights::get();
+        self.nnue_acc.refresh(&self.grid, weights);
+    }
+
+    #[inline]
+    pub fn add_piece_nnue(&mut self, piece: Piece, sq: usize) {
+        let weights = NnueWeights::get();
+        self.nnue_acc.add_piece(piece, sq, weights);
+    }
+
+    #[inline]
+    pub fn remove_piece_nnue(&mut self, piece: Piece, sq: usize) {
+        let weights = NnueWeights::get();
+        self.nnue_acc.remove_piece(piece, sq, weights);
     }
 }
 

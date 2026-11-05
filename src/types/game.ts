@@ -73,6 +73,8 @@ export interface EngineConfig {
   pruning_method: number;
   pruning_multiplier: number;
   mate_score: number;
+  eval_mode: number;
+  nnue_weight: number;
   [key: string]: number;
 }
 
@@ -91,5 +93,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   pruning_method: 0,
   pruning_multiplier: 1.0,
   mate_score: 30000,
+  eval_mode: 0,
+  nnue_weight: 50,
 };
 

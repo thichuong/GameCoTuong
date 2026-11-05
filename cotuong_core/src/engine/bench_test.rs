@@ -54,6 +54,7 @@ mod tests {
             black_material: 0,
             red_pst: 0,
             black_pst: 0,
+            nnue_acc: Default::default(),
         };
 
         // Helper

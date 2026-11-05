@@ -1,0 +1,12 @@
+[package]
+name = "cotuong_trainer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cotuong_core = { path = "../cotuong_core" }
+rayon = "1.8"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
