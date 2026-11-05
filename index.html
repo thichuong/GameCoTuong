@@ -1,29 +1,21 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="vi" class="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#222222" />
-    <meta name="description" content="Chơi Cờ Tướng (Xiangqi) mượt mà với AI thông minh, hỗ trợ chơi offline." />
-    <title>Cờ Tướng - Xiangqi</title>
+    <meta name="theme-color" content="#14110f" />
+    <meta name="description" content="Trò chơi Cờ Tướng (Xiangqi) truyền thống tích hợp AI thông minh chạy trên WebAssembly, hỗ trợ tùy chỉnh chuyên sâu thuật toán và biên bản ván đấu." />
+    <meta property="og:title" content="Cờ Tướng Đại Sư (Xiangqi AI)" />
+    <meta property="og:description" content="Trò chơi Cờ Tướng (Xiangqi) truyền thống tích hợp AI thông minh chạy trên WebAssembly, hỗ trợ tùy chỉnh chuyên sâu thuật toán và biên bản ván đấu." />
+    <title>Cờ Tướng Đại Sư (Xiangqi AI)</title>
     <link rel="icon" type="image/png" href="/icon.png" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icon.png" />
-    <style>
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-        padding: 0;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        background-color: #222;
-        color: #eee;
-        min-height: 100vh;
-      }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Serif:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
-  <body>
+  <body class="bg-[#14110F] text-[#F5EFE6] antialiased selection:bg-amber-500/30 selection:text-amber-200">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>

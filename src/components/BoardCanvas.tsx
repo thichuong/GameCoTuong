@@ -9,12 +9,32 @@ interface BoardCanvasProps {
   lastMove: { from_row: number; from_col: number; to_row: number; to_col: number } | null;
   onSquareClick: (row: number, col: number) => void;
   disabled?: boolean;
+  children?: React.ReactNode;
 }
 
-const CELL_SIZE = 50.0;
-const PADDING = 25.0;
-const BOARD_WIDTH = 450.0;
-const BOARD_HEIGHT = 500.0;
+const CELL_SIZE = 54.0;
+const PADDING = 34.0;
+const BOARD_WIDTH = 8 * CELL_SIZE + PADDING * 2; // 500
+const BOARD_HEIGHT = 9 * CELL_SIZE + PADDING * 2; // 554
+
+const FIDUCIAL_POINTS: [number, number][] = [
+  // Cannons
+  [2, 1],
+  [2, 7],
+  [7, 1],
+  [7, 7],
+  // Soldiers
+  [3, 0],
+  [3, 2],
+  [3, 4],
+  [3, 6],
+  [3, 8],
+  [6, 0],
+  [6, 2],
+  [6, 4],
+  [6, 6],
+  [6, 8],
+];
 
 function getPieceSymbol(type: PieceType, color: PieceColor): string {
   switch (type) {
@@ -69,7 +89,6 @@ function getLogicCoords(
     return null;
   }
 
-  // Check click distance to intersection
   const snapX = visCol * CELL_SIZE + PADDING;
   const snapY = visRow * CELL_SIZE + PADDING;
   const dist = Math.hypot(x - snapX, y - snapY);
@@ -91,6 +110,52 @@ function getLogicCoords(
   return [row, col];
 }
 
+function drawFiducialMark(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  visCol: number
+) {
+  const offset = 4.5;
+  const len = 9;
+  ctx.strokeStyle = '#6B4226';
+  ctx.lineWidth = 1.4;
+
+  // Left side L-marks (only if not on left edge)
+  if (visCol > 0) {
+    // Top-left
+    ctx.beginPath();
+    ctx.moveTo(x - offset - len, y - offset);
+    ctx.lineTo(x - offset, y - offset);
+    ctx.lineTo(x - offset, y - offset - len);
+    ctx.stroke();
+
+    // Bottom-left
+    ctx.beginPath();
+    ctx.moveTo(x - offset - len, y + offset);
+    ctx.lineTo(x - offset, y + offset);
+    ctx.lineTo(x - offset, y + offset + len);
+    ctx.stroke();
+  }
+
+  // Right side L-marks (only if not on right edge)
+  if (visCol < 8) {
+    // Top-right
+    ctx.beginPath();
+    ctx.moveTo(x + offset + len, y - offset);
+    ctx.lineTo(x + offset, y - offset);
+    ctx.lineTo(x + offset, y - offset - len);
+    ctx.stroke();
+
+    // Bottom-right
+    ctx.beginPath();
+    ctx.moveTo(x + offset + len, y + offset);
+    ctx.lineTo(x + offset, y + offset);
+    ctx.lineTo(x + offset, y + offset + len);
+    ctx.stroke();
+  }
+}
+
 export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   board,
   playerSide,
@@ -99,6 +164,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   lastMove,
   onSquareClick,
   disabled = false,
+  children,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -108,18 +174,41 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear board background
-    ctx.clearRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
-    ctx.fillStyle = '#edd8b7'; // Rich traditional Xiangqi wooden texture
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== BOARD_WIDTH * dpr || canvas.height !== BOARD_HEIGHT * dpr) {
+      canvas.width = BOARD_WIDTH * dpr;
+      canvas.height = BOARD_HEIGHT * dpr;
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    // Rich handcrafted Rosewood / Hinoki board gradient
+    const boardGrad = ctx.createLinearGradient(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+    boardGrad.addColorStop(0, '#EED7B5');
+    boardGrad.addColorStop(0.5, '#E4C598');
+    boardGrad.addColorStop(1, '#D8B480');
+    ctx.fillStyle = boardGrad;
     ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
 
-    // Border frame
-    ctx.strokeStyle = '#5a3d28';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(PADDING - 5, PADDING - 5, 8 * CELL_SIZE + 10, 9 * CELL_SIZE + 10);
+    // Outer heavy frame
+    ctx.strokeStyle = '#4A2C16';
+    ctx.lineWidth = 3.5;
+    ctx.strokeRect(
+      PADDING - 8,
+      PADDING - 8,
+      8 * CELL_SIZE + 16,
+      9 * CELL_SIZE + 16
+    );
 
-    ctx.strokeStyle = '#8b5a2b';
-    ctx.lineWidth = 1.5;
+    // Inner grid hairline frame
+    ctx.strokeStyle = '#6B4226';
+    ctx.lineWidth = 1.6;
+    ctx.strokeRect(PADDING, PADDING, 8 * CELL_SIZE, 9 * CELL_SIZE);
+
+    // Subtle river band shading
+    ctx.fillStyle = 'rgba(107, 66, 38, 0.06)';
+    ctx.fillRect(PADDING + 1, PADDING + 4 * CELL_SIZE + 1, 8 * CELL_SIZE - 2, CELL_SIZE - 2);
 
     // Draw 10 horizontal lines
     for (let r = 0; r < 10; r++) {
@@ -134,19 +223,16 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     for (let c = 0; c < 9; c++) {
       const x = c * CELL_SIZE + PADDING;
       if (c === 0 || c === 8) {
-        // Outer boundaries are continuous
         ctx.beginPath();
         ctx.moveTo(x, PADDING);
         ctx.lineTo(x, PADDING + 9 * CELL_SIZE);
         ctx.stroke();
       } else {
-        // Top half
         ctx.beginPath();
         ctx.moveTo(x, PADDING);
         ctx.lineTo(x, PADDING + 4 * CELL_SIZE);
         ctx.stroke();
 
-        // Bottom half
         ctx.beginPath();
         ctx.moveTo(x, PADDING + 5 * CELL_SIZE);
         ctx.lineTo(x, PADDING + 9 * CELL_SIZE);
@@ -154,10 +240,34 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
       }
     }
 
-    // Draw River Text
+    // Palaces diagonals
+    const drawPalaceDiagonals = (startVisRow: number) => {
+      ctx.save();
+      ctx.strokeStyle = '#6B4226';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(PADDING + 3 * CELL_SIZE, PADDING + startVisRow * CELL_SIZE);
+      ctx.lineTo(PADDING + 5 * CELL_SIZE, PADDING + (startVisRow + 2) * CELL_SIZE);
+      ctx.moveTo(PADDING + 5 * CELL_SIZE, PADDING + startVisRow * CELL_SIZE);
+      ctx.lineTo(PADDING + 3 * CELL_SIZE, PADDING + (startVisRow + 2) * CELL_SIZE);
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    drawPalaceDiagonals(0);
+    drawPalaceDiagonals(7);
+
+    // Fiducial Markers for Cannons and Soldiers
+    FIDUCIAL_POINTS.forEach(([r, c]) => {
+      const { x, y } = getVisualCoords(r, c, playerSide);
+      const visCol = playerSide === 'black' ? 8 - c : c;
+      drawFiducialMark(ctx, x, y, visCol);
+    });
+
+    // River Calligraphy
     ctx.save();
-    ctx.font = 'bold 20px "KaiTi", "SimSun", "STKaiti", serif';
-    ctx.fillStyle = '#8b5a2b';
+    ctx.font = 'bold 22px "Noto Serif", "KaiTi", "SimSun", "STKaiti", serif';
+    ctx.fillStyle = '#5C381E';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const riverY = PADDING + 4.5 * CELL_SIZE;
@@ -170,34 +280,23 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     }
     ctx.restore();
 
-    // Palaces diagonals
-    const drawPalaceDiagonals = (startVisRow: number) => {
-      ctx.beginPath();
-      ctx.moveTo(PADDING + 3 * CELL_SIZE, PADDING + startVisRow * CELL_SIZE);
-      ctx.lineTo(PADDING + 5 * CELL_SIZE, PADDING + (startVisRow + 2) * CELL_SIZE);
-      ctx.moveTo(PADDING + 5 * CELL_SIZE, PADDING + startVisRow * CELL_SIZE);
-      ctx.lineTo(PADDING + 3 * CELL_SIZE, PADDING + (startVisRow + 2) * CELL_SIZE);
-      ctx.stroke();
-    };
-
-    drawPalaceDiagonals(0); // Top palace
-    drawPalaceDiagonals(7); // Bottom palace
-
     // Highlight Last Move
     if (lastMove) {
       const fromCoord = getVisualCoords(lastMove.from_row, lastMove.from_col, playerSide);
       const toCoord = getVisualCoords(lastMove.to_row, lastMove.to_col, playerSide);
 
       ctx.save();
-      ctx.strokeStyle = 'rgba(41, 128, 185, 0.7)';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([4, 4]);
+      // Origin square marker
+      ctx.strokeStyle = 'rgba(180, 83, 9, 0.75)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 4]);
+      ctx.strokeRect(fromCoord.x - 24, fromCoord.y - 24, 48, 48);
 
-      // Box around from square
-      ctx.strokeRect(fromCoord.x - 23, fromCoord.y - 23, 46, 46);
-      // Box around to square
-      ctx.strokeStyle = 'rgba(39, 174, 96, 0.8)';
-      ctx.strokeRect(toCoord.x - 23, toCoord.y - 23, 46, 46);
+      // Destination square glow box
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(21, 128, 61, 0.9)';
+      ctx.lineWidth = 2.8;
+      ctx.strokeRect(toCoord.x - 25, toCoord.y - 25, 50, 50);
       ctx.restore();
     }
 
@@ -213,7 +312,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
       drawPiece(ctx, x, y, sq.piece, isSelected);
     });
 
-    // Draw Legal Move Dots/Indicators
+    // Draw Legal Move Indicators
     legalMoves.forEach(([r, c]) => {
       const { x, y } = getVisualCoords(r, c, playerSide);
       const targetSquare = board.find((s) => s.row === r && s.col === c);
@@ -221,24 +320,26 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
 
       ctx.save();
       if (isCapture) {
-        // Draw red/gold capture ring
-        ctx.strokeStyle = '#e74c3c';
-        ctx.lineWidth = 3;
+        // Vermilion capture target ring
+        ctx.strokeStyle = '#DC2626';
+        ctx.lineWidth = 3.2;
         ctx.beginPath();
-        ctx.arc(x, y, 24, 0, Math.PI * 2);
+        ctx.arc(x, y, 25, 0, Math.PI * 2);
         ctx.stroke();
       } else {
-        // Draw green destination dot
-        ctx.fillStyle = 'rgba(46, 204, 113, 0.85)';
+        // Jade destination dot
+        ctx.fillStyle = 'rgba(22, 163, 74, 0.9)';
         ctx.beginPath();
-        ctx.arc(x, y, 7, 0, Math.PI * 2);
+        ctx.arc(x, y, 7.5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#27ae60';
+        ctx.strokeStyle = '#DCFCE7';
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
       ctx.restore();
     });
+
+    ctx.restore();
   }, [board, playerSide, selectedSquare, legalMoves, lastMove]);
 
   useEffect(() => {
@@ -251,8 +352,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const scaleX = BOARD_WIDTH / rect.width;
+    const scaleY = BOARD_HEIGHT / rect.height;
 
     const clickX = (e.clientX - rect.left) * scaleX;
     const clickY = (e.clientY - rect.top) * scaleY;
@@ -264,21 +365,19 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   };
 
   return (
-    <div style={{ display: 'inline-block', position: 'relative', margin: '10px auto' }}>
+    <div className="relative inline-flex items-center justify-center p-2.5 sm:p-3.5 rounded-2xl bg-gradient-to-b from-[#2B1D14] to-[#1D130D] border border-[#4A3222] shadow-[0_20px_50px_rgba(0,0,0,0.75)]">
       <canvas
         ref={canvasRef}
-        width={BOARD_WIDTH}
-        height={BOARD_HEIGHT}
         onClick={handleCanvasClick}
         style={{
-          borderRadius: '8px',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          maxWidth: '100%',
-          height: 'auto',
-          display: 'block',
+          width: `${BOARD_WIDTH}px`,
+          height: `${BOARD_HEIGHT}px`,
         }}
+        className={`rounded-xl block max-w-full h-auto transition-opacity ${
+          disabled ? 'cursor-not-allowed' : 'cursor-pointer'
+        }`}
       />
+      {children}
     </div>
   );
 };
@@ -290,60 +389,73 @@ function drawPiece(
   piece: Piece,
   isSelected: boolean
 ): void {
-  const radius = 22;
+  const radius = 23.5;
 
   ctx.save();
 
-  // Shadow / Glow
+  // Elevation shadow or selection aura
   if (isSelected) {
-    ctx.shadowBlur = 16;
-    ctx.shadowColor = '#f39c12';
-  } else {
-    ctx.shadowBlur = 4;
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-    ctx.shadowOffsetX = 2;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = 'rgba(245, 158, 11, 0.9)';
+    ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 2;
+  } else {
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = 'rgba(25, 15, 5, 0.55)';
+    ctx.shadowOffsetX = 1.5;
+    ctx.shadowOffsetY = 3;
   }
 
-  // Outer piece wooden disk
+  // Piece wooden ivory disc
+  const discGrad = ctx.createRadialGradient(x - 6, y - 6, 3, x, y, radius);
+  if (piece.color === 'red') {
+    discGrad.addColorStop(0, '#FFFDF9');
+    discGrad.addColorStop(0.75, '#FBF0DC');
+    discGrad.addColorStop(1, '#EAD2AC');
+  } else {
+    discGrad.addColorStop(0, '#FAF4E8');
+    discGrad.addColorStop(0.75, '#EFE3CC');
+    discGrad.addColorStop(1, '#DBC5A0');
+  }
+
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = piece.color === 'red' ? '#fdf5e6' : '#f0e6d2';
+  ctx.fillStyle = discGrad;
   ctx.fill();
 
+  // Reset shadow for crisp strokes
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
 
-  // Outer rim
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = piece.color === 'red' ? '#c0392b' : '#2c3e50';
+  // Outer carved rim
+  ctx.lineWidth = 2.4;
+  ctx.strokeStyle = piece.color === 'red' ? '#B91C1C' : '#1E293B';
   ctx.stroke();
 
-  // Inner decorative ring
+  // Inner engraved ring
   ctx.beginPath();
-  ctx.arc(x, y, radius - 3.5, 0, Math.PI * 2);
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = piece.color === 'red' ? '#e74c3c' : '#7f8c8d';
+  ctx.arc(x, y, radius - 3.8, 0, Math.PI * 2);
+  ctx.lineWidth = 1.1;
+  ctx.strokeStyle = piece.color === 'red' ? '#DC2626' : '#475569';
   ctx.stroke();
 
-  // Selected highlight ring
+  // Selection golden halo
   if (isSelected) {
     ctx.beginPath();
-    ctx.arc(x, y, radius + 2, 0, Math.PI * 2);
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = '#f1c40f';
+    ctx.arc(x, y, radius + 2.2, 0, Math.PI * 2);
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = '#F59E0B';
     ctx.stroke();
   }
 
-  // Text character
+  // Traditional Calligraphy Character
   const symbol = getPieceSymbol(piece.type, piece.color);
-  ctx.font = 'bold 22px "KaiTi", "SimSun", "STKaiti", serif';
+  ctx.font = 'bold 23px "Noto Serif", "KaiTi", "SimSun", "STKaiti", serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = piece.color === 'red' ? '#c0392b' : '#1a252f';
+  ctx.fillStyle = piece.color === 'red' ? '#B91C1C' : '#0F172A';
   ctx.fillText(symbol, x, y + 1);
 
   ctx.restore();
 }
-

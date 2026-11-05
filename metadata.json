@@ -1,0 +1,5 @@
+{
+  "name": "Cờ Tướng Đại Sư (Xiangqi AI)",
+  "description": "Trò chơi Cờ Tướng (Xiangqi) truyền thống tích hợp AI thông minh chạy trên WebAssembly, hỗ trợ tùy chỉnh chuyên sâu thuật toán và biên bản ván đấu.",
+  "requestFramePermissions": []
+}

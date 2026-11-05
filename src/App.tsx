@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Trophy, Handshake, AlertTriangle, RotateCcw } from 'lucide-react';
 import init, { WasmGameState } from './wasm/cotuong_core.js';
 import wasmUrl from './wasm/cotuong_core_bg.wasm?url';
 import type {
@@ -8,6 +9,7 @@ import type {
   GameStatus,
   HistoryRecord,
   PieceColor,
+  SearchStats,
   Square,
 } from './types/game.js';
 import { DEFAULT_ENGINE_CONFIG } from './types/game.js';
@@ -38,6 +40,7 @@ export const App: React.FC = () => {
   const [difficulty, setDifficulty] = useState<Difficulty>(1);
   const [isPaused, setIsPaused] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  const [lastStats, setLastStats] = useState<SearchStats | null>(null);
 
   // Board presentation
   const [board, setBoard] = useState<Square[]>([]);
@@ -54,7 +57,8 @@ export const App: React.FC = () => {
   } | null>(null);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
 
-  // Engine Dual Configuration
+  // UI Panels State
+  const [isLogOpen, setIsLogOpen] = useState(false);
   const [redConfig, setRedConfig] = useState<EngineConfig>(DEFAULT_ENGINE_CONFIG);
   const [blackConfig, setBlackConfig] = useState<EngineConfig>(DEFAULT_ENGINE_CONFIG);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -171,6 +175,7 @@ export const App: React.FC = () => {
             `🤖 Độ sâu: ${stats.depth}, Nodes: ${stats.nodes}, Thời gian: ${stats.time_ms}ms`
           );
 
+          setLastStats(stats);
           setLastMove(move);
           syncGameState();
 
@@ -244,25 +249,21 @@ export const App: React.FC = () => {
     const state = gameStateRef.current;
     if (!state) return;
 
-    // Check if player is allowed to move right now
     if (gameMode === 'HumanVsComputer' && turn !== playerSide) return;
     if (gameMode === 'ComputerVsComputer') return;
 
     const clickedSquare = board.find((s) => s.row === row && s.col === col);
     const piece = clickedSquare?.piece;
 
-    // If already selected a piece
     if (selectedSquare) {
       const [selRow, selCol] = selectedSquare;
 
-      // Clicked same square -> deselect
       if (selRow === row && selCol === col) {
         setSelectedSquare(null);
         setLegalMoves([]);
         return;
       }
 
-      // Check if clicked square is in legal moves
       const isLegal = legalMoves.some(([r, c]) => r === row && c === col);
       if (isLegal) {
         try {
@@ -294,7 +295,6 @@ export const App: React.FC = () => {
       }
     }
 
-    // Select own piece
     if (piece && piece.color === turn) {
       setSelectedSquare([row, col]);
       const moves = state.get_legal_moves(row, col) as [number, number][];
@@ -312,6 +312,7 @@ export const App: React.FC = () => {
     setSelectedSquare(null);
     setLegalMoves([]);
     setLastMove(null);
+    setLastStats(null);
     syncGameState();
     if (gameMode === 'ComputerVsComputer') {
       setIsPaused(true);
@@ -325,7 +326,6 @@ export const App: React.FC = () => {
     if (!state) return;
 
     if (gameMode === 'HumanVsComputer') {
-      // Undo both AI and player move if player's turn
       if (state.turn() === playerSide && state.history_len() >= 2) {
         state.undo_move();
       }
@@ -340,65 +340,82 @@ export const App: React.FC = () => {
     syncGameState();
   };
 
-  const getStatusBanner = () => {
-    if (status.status === 'Checkmate') {
-      const winnerName = status.winner === 'red' ? 'Bên ĐỎ' : 'Bên ĐEN';
-      return (
-        <div className="status-banner status-checkmate">
-          🏆 {winnerName} THẮNG! (Chiếu bí - Checkmate)
-        </div>
-      );
-    }
-    if (status.status === 'Stalemate') {
-      return (
-        <div className="status-banner status-stalemate">
-          🤝 HÒA CỜ! (Hết nước đi - Stalemate)
-        </div>
-      );
-    }
-    if (isInCheck) {
-      return (
-        <div className="status-banner status-check">
-          ⚠️ CHIẾU TƯỚNG!
-        </div>
-      );
-    }
-    return null;
-  };
-
   return (
-    <div className="app-container">
-      <h1 className="game-title">CỜ TƯỚNG</h1>
-
-      {getStatusBanner()}
-
-      <ThinkingIndicator isThinking={isThinking} />
-
-      <ControlsArea
-        gameMode={gameMode}
-        setGameMode={setGameMode}
-        playerSide={playerSide}
-        setPlayerSide={setPlayerSide}
-        difficulty={difficulty}
-        setDifficulty={setDifficulty}
-        isPaused={isPaused}
-        setIsPaused={setIsPaused}
-        onNewGame={handleNewGame}
-        onUndo={handleUndo}
-        onExportCsv={() => exportCsv(history)}
-        onOpenConfig={() => setIsConfigOpen(true)}
-        isThinking={isThinking}
-        canUndo={history.length > 0}
-      />
-
-      <div className="main-layout">
-        <LogPanel history={history} />
-
-        <div className="board-container">
-          <div className="turn-badge">
-            Lượt đi: {turn === 'red' ? '🔴 Bên Đỏ' : '⚫ Bên Đen'}
+    <div className="min-h-screen bg-[#14110F] text-[#F5EFE6] flex flex-col justify-between px-3 py-4 sm:px-6 sm:py-5">
+      {/* Top Bar */}
+      <header className="w-full max-w-[760px] mx-auto flex items-center justify-between gap-4 pb-3 mb-3 border-b border-stone-800/80">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-red-700 to-red-950 border border-amber-400/50 flex items-center justify-center font-display-serif font-bold text-lg text-amber-100 shadow-md shrink-0">
+            帥
           </div>
+          <div>
+            <h1 className="font-display-serif text-lg sm:text-xl font-bold tracking-wide text-[#F5EFE6] leading-tight">
+              CỜ TƯỚNG ĐẠI SƯ
+            </h1>
+            <p className="text-xs text-stone-400">
+              Xiangqi AI · WebAssembly Engine
+            </p>
+          </div>
+        </div>
 
+        {/* Active Turn & Check Status Indicator */}
+        <div className="flex items-center gap-3">
+          {isInCheck && status.status === 'Playing' && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>Chiếu tướng!</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#1E1915] border border-stone-800">
+            <span
+              className={`w-5 h-5 rounded-full flex items-center justify-center font-display-serif text-xs font-bold ${
+                turn === 'red'
+                  ? 'bg-red-900 text-red-200 border border-red-500/50'
+                  : 'bg-stone-800 text-stone-200 border border-stone-600'
+              }`}
+            >
+              {turn === 'red' ? '帥' : '將'}
+            </span>
+            <div className="text-xs">
+              <span className="text-stone-400">Lượt đi: </span>
+              <span
+                className={
+                  turn === 'red'
+                    ? 'font-semibold text-red-400'
+                    : 'font-semibold text-amber-300'
+                }
+              >
+                {turn === 'red' ? 'Bên Đỏ' : 'Bên Đen'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col items-center justify-center gap-4 w-full max-w-[760px] mx-auto">
+        <ControlsArea
+          gameMode={gameMode}
+          setGameMode={setGameMode}
+          playerSide={playerSide}
+          setPlayerSide={setPlayerSide}
+          difficulty={difficulty}
+          setDifficulty={setDifficulty}
+          isPaused={isPaused}
+          setIsPaused={setIsPaused}
+          onNewGame={handleNewGame}
+          onUndo={handleUndo}
+          onExportCsv={() => exportCsv(history)}
+          onOpenConfig={() => setIsConfigOpen(true)}
+          onToggleLog={() => setIsLogOpen((prev) => !prev)}
+          moveCount={history.length}
+          isThinking={isThinking}
+          canUndo={history.length > 0}
+        />
+
+        {/* Board Container with Overview Overlays */}
+        <div className="relative flex flex-col items-center justify-center my-1">
           <BoardCanvas
             board={board}
             playerSide={playerSide}
@@ -407,9 +424,67 @@ export const App: React.FC = () => {
             lastMove={lastMove}
             onSquareClick={handleSquareClick}
             disabled={isThinking || status.status !== 'Playing'}
-          />
+          >
+            {/* AI Thinking Overview Overlay directly on the board */}
+            <ThinkingIndicator
+              isThinking={isThinking}
+              turn={turn}
+              difficulty={difficulty}
+              lastStats={lastStats}
+            />
+
+            {/* End-of-Game Victory / Draw Overlay on the board */}
+            {status.status !== 'Playing' && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs rounded-2xl animate-board-overlay">
+                <div className="w-full max-w-[320px] rounded-2xl bg-[#1A1512] border border-amber-500/40 shadow-2xl p-5 text-center">
+                  {status.status === 'Checkmate' ? (
+                    <>
+                      <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/35 flex items-center justify-center mx-auto mb-3 text-amber-400">
+                        <Trophy className="w-6 h-6" />
+                      </div>
+                      <h2 className="font-display-serif text-lg font-bold text-[#F5EFE6]">
+                        {status.winner === 'red' ? 'Bên Đỏ Chiến Thắng!' : 'Bên Đen Chiến Thắng!'}
+                      </h2>
+                      <p className="text-xs text-stone-400 mt-1">
+                        Chiếu bí (Checkmate) sau {history.length} nước đi
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center mx-auto mb-3 text-stone-300">
+                        <Handshake className="w-6 h-6" />
+                      </div>
+                      <h2 className="font-display-serif text-lg font-bold text-[#F5EFE6]">
+                        Ván Cờ Hòa!
+                      </h2>
+                      <p className="text-xs text-stone-400 mt-1">
+                        Hết nước đi hợp lệ (Stalemate)
+                      </p>
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleNewGame}
+                    className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] text-white transition-colors cursor-pointer shadow-md"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Chơi ván mới</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </BoardCanvas>
         </div>
-      </div>
+
+        {/* Collapsible Move Log Dock at the bottom ("ẩn xuống, khi nào cần thì mở lên xem") */}
+        <LogPanel
+          history={history}
+          isOpen={isLogOpen}
+          onToggle={setIsLogOpen}
+          onExportCsv={() => exportCsv(history)}
+        />
+      </main>
 
       <ConfigModal
         isOpen={isConfigOpen}
@@ -424,4 +499,3 @@ export const App: React.FC = () => {
 };
 
 export default App;
-
