@@ -23,6 +23,22 @@ pub mod protocol;
 use dataset::{extract_features, load_dataset_file, PositionSample};
 use protocol::{EngineProtocol, ExternalEngineClient};
 
+pub const FLOAT_NNUE_MAGIC: &[u8; 8] = b"COTF32_1";
+pub const FLOAT_FILE_SIZE: usize = 8
+    + (L1_INPUT_SIZE * L1_OUTPUT_SIZE
+        + L1_OUTPUT_SIZE
+        + L1_INPUT_SIZE * PSQT_BUCKETS
+        + L2_OUTPUT_SIZE * L2_INPUT_SIZE
+        + L2_OUTPUT_SIZE
+        + L3_OUTPUT_SIZE * L3_INPUT_SIZE
+        + L3_OUTPUT_SIZE
+        + L3_OUTPUT_SIZE
+        + 1)
+        * 4;
+
+pub const DEFAULT_FLOAT_MODEL: &str = "checkpoints/model_latest.f32";
+pub const DEFAULT_QUANTIZED_MODEL: &str = "cotuong_core/assets/default.nnue";
+
 #[derive(Clone)]
 pub struct FloatNnue {
     pub w1: Box<[[f32; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]>,
@@ -753,6 +769,300 @@ impl FloatNnue {
         file.write_all(&bytes)?;
         Ok(())
     }
+
+    /// Saves full-precision unquantized model weights to a binary file.
+    pub fn save_float(&self, path: &str) -> std::io::Result<()> {
+        let mut file = File::create(path)?;
+        let mut bytes = Vec::with_capacity(FLOAT_FILE_SIZE);
+        bytes.extend_from_slice(FLOAT_NNUE_MAGIC);
+
+        for row in self.w1.iter() {
+            for &val in row.iter() {
+                bytes.extend_from_slice(&val.to_le_bytes());
+            }
+        }
+        for &val in self.b1.iter() {
+            bytes.extend_from_slice(&val.to_le_bytes());
+        }
+        for row in self.w_psqt.iter() {
+            for &val in row.iter() {
+                bytes.extend_from_slice(&val.to_le_bytes());
+            }
+        }
+        for row in self.w2.iter() {
+            for &val in row.iter() {
+                bytes.extend_from_slice(&val.to_le_bytes());
+            }
+        }
+        for &val in self.b2.iter() {
+            bytes.extend_from_slice(&val.to_le_bytes());
+        }
+        for row in self.w3.iter() {
+            for &val in row.iter() {
+                bytes.extend_from_slice(&val.to_le_bytes());
+            }
+        }
+        for &val in self.b3.iter() {
+            bytes.extend_from_slice(&val.to_le_bytes());
+        }
+        for &val in self.w4.iter() {
+            bytes.extend_from_slice(&val.to_le_bytes());
+        }
+        bytes.extend_from_slice(&self.b4.to_le_bytes());
+
+        file.write_all(&bytes)?;
+        Ok(())
+    }
+
+    /// Loads full-precision unquantized model weights from bytes.
+    pub fn load_float(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() != FLOAT_FILE_SIZE {
+            return Err(format!(
+                "Invalid Float NNUE size: expected {}, got {}",
+                FLOAT_FILE_SIZE,
+                bytes.len()
+            ));
+        }
+        if bytes.get(0..8) != Some(FLOAT_NNUE_MAGIC) {
+            return Err("Invalid Float NNUE magic header".to_string());
+        }
+
+        let mut offset = 8;
+        let mut read_f32 = |data: &[u8]| -> Result<f32, String> {
+            let slice = data
+                .get(offset..offset + 4)
+                .ok_or_else(|| "Unexpected EOF reading float".to_string())?;
+            offset += 4;
+            let arr: [u8; 4] = slice.try_into().map_err(|_| "Slice convert error")?;
+            Ok(f32::from_le_bytes(arr))
+        };
+
+        let mut w1_vec = vec![[0.0f32; L1_OUTPUT_SIZE]; L1_INPUT_SIZE];
+        for row in &mut w1_vec {
+            for val in row {
+                *val = read_f32(bytes)?;
+            }
+        }
+        let w1: Box<[[f32; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]> = w1_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W1 array".to_string())?;
+
+        let mut b1 = [0.0f32; L1_OUTPUT_SIZE];
+        for val in &mut b1 {
+            *val = read_f32(bytes)?;
+        }
+
+        let mut w_psqt_vec = vec![[0.0f32; PSQT_BUCKETS]; L1_INPUT_SIZE];
+        for row in &mut w_psqt_vec {
+            for val in row {
+                *val = read_f32(bytes)?;
+            }
+        }
+        let w_psqt: Box<[[f32; PSQT_BUCKETS]; L1_INPUT_SIZE]> = w_psqt_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W_PSQT array".to_string())?;
+
+        let mut w2_vec = vec![[0.0f32; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
+        for row in &mut w2_vec {
+            for val in row {
+                *val = read_f32(bytes)?;
+            }
+        }
+        let w2: Box<[[f32; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]> = w2_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W2 array".to_string())?;
+
+        let mut b2 = [0.0f32; L2_OUTPUT_SIZE];
+        for val in &mut b2 {
+            *val = read_f32(bytes)?;
+        }
+
+        let mut w3_vec = vec![[0.0f32; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
+        for row in &mut w3_vec {
+            for val in row {
+                *val = read_f32(bytes)?;
+            }
+        }
+        let w3: Box<[[f32; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]> = w3_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W3 array".to_string())?;
+
+        let mut b3 = [0.0f32; L3_OUTPUT_SIZE];
+        for val in &mut b3 {
+            *val = read_f32(bytes)?;
+        }
+
+        let mut w4 = [0.0f32; L3_OUTPUT_SIZE];
+        for val in &mut w4 {
+            *val = read_f32(bytes)?;
+        }
+
+        let b4 = read_f32(bytes)?;
+
+        Ok(Self {
+            w1,
+            b1,
+            w_psqt,
+            w2,
+            b2,
+            w3,
+            b3,
+            w4,
+            b4,
+        })
+    }
+
+    /// Loads weights from quantized `NnueWeights`.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn from_quantized_weights(weights: &NnueWeights) -> Self {
+        let mut w1_vec = vec![[0.0f32; L1_OUTPUT_SIZE]; L1_INPUT_SIZE];
+        for (dst_row, src_row) in w1_vec.iter_mut().zip(weights.w1.iter()) {
+            for (dst, &val) in dst_row.iter_mut().zip(src_row.iter()) {
+                *dst = f32::from(val) / 256.0;
+            }
+        }
+        let Ok(w1) = w1_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+
+        let mut b1 = [0.0f32; L1_OUTPUT_SIZE];
+        for (dst, &val) in b1.iter_mut().zip(weights.b1.iter()) {
+            *dst = f32::from(val) / 256.0;
+        }
+
+        let mut w_psqt_vec = vec![[0.0f32; PSQT_BUCKETS]; L1_INPUT_SIZE];
+        for (dst_row, src_row) in w_psqt_vec.iter_mut().zip(weights.w_psqt.iter()) {
+            for (dst, &val) in dst_row.iter_mut().zip(src_row.iter()) {
+                *dst = f32::from(val) / 16.0;
+            }
+        }
+        let Ok(w_psqt) = w_psqt_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+
+        let mut w2_vec = vec![[0.0f32; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
+        for (dst_row, src_row) in w2_vec.iter_mut().zip(weights.w2.iter()) {
+            for (dst, &val) in dst_row.iter_mut().zip(src_row.iter()) {
+                *dst = f32::from(val) / 64.0;
+            }
+        }
+        let Ok(w2) = w2_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+
+        let mut b2 = [0.0f32; L2_OUTPUT_SIZE];
+        for (dst, &val) in b2.iter_mut().zip(weights.b2.iter()) {
+            *dst = (val as f32) / 4096.0;
+        }
+
+        let mut w3_vec = vec![[0.0f32; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
+        for (dst_row, src_row) in w3_vec.iter_mut().zip(weights.w3.iter()) {
+            for (dst, &val) in dst_row.iter_mut().zip(src_row.iter()) {
+                *dst = f32::from(val) / 64.0;
+            }
+        }
+        let Ok(w3) = w3_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+
+        let mut b3 = [0.0f32; L3_OUTPUT_SIZE];
+        for (dst, &val) in b3.iter_mut().zip(weights.b3.iter()) {
+            *dst = (val as f32) / 4096.0;
+        }
+
+        let mut w4 = [0.0f32; L3_OUTPUT_SIZE];
+        for (dst, &val) in w4.iter_mut().zip(weights.w4.iter()) {
+            *dst = f32::from(val) / 16.0;
+        }
+
+        let b4 = (weights.b4 as f32) / 16.0;
+
+        Self {
+            w1,
+            b1,
+            w_psqt,
+            w2,
+            b2,
+            w3,
+            b3,
+            w4,
+            b4,
+        }
+    }
+
+    /// Loads model weights from either a full-precision float file (.f32) or a quantized NNUE file (.nnue).
+    pub fn load_from_file(path: &str) -> Result<Self, String> {
+        let bytes = std::fs::read(path).map_err(|e| format!("Failed to read '{path}': {e}"))?;
+        if bytes.starts_with(FLOAT_NNUE_MAGIC) {
+            Self::load_float(&bytes)
+        } else if bytes.starts_with(NNUE_MAGIC) {
+            let weights = NnueWeights::load_from_bytes(&bytes)?;
+            Ok(Self::from_quantized_weights(&weights))
+        } else {
+            Err(format!("File '{path}' has unknown format/header"))
+        }
+    }
+
+    /// Loads model weights from specified path, or fallback existing file, or creates new if none found or scratch.
+    #[must_use]
+    pub fn load_or_init(
+        specified_path: Option<&str>,
+        fallback_path: Option<&str>,
+        scratch: bool,
+    ) -> Self {
+        if scratch {
+            println!("🌱 Khởi tạo mô hình NNUE mới từ đầu (--scratch)...");
+            return Self::new();
+        }
+
+        if let Some(path) = specified_path {
+            match Self::load_from_file(path) {
+                Ok(model) => {
+                    println!("♻️  Đã nạp thành công trọng số từ: {path} để tiếp tục huấn luyện!");
+                    return model;
+                }
+                Err(e) => {
+                    eprintln!("⚠️  Không thể nạp trọng số từ '{path}': {e}. Sẽ khởi tạo mạng mới.");
+                    return Self::new();
+                }
+            }
+        }
+
+        if let Some(fb) = fallback_path {
+            if std::path::Path::new(fb).exists() {
+                match Self::load_from_file(fb) {
+                    Ok(model) => {
+                        println!(
+                            "♻️  Tự động nạp trọng số chưa lượng tử hóa từ: {fb} để tiếp tục huấn luyện!"
+                        );
+                        return model;
+                    }
+                    Err(e) => {
+                        println!(
+                            "⚠️  Tệp '{fb}' tồn tại nhưng nạp thất bại: {e}. Sẽ thử tìm file khác."
+                        );
+                    }
+                }
+            }
+        }
+
+        // Also check if default quantized weights exist
+        let default_quantized = "cotuong_core/assets/default.nnue";
+        if std::path::Path::new(default_quantized).exists() {
+            if let Ok(model) = Self::load_from_file(default_quantized) {
+                println!("♻️  Tự động nạp trọng số từ: {default_quantized}!");
+                return model;
+            }
+        }
+
+        println!("🌱 Không tìm thấy trọng số trước đó. Khởi tạo mô hình mạng mới từ đầu!");
+        Self::new()
+    }
 }
 
 fn sigmoid(x: f32) -> f32 {
@@ -990,6 +1300,7 @@ fn calculate_delta_elo(score_rate: f64) -> f64 {
 }
 
 /// Runs Supervised Learning on a master games / openings dataset file.
+#[allow(clippy::too_many_arguments)]
 fn run_dataset_training(
     dataset_path: &str,
     epochs: usize,
@@ -997,6 +1308,8 @@ fn run_dataset_training(
     checkpoint_dir: Option<&str>,
     lr: f32,
     eval_games: usize,
+    resume_path: Option<&str>,
+    scratch: bool,
 ) {
     println!("\n▶ Nạp dữ liệu kỳ phổ mẫu từ: {dataset_path} ...");
     let mut samples = match load_dataset_file(dataset_path) {
@@ -1008,7 +1321,7 @@ fn run_dataset_training(
     };
     println!("  • Đã nạp thành công {} thế cờ mẫu!", samples.len());
 
-    let mut champion_model = FloatNnue::new();
+    let mut champion_model = FloatNnue::load_or_init(resume_path, Some(output_path), scratch);
     let mut champion_weights = Arc::new(champion_model.to_quantized_weights());
 
     let mut rng = rand::thread_rng();
@@ -1093,17 +1406,17 @@ fn run_dataset_training(
             champion_model = candidate_model;
             champion_weights = cand_weights;
 
-            if let Err(e) = champion_model.export_quantized(output_path) {
-                eprintln!("    ❌ Lỗi ghi file trọng số: {e}");
+            if let Err(e) = champion_model.save_float(output_path) {
+                eprintln!("    ❌ Lỗi ghi file trọng số Float: {e}");
             } else {
-                println!("    💾 Đã xuất trọng số mới sang: {output_path}");
+                println!("    💾 Đã lưu trọng số Float (chưa lượng tử hóa) sang: {output_path}");
             }
 
             if let Some(cp_dir) = checkpoint_dir {
                 let _ = std::fs::create_dir_all(cp_dir);
-                let cp_path = format!("{cp_dir}/dataset_epoch_{epoch}.nnue");
-                if champion_model.export_quantized(&cp_path).is_ok() {
-                    println!("    📁 Đã lưu checkpoint: {cp_path}");
+                let cp_path = format!("{cp_dir}/dataset_epoch_{epoch}.f32");
+                if champion_model.save_float(&cp_path).is_ok() {
+                    println!("    📁 Đã lưu checkpoint Float: {cp_path}");
                 }
             }
         } else {
@@ -1127,6 +1440,8 @@ fn run_teacher_distillation(
     output_path: &str,
     checkpoint_dir: Option<&str>,
     lr: f32,
+    resume_path: Option<&str>,
+    scratch: bool,
 ) {
     println!("\n▶ Khởi động Engine Sư Phụ ({engine_path:?}, protocol: {protocol:?}) ...");
     let mut client = match ExternalEngineClient::spawn(engine_path, protocol) {
@@ -1171,8 +1486,8 @@ fn run_teacher_distillation(
         eval_start.elapsed()
     );
 
-    // Train on labeled samples
-    let mut model = FloatNnue::new();
+    // Train on labeled samples (resuming from existing model if available)
+    let mut model = FloatNnue::load_or_init(resume_path, Some(output_path), scratch);
     for epoch in 1..=epochs {
         let mut total_loss = 0.0f32;
         for sample in &samples {
@@ -1186,17 +1501,17 @@ fn run_teacher_distillation(
 
         if let Some(cp_dir) = checkpoint_dir {
             let _ = std::fs::create_dir_all(cp_dir);
-            let cp_path = format!("{cp_dir}/teacher_epoch_{epoch}.nnue");
-            if model.export_quantized(&cp_path).is_ok() {
-                println!("    📁 Đã lưu checkpoint: {cp_path}");
+            let cp_path = format!("{cp_dir}/teacher_epoch_{epoch}.f32");
+            if model.save_float(&cp_path).is_ok() {
+                println!("    📁 Đã lưu checkpoint Float: {cp_path}");
             }
         }
     }
 
-    if let Err(e) = model.export_quantized(output_path) {
-        eprintln!("❌ Lỗi xuất trọng số: {e}");
+    if let Err(e) = model.save_float(output_path) {
+        eprintln!("❌ Lỗi xuất trọng số Float: {e}");
     } else {
-        println!("💾 Đã lưu trọng số đã chưng cất tri thức sang: {output_path}");
+        println!("💾 Đã lưu trọng số Float đã chưng cất tri thức sang: {output_path}");
     }
 }
 
@@ -1207,6 +1522,7 @@ fn run_sparring_match(
     num_games: usize,
     depth: u8,
     output_path: &str,
+    resume_path: Option<&str>,
 ) {
     println!("\n▶ Khởi tạo trận đấu tập (Sparring) với Engine: {engine_path} ...");
     let mut client = match ExternalEngineClient::spawn(engine_path, protocol) {
@@ -1218,7 +1534,7 @@ fn run_sparring_match(
     };
     println!("✅ Đã sẵn sàng thi đấu {num_games} ván đối kháng!");
 
-    let candidate_model = FloatNnue::new();
+    let candidate_model = FloatNnue::load_or_init(resume_path, Some(output_path), false);
     let cand_weights = Arc::new(candidate_model.to_quantized_weights());
     let config_cand = Arc::new(EngineConfig {
         eval_mode: 2,
@@ -1310,13 +1626,11 @@ fn run_sparring_match(
     println!("   • Bot : {wins} Thắng | {draws} Hòa | {losses} Thua / {num_games} ván");
     let score_rate = (wins as f64 + 0.5 * draws as f64) / (num_games as f64);
     println!("   • Tỷ lệ đạt điểm: {:.1}%", score_rate * 100.0);
-
-    if let Err(e) = candidate_model.export_quantized(output_path) {
-        eprintln!("❌ Lỗi xuất trọng số: {e}");
-    }
+    println!("💡 Trận đấu tập đánh giá (Sparring) hoàn tất, mô hình được giữ nguyên.");
 }
 
 /// Runs Self-Play Reinforcement Learning loop.
+#[allow(clippy::too_many_arguments)]
 fn run_selfplay_training(
     num_games: usize,
     epochs: usize,
@@ -1324,9 +1638,11 @@ fn run_selfplay_training(
     output_path: &str,
     checkpoint_dir: Option<&str>,
     lr: f32,
+    resume_path: Option<&str>,
+    scratch: bool,
 ) {
     let overall_start = Instant::now();
-    let mut champion_model = FloatNnue::new();
+    let mut champion_model = FloatNnue::load_or_init(resume_path, Some(output_path), scratch);
     let mut champion_weights = Arc::new(champion_model.to_quantized_weights());
 
     let mut replay_buffer: Vec<PositionSample> = Vec::new();
@@ -1430,17 +1746,17 @@ fn run_selfplay_training(
             champion_model = candidate_model;
             champion_weights = cand_weights;
 
-            if let Err(e) = champion_model.export_quantized(output_path) {
-                eprintln!("    ❌ Lỗi ghi file trọng số: {e}");
+            if let Err(e) = champion_model.save_float(output_path) {
+                eprintln!("    ❌ Lỗi ghi file trọng số Float: {e}");
             } else {
-                println!("    💾 Đã xuất trọng số mới sang: {output_path}");
+                println!("    💾 Đã lưu trọng số Float (chưa lượng tử hóa) sang: {output_path}");
             }
 
             if let Some(cp_dir) = checkpoint_dir {
                 let _ = std::fs::create_dir_all(cp_dir);
-                let cp_path = format!("{cp_dir}/selfplay_epoch_{epoch}.nnue");
-                if champion_model.export_quantized(&cp_path).is_ok() {
-                    println!("    📁 Đã lưu checkpoint: {cp_path}");
+                let cp_path = format!("{cp_dir}/selfplay_epoch_{epoch}.f32");
+                if champion_model.save_float(&cp_path).is_ok() {
+                    println!("    📁 Đã lưu checkpoint Float: {cp_path}");
                 }
             }
         } else {
@@ -1463,6 +1779,36 @@ fn run_selfplay_training(
         overall_start.elapsed()
     );
     println!("================================================================================");
+}
+
+/// Quantizes a full-precision float model into an int16/int8 NNUE binary file.
+fn run_quantize_mode(input_path: &str, output_path: &str) {
+    println!("\n▶ Bắt đầu lượng tử hóa mô hình Float NNUE (f32) -> Quantized NNUE (i16/i8)...");
+    println!("  • File nguồn (Float NNUE)    : {input_path}");
+    println!("  • File đích (Quantized NNUE) : {output_path}");
+
+    let model = match FloatNnue::load_from_file(input_path) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("❌ Lỗi nạp mô hình Float từ '{input_path}': {e}");
+            return;
+        }
+    };
+
+    if let Some(parent) = std::path::Path::new(output_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    if let Err(e) = model.export_quantized(output_path) {
+        eprintln!("❌ Lỗi xuất trọng số lượng tử hóa: {e}");
+    } else {
+        println!("✅ Đã lượng tử hóa và lưu thành công sang: {output_path}");
+        if let Ok(metadata) = std::fs::metadata(output_path) {
+            #[allow(clippy::cast_precision_loss)]
+            let size_kb = metadata.len() as f64 / 1024.0;
+            println!("  • Dung lượng file lượng tử hóa : {size_kb:.1} KB");
+        }
+    }
 }
 
 fn main() {
@@ -1543,11 +1889,27 @@ fn main() {
         .and_then(|s| s.parse::<f32>().ok())
         .unwrap_or(0.01);
 
+    let input_path = args
+        .iter()
+        .position(|a| a == "--input" || a == "-i")
+        .and_then(|idx| args.get(idx + 1))
+        .map(String::as_str)
+        .unwrap_or(DEFAULT_FLOAT_MODEL);
+
     let output_path = args
         .iter()
-        .position(|a| a == "--output")
+        .position(|a| a == "--output" || a == "-o")
         .and_then(|idx| args.get(idx + 1))
-        .map_or("cotuong_core/assets/default.nnue", |s| s.as_str());
+        .map_or_else(
+            || {
+                if mode == "quantize" || mode == "export" {
+                    DEFAULT_QUANTIZED_MODEL
+                } else {
+                    DEFAULT_FLOAT_MODEL
+                }
+            },
+            |s| s.as_str(),
+        );
 
     let checkpoint_dir = args
         .iter()
@@ -1556,19 +1918,45 @@ fn main() {
         .map(String::as_str)
         .or(Some("checkpoints"));
 
+    let resume_path = args
+        .iter()
+        .position(|a| a == "--resume" || a == "--init")
+        .and_then(|idx| args.get(idx + 1))
+        .map(String::as_str);
+
+    let scratch = args.iter().any(|a| a == "--scratch");
+
     println!("================================================================================");
     println!(" 🧠 Xiangqi AI Trainer (Master Dataset & External UCCI/UCI Engine Integration)  ");
     println!("================================================================================");
     println!("Cấu hình:");
     println!("  • Chế độ (Mode)            : {mode}");
-    println!("  • Số Epochs                : {epochs}");
-    println!("  • Tốc độ học (LR)          : {lr}");
-    println!("  • Đường dẫn trọng số đích : {output_path}");
-    if let Some(cp) = checkpoint_dir {
-        println!("  • Thư mục Checkpoint       : {cp}");
+    if mode == "quantize" || mode == "export" {
+        println!("  • File Float nguồn         : {input_path}");
+        println!("  • File NNUE đích           : {output_path}");
+    } else {
+        println!("  • Số Epochs                : {epochs}");
+        println!("  • Tốc độ học (LR)          : {lr}");
+        println!("  • Đường dẫn trọng số đích : {output_path}");
+        if let Some(res) = resume_path {
+            println!("  • Nạp trọng số khởi điểm  : {res}");
+        } else if scratch {
+            println!("  • Huấn luyện mới từ đầu    : BẬT (--scratch)");
+        } else {
+            println!("  • Kế thừa trọng số         : Tự động từ {output_path} (nếu có)");
+        }
+        if let Some(cp) = checkpoint_dir {
+            println!("  • Thư mục Checkpoint       : {cp}");
+        }
     }
 
     match mode.as_str() {
+        "quantize" | "export" => {
+            println!(
+                "================================================================================"
+            );
+            run_quantize_mode(input_path, output_path);
+        }
         "dataset" | "sl" => {
             println!("  • Tập dữ liệu kỳ phổ mẫu   : {dataset_path}");
             println!("  • Số ván Đấu Đánh Giá      : {eval_games}");
@@ -1582,6 +1970,8 @@ fn main() {
                 checkpoint_dir,
                 lr,
                 eval_games,
+                resume_path,
+                scratch,
             );
         }
         "teacher" | "distill" => {
@@ -1601,6 +1991,8 @@ fn main() {
                 output_path,
                 checkpoint_dir,
                 lr,
+                resume_path,
+                scratch,
             );
         }
         "sparring" | "match" => {
@@ -1611,7 +2003,14 @@ fn main() {
             println!(
                 "================================================================================"
             );
-            run_sparring_match(engine, engine_proto, num_games, engine_depth, output_path);
+            run_sparring_match(
+                engine,
+                engine_proto,
+                num_games,
+                engine_depth,
+                output_path,
+                resume_path,
+            );
         }
         "selfplay" | "rl" => {
             println!("  • Số ván Self-Play/Epoch   : {num_games}");
@@ -1626,10 +2025,69 @@ fn main() {
                 output_path,
                 checkpoint_dir,
                 lr,
+                resume_path,
+                scratch,
             );
         }
         unknown => {
             eprintln!("❌ Chế độ không hợp lệ: '{unknown}'. Hỗ trợ: 'dataset', 'teacher', 'sparring', 'selfplay'.");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_float_save_and_load_roundtrip() {
+        let original_model = FloatNnue::new();
+        let temp_path = "/tmp/test_model_roundtrip.f32";
+        assert!(original_model.save_float(temp_path).is_ok());
+
+        let loaded = FloatNnue::load_from_file(temp_path);
+        assert!(loaded.is_ok());
+        let loaded_model = loaded.unwrap();
+
+        // Exact match for float weights
+        assert_eq!(original_model.b1, loaded_model.b1);
+        assert_eq!(original_model.b2, loaded_model.b2);
+        assert_eq!(original_model.b3, loaded_model.b3);
+        assert_eq!(original_model.w4, loaded_model.w4);
+        assert_eq!(original_model.b4, loaded_model.b4);
+
+        let _ = std::fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn test_quantized_weights_roundtrip() {
+        let original_model = FloatNnue::new();
+        let quantized = original_model.to_quantized_weights();
+        let reconstructed = FloatNnue::from_quantized_weights(&quantized);
+
+        // Check biases roundtrip closeness
+        for (b_orig, b_recon) in original_model.b1.iter().zip(reconstructed.b1.iter()) {
+            assert!((b_orig - b_recon).abs() < 0.01);
+        }
+
+        // Test export & load from file roundtrip
+        let temp_path = "/tmp/test_roundtrip.nnue";
+        assert!(original_model.export_quantized(temp_path).is_ok());
+        let loaded = FloatNnue::load_from_file(temp_path);
+        assert!(loaded.is_ok());
+        let loaded_model = loaded.unwrap();
+        assert!((loaded_model.b4 - original_model.b4).abs() < 0.1);
+        let _ = std::fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn test_load_or_init_behavior() {
+        // Scratch always gives fresh model
+        let scratch_model = FloatNnue::load_or_init(None, None, true);
+        assert_eq!(scratch_model.b1[8], -0.55);
+
+        // Non-existent specified path falls back to new
+        let fallback_model = FloatNnue::load_or_init(Some("/tmp/non_existent.nnue"), None, false);
+        assert_eq!(fallback_model.b1[8], -0.55);
     }
 }
