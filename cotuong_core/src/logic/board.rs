@@ -193,7 +193,7 @@ impl Board {
                     };
 
                     if let Some(pos) = BoardCoordinate::new(r, c) {
-                        board.add_piece(pos, piece_type, color);
+                        board.raw_add_piece(pos, piece_type, color);
                     }
                     c += 1;
                 }
@@ -285,22 +285,22 @@ impl Board {
         // Back row
         for (col, &pt) in pieces.iter().enumerate() {
             if let Some(pos) = make_coord(back_row, col) {
-                self.add_piece(pos, pt, color);
+                self.raw_add_piece(pos, pt, color);
             }
         }
 
         // Cannons
         if let Some(pos) = make_coord(cannon_row, 1) {
-            self.add_piece(pos, PieceType::Cannon, color);
+            self.raw_add_piece(pos, PieceType::Cannon, color);
         }
         if let Some(pos) = make_coord(cannon_row, 7) {
-            self.add_piece(pos, PieceType::Cannon, color);
+            self.raw_add_piece(pos, PieceType::Cannon, color);
         }
 
         // Soldiers
         for col in (0..9).step_by(2) {
             if let Some(pos) = make_coord(soldier_row, col) {
-                self.add_piece(pos, PieceType::Soldier, color);
+                self.raw_add_piece(pos, PieceType::Soldier, color);
             }
         }
     }
@@ -311,12 +311,13 @@ impl Board {
         to: BoardCoordinate,
     ) -> Option<Piece> {
         let piece = self.get_piece(from)?;
-        self.remove_piece(from, piece.piece_type, piece.color);
+        self.raw_remove_piece(from, piece.piece_type, piece.color);
         let captured = self.get_piece(to);
         if let Some(cap) = captured {
-            self.remove_piece(to, cap.piece_type, cap.color);
+            self.raw_remove_piece(to, cap.piece_type, cap.color);
         }
-        self.add_piece(to, piece.piece_type, piece.color);
+        self.raw_add_piece(to, piece.piece_type, piece.color);
+        self.refresh_nnue();
         captured
     }
 
@@ -327,28 +328,25 @@ impl Board {
         captured: Option<Piece>,
     ) {
         if let Some(piece) = self.get_piece(to) {
-            self.remove_piece(to, piece.piece_type, piece.color);
-            self.add_piece(from, piece.piece_type, piece.color);
+            self.raw_remove_piece(to, piece.piece_type, piece.color);
+            self.raw_add_piece(from, piece.piece_type, piece.color);
             if let Some(cap) = captured {
-                self.add_piece(to, cap.piece_type, cap.color);
+                self.raw_add_piece(to, cap.piece_type, cap.color);
             }
-        } else {
-            // Logic error: Tried to undo move but piece not at 'to'
-            // For production safety, we just log or ignore rather than panic.
-            // In severe cases, we could return a Result, but method signature is void.
-            // We'll proceed safely by doing nothing if piece is missing.
+            self.refresh_nnue();
         }
     }
 
     pub fn set_piece(&mut self, pos: BoardCoordinate, piece: Option<Piece>) {
         // Remove existing
         if let Some(p) = self.get_piece(pos) {
-            self.remove_piece(pos, p.piece_type, p.color);
+            self.raw_remove_piece(pos, p.piece_type, p.color);
         }
         // Add new
         if let Some(p) = piece {
-            self.add_piece(pos, p.piece_type, p.color);
+            self.raw_add_piece(pos, p.piece_type, p.color);
         }
+        self.refresh_nnue();
     }
 
     pub fn clear(&mut self) {
@@ -362,10 +360,17 @@ impl Board {
         self.black_material = 0;
         self.red_pst = 0;
         self.black_pst = 0;
+        self.refresh_nnue();
     }
 
-    // Helper to add a piece
+    // Helper to add a piece and synchronize NNUE accumulator
     pub fn add_piece(&mut self, pos: BoardCoordinate, piece_type: PieceType, color: Color) {
+        self.raw_add_piece(pos, piece_type, color);
+        self.refresh_nnue();
+    }
+
+    #[inline]
+    fn raw_add_piece(&mut self, pos: BoardCoordinate, piece_type: PieceType, color: Color) {
         let sq = pos.index();
         let bit = 1u128 << sq;
         let idx = color.index() * 7 + piece_type.index();
@@ -377,8 +382,8 @@ impl Board {
         self.occupied_cols[pos.col] |= 1 << pos.row;
     }
 
-    // Helper to remove a piece
-    fn remove_piece(&mut self, pos: BoardCoordinate, piece_type: PieceType, color: Color) {
+    #[inline]
+    fn raw_remove_piece(&mut self, pos: BoardCoordinate, piece_type: PieceType, color: Color) {
         let sq = pos.index();
         let bit = 1u128 << sq;
         let idx = color.index() * 7 + piece_type.index();
@@ -412,6 +417,16 @@ impl Board {
             bb |= self.bitboards[start + i];
         }
         bb
+    }
+
+    /// Returns true if `color` has at least one major attacking piece (Horse, Chariot, or Cannon).
+    #[inline]
+    #[must_use]
+    pub const fn has_major_pieces(&self, color: Color) -> bool {
+        match color {
+            Color::Red => (self.bitboards[3] | self.bitboards[4] | self.bitboards[5]) != 0,
+            Color::Black => (self.bitboards[10] | self.bitboards[11] | self.bitboards[12]) != 0,
+        }
     }
 
     pub fn calculate_initial_hash(&self) -> u64 {
@@ -466,22 +481,13 @@ impl Board {
         let to_row = mv.to_row as usize;
         let to_col = mv.to_col as usize;
 
-        // Safety: Engine moves should be valid.
-        let from = if let Some(pos) = BoardCoordinate::new(from_row, from_col) {
-            pos
-        } else {
+        let Some(from) = BoardCoordinate::new(from_row, from_col) else {
             return;
         };
-        let to = if let Some(pos) = BoardCoordinate::new(to_row, to_col) {
-            pos
-        } else {
+        let Some(to) = BoardCoordinate::new(to_row, to_col) else {
             return;
         };
-
-        // 1. Get piece at source
-        let piece = if let Some(p) = self.get_piece(from) {
-            p
-        } else {
+        let Some(piece) = self.get_piece(from) else {
             return;
         };
 
@@ -490,11 +496,10 @@ impl Board {
         let k_black = crate::engine::nnue::get_black_king_palace_idx(self);
         let is_general = piece.piece_type == PieceType::General;
 
-        // Remove from source
-        self.remove_piece(from, piece.piece_type, piece.color);
+        // 1. Remove from source
+        self.raw_remove_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
 
-        // Update Score (Remove from source)
         let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
         if piece.color == Color::Red {
             self.red_pst -= pst_from;
@@ -503,18 +508,15 @@ impl Board {
         }
 
         // 2. Remove captured piece (if any)
-        if let Some(captured) = self.get_piece(to) {
-            self.remove_piece(to, captured.piece_type, captured.color);
-            self.zobrist_hash ^=
-                keys.get_piece_key(captured.piece_type, captured.color, to_row, to_col);
-            self.nnue_acc
-                .remove_piece(captured, to.index(), k_red, k_black, weights);
+        let captured = self.get_piece(to);
+        if let Some(cap) = captured {
+            self.raw_remove_piece(to, cap.piece_type, cap.color);
+            self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
 
-            // Update Score (Remove captured)
-            let cap_val = get_piece_value(captured.piece_type);
-            let cap_pst = get_pst_value(captured.piece_type, captured.color, to_row, to_col);
+            let cap_val = get_piece_value(cap.piece_type);
+            let cap_pst = get_pst_value(cap.piece_type, cap.color, to_row, to_col);
 
-            if captured.color == Color::Red {
+            if cap.color == Color::Red {
                 self.red_material -= cap_val;
                 self.red_pst -= cap_pst;
             } else {
@@ -524,36 +526,47 @@ impl Board {
         }
 
         // 3. Place piece at destination
-        self.add_piece(to, piece.piece_type, piece.color);
+        self.raw_add_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
 
-        // Update NNUE accumulator
+        // 4. Update NNUE accumulator accurately
         if is_general {
             if piece.color == Color::Red {
                 let new_k_red = crate::engine::nnue::palace_index(to.index());
                 self.nnue_acc.refresh_red(&self.grid, new_k_red, weights);
+                if let Some(cap) = captured {
+                    self.nnue_acc
+                        .remove_piece_black(cap, to.index(), k_black, weights);
+                }
                 self.nnue_acc
-                    .remove_piece(piece, from.index(), k_red, k_black, weights);
+                    .remove_piece_black(piece, from.index(), k_black, weights);
                 self.nnue_acc
-                    .add_piece(piece, to.index(), k_red, k_black, weights);
+                    .add_piece_black(piece, to.index(), k_black, weights);
             } else {
                 let flipped_to = 89_usize.saturating_sub(to.index());
                 let new_k_black = crate::engine::nnue::palace_index(flipped_to);
                 self.nnue_acc
                     .refresh_black(&self.grid, new_k_black, weights);
+                if let Some(cap) = captured {
+                    self.nnue_acc
+                        .remove_piece_red(cap, to.index(), k_red, weights);
+                }
                 self.nnue_acc
-                    .remove_piece(piece, from.index(), k_red, k_black, weights);
+                    .remove_piece_red(piece, from.index(), k_red, weights);
                 self.nnue_acc
-                    .add_piece(piece, to.index(), k_red, k_black, weights);
+                    .add_piece_red(piece, to.index(), k_red, weights);
             }
         } else {
+            if let Some(cap) = captured {
+                self.nnue_acc
+                    .remove_piece(cap, to.index(), k_red, k_black, weights);
+            }
             self.nnue_acc
                 .remove_piece(piece, from.index(), k_red, k_black, weights);
             self.nnue_acc
                 .add_piece(piece, to.index(), k_red, k_black, weights);
         }
 
-        // Update Score (Add to dest)
         let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
         if piece.color == Color::Red {
             self.red_pst += pst_to;
@@ -561,7 +574,7 @@ impl Board {
             self.black_pst += pst_to;
         }
 
-        // 4. Switch turn hash
+        // 5. Switch turn hash
         self.zobrist_hash ^= keys.side_key;
     }
 
@@ -572,14 +585,10 @@ impl Board {
         let to_row = mv.to_row as usize;
         let to_col = mv.to_col as usize;
 
-        let from = if let Some(pos) = BoardCoordinate::new(from_row, from_col) {
-            pos
-        } else {
+        let Some(from) = BoardCoordinate::new(from_row, from_col) else {
             return;
         };
-        let to = if let Some(pos) = BoardCoordinate::new(to_row, to_col) {
-            pos
-        } else {
+        let Some(to) = BoardCoordinate::new(to_row, to_col) else {
             return;
         };
 
@@ -587,9 +596,7 @@ impl Board {
         self.zobrist_hash ^= keys.side_key;
 
         // 3. Move piece back from destination to source
-        let piece = if let Some(p) = self.get_piece(to) {
-            p
-        } else {
+        let Some(piece) = self.get_piece(to) else {
             return;
         };
 
@@ -599,10 +606,9 @@ impl Board {
         let is_general = piece.piece_type == PieceType::General;
 
         // Remove from destination
-        self.remove_piece(to, piece.piece_type, piece.color);
+        self.raw_remove_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
 
-        // Update Score (Remove from dest)
         let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
         if piece.color == Color::Red {
             self.red_pst -= pst_to;
@@ -611,10 +617,9 @@ impl Board {
         }
 
         // Place back at source
-        self.add_piece(from, piece.piece_type, piece.color);
+        self.raw_add_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
 
-        // Update Score (Add to source)
         let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
         if piece.color == Color::Red {
             self.red_pst += pst_from;
@@ -624,10 +629,9 @@ impl Board {
 
         // 2. Restore captured piece (if any)
         if let Some(cap) = captured {
-            self.add_piece(to, cap.piece_type, cap.color);
+            self.raw_add_piece(to, cap.piece_type, cap.color);
             self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
 
-            // Update Score (Restore captured)
             let cap_val = get_piece_value(cap.piece_type);
             let cap_pst = get_pst_value(cap.piece_type, cap.color, to_row, to_col);
 
@@ -640,18 +644,18 @@ impl Board {
             }
         }
 
-        // 1. Update NNUE accumulator
+        // 1. Update NNUE accumulator accurately
         if is_general {
             if piece.color == Color::Red {
                 let new_k_red = crate::engine::nnue::palace_index(from.index());
                 self.nnue_acc.refresh_red(&self.grid, new_k_red, weights);
                 self.nnue_acc
-                    .remove_piece(piece, to.index(), new_k_red, k_black, weights);
+                    .remove_piece_black(piece, to.index(), k_black, weights);
                 self.nnue_acc
-                    .add_piece(piece, from.index(), new_k_red, k_black, weights);
+                    .add_piece_black(piece, from.index(), k_black, weights);
                 if let Some(cap) = captured {
                     self.nnue_acc
-                        .add_piece(cap, to.index(), new_k_red, k_black, weights);
+                        .add_piece_black(cap, to.index(), k_black, weights);
                 }
             } else {
                 let flipped_from = 89_usize.saturating_sub(from.index());
@@ -659,12 +663,12 @@ impl Board {
                 self.nnue_acc
                     .refresh_black(&self.grid, new_k_black, weights);
                 self.nnue_acc
-                    .remove_piece(piece, to.index(), k_red, new_k_black, weights);
+                    .remove_piece_red(piece, to.index(), k_red, weights);
                 self.nnue_acc
-                    .add_piece(piece, from.index(), k_red, new_k_black, weights);
+                    .add_piece_red(piece, from.index(), k_red, weights);
                 if let Some(cap) = captured {
                     self.nnue_acc
-                        .add_piece(cap, to.index(), k_red, new_k_black, weights);
+                        .add_piece_red(cap, to.index(), k_red, weights);
                 }
             }
         } else {

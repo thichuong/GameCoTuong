@@ -1,6 +1,7 @@
 use crate::engine::config::EngineConfig;
 use crate::engine::eval::SimpleEvaluator;
-use crate::engine::tt::{TTFlag, TranspositionTable};
+use crate::engine::movegen::EngineMoveGen;
+use crate::engine::tt::{TTEntry, TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
 use crate::logic::game::GameState;
@@ -8,13 +9,19 @@ use crate::logic::generator::MoveGenerator;
 use crate::logic::rules::{is_flying_general, is_in_check};
 use std::sync::Arc;
 
+const MATE_THRESHOLD: i32 = 15_000;
+const INF_SCORE: i32 = 500_000;
+
 pub struct AlphaBetaEngine {
     config: Arc<EngineConfig>,
     evaluator: SimpleEvaluator,
     tt: TranspositionTable,
     killer_moves: [[Option<Move>; 2]; 64],
+    countermove_table: Box<[[Option<Move>; 90]; 90]>,
     history_stack: Vec<u64>,
     pub history_table: Box<[[i32; 90]]>,
+    static_eval_stack: [i32; 128],
+    move_stack: [Option<Move>; 128],
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
@@ -23,19 +30,24 @@ pub struct AlphaBetaEngine {
     mate_score_table: [i32; 256],
 }
 
-use crate::engine::movegen::EngineMoveGen;
-
 impl AlphaBetaEngine {
+    #[must_use]
     pub fn new(config: Arc<EngineConfig>) -> Self {
         let dynamic_limits = Self::precompute_limits(&config);
         let mate_score_table = Self::precompute_mate_scores(&config);
+        let Ok(countermove_table) = vec![[None; 90]; 90].into_boxed_slice().try_into() else {
+            unreachable!()
+        };
         Self {
             evaluator: SimpleEvaluator::new(config.clone()),
             config,
             tt: TranspositionTable::new(64),
             killer_moves: [[None; 2]; 64],
+            countermove_table,
             history_stack: Vec::with_capacity(64),
             history_table: vec![[0; 90]; 90].into_boxed_slice(),
+            static_eval_stack: [0; 128],
+            move_stack: [None; 128],
             nodes_searched: 0,
             start_time: 0.0,
             time_limit: None,
@@ -45,6 +57,7 @@ impl AlphaBetaEngine {
         }
     }
 
+    #[must_use]
     pub fn with_weights(
         config: Arc<EngineConfig>,
         weights: Arc<crate::engine::nnue::NnueWeights>,
@@ -72,13 +85,14 @@ impl AlphaBetaEngine {
         let mut table = [[0; 64]; 64];
         for (depth, row) in table.iter_mut().enumerate() {
             for (moves_searched, val) in row.iter_mut().enumerate() {
-                if depth >= 3 && moves_searched >= 4 {
+                if depth >= 2 && moves_searched >= 2 {
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     {
-                        let r = 1.0
+                        // Pikafish / Fairy-Stockfish logarithmic LMR base table
+                        let r = 0.75
                             + (f64::from(depth as u32).ln()
                                 * f64::from(moves_searched as u32).ln())
-                                / 1.5; // Increased aggression from 2.0
+                                / 2.15;
                         *val = (r as u8).min((depth - 1) as u8);
                     }
                 } else {
@@ -92,10 +106,14 @@ impl AlphaBetaEngine {
     fn precompute_limits(config: &EngineConfig) -> [usize; 64] {
         let mut limits = [0; 64];
         for (d, limit) in limits.iter_mut().enumerate() {
-            let depth = d as f32;
-            let multiplier = config.pruning_multiplier;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_sign_loss,
+                clippy::cast_possible_truncation
+            )]
             {
+                let depth = d as f32;
+                let multiplier = config.pruning_multiplier;
                 *limit = (depth * depth).mul_add(multiplier, 8.0) as usize;
             }
         }
@@ -107,13 +125,10 @@ impl AlphaBetaEngine {
         let base = config.mate_score;
 
         for (ply, val) in table.iter_mut().enumerate() {
-            // Standardize mate scoring: Always prefer faster mate.
-            // Score = Base - Ply
-            // Ply 1: 30000 - 1 = 29999
-            // Ply 10: 30000 - 10 = 29990
-            // Ply 100: 30000 - 100 = 29900
-            // This ensures we always find the shortest path to mate.
-            *val = base - (ply as i32);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+            {
+                *val = base - (ply as i32);
+            }
         }
         table
     }
@@ -129,7 +144,7 @@ impl AlphaBetaEngine {
             if let Ok(worker) = global.dyn_into::<web_sys::WorkerGlobalScope>() {
                 return worker.performance().map(|p| p.now()).unwrap_or(0.0);
             }
-            0.0 // Fail safe instead of panic
+            0.0
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -161,16 +176,43 @@ impl AlphaBetaEngine {
         self.history_stack.iter().filter(|&&h| h == hash).count() >= 2
     }
 
-    /// Calculate the mate score penalty using precomputed table.
     #[inline]
     fn calculate_mate_score(&self, ply: u8) -> i32 {
-        self.mate_score_table[ply as usize]
+        self.mate_score_table
+            .get(ply as usize)
+            .copied()
+            .unwrap_or(self.config.mate_score - i32::from(ply))
     }
 
-    /// Public wrapper for testing the mate score calculation.
     #[cfg(test)]
+    #[must_use]
     pub fn calculate_mate_score_for_test(&self, ply: u8) -> i32 {
         self.calculate_mate_score(ply)
+    }
+
+    #[inline]
+    fn eval_for_turn(&self, board: &Board, turn: Color) -> i32 {
+        let raw = self.evaluator.evaluate(board);
+        if turn == Color::Red {
+            raw
+        } else {
+            -raw
+        }
+    }
+
+    #[inline]
+    fn refine_eval_with_tt(static_eval: i32, tt_entry: Option<TTEntry>) -> i32 {
+        if let Some(entry) = tt_entry {
+            if entry.score.abs() < MATE_THRESHOLD {
+                match entry.flag {
+                    TTFlag::Exact => return entry.score,
+                    TTFlag::LowerBound if entry.score > static_eval => return entry.score,
+                    TTFlag::UpperBound if entry.score < static_eval => return entry.score,
+                    _ => {}
+                }
+            }
+        }
+        static_eval
     }
 
     fn probcut(
@@ -181,21 +223,22 @@ impl AlphaBetaEngine {
         turn: Color,
         ply: u8,
     ) -> Option<Option<i32>> {
-        if depth >= self.config.probcut_depth && beta.abs() < 15000 {
+        if depth >= self.config.probcut_depth && beta.abs() < MATE_THRESHOLD {
             let margin = self.config.probcut_margin;
             let reduction = self.config.probcut_reduction;
 
             if depth > reduction {
+                let probcut_beta = beta.saturating_add(margin);
                 if let Some(score) = self.alpha_beta(
                     board,
-                    -beta - margin,
-                    -beta - margin + 1,
+                    -probcut_beta,
+                    -probcut_beta + 1,
                     depth - reduction,
                     turn.opposite(),
                     ply + 1,
                     None,
                 ) {
-                    if -score >= beta + margin {
+                    if -score >= probcut_beta {
                         return Some(Some(beta));
                     }
                 } else {
@@ -206,23 +249,35 @@ impl AlphaBetaEngine {
         None
     }
 
+    /// Pikafish & Fairy-Stockfish Null Move Pruning with dynamic eval-based reduction
     fn null_move_pruning(
         &mut self,
         board: &mut Board,
+        eval: i32,
         beta: i32,
         depth: u8,
         turn: Color,
         ply: u8,
     ) -> Option<Option<i32>> {
-        if depth >= 3 && beta.abs() < 15000 && !is_in_check(board, turn) {
-            let r = if depth > 6 { 3 } else { 2 };
+        if depth >= 3
+            && eval >= beta
+            && beta.abs() < MATE_THRESHOLD
+            && board.has_major_pieces(turn)
+        {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let eval_bonus = ((eval - beta) / 180).clamp(0, 3) as u8;
+            let r = (3 + depth / 4 + eval_bonus).min(depth - 1);
+
             board.apply_null_move();
+            if let Some(slot) = self.move_stack.get_mut(ply as usize) {
+                *slot = None;
+            }
 
             let result = self.alpha_beta(
                 board,
                 -beta,
                 -beta + 1,
-                depth - 1 - r,
+                depth.saturating_sub(r),
                 turn.opposite(),
                 ply + 1,
                 None,
@@ -231,8 +286,13 @@ impl AlphaBetaEngine {
             board.apply_null_move();
 
             if let Some(score) = result {
-                if -score >= beta {
-                    return Some(Some(beta));
+                let nmp_score = -score;
+                if nmp_score >= beta {
+                    return Some(Some(if nmp_score >= MATE_THRESHOLD {
+                        beta
+                    } else {
+                        nmp_score
+                    }));
                 }
             } else {
                 return Some(None);
@@ -245,7 +305,7 @@ impl AlphaBetaEngine {
     fn singular_extension(
         &mut self,
         board: &mut Board,
-        tt_entry: Option<crate::engine::tt::TTEntry>,
+        tt_entry: Option<TTEntry>,
         depth: u8,
         turn: Color,
         ply: u8,
@@ -257,10 +317,11 @@ impl AlphaBetaEngine {
             && best_move_tt.is_some()
         {
             if let Some(entry) = tt_entry {
-                if entry.depth >= depth - 3
+                if entry.depth >= depth.saturating_sub(3)
+                    && entry.score.abs() < MATE_THRESHOLD
                     && (entry.flag == TTFlag::Exact || entry.flag == TTFlag::LowerBound)
                 {
-                    let margin = self.config.singular_extension_margin;
+                    let margin = self.config.singular_extension_margin + 2 * i32::from(depth);
                     let singular_beta = entry.score - margin;
 
                     if let Some(score) = self.alpha_beta(
@@ -282,13 +343,148 @@ impl AlphaBetaEngine {
         0
     }
 
+    /// Pikafish / Stockfish History Gravity update (stat bonus + malus for searched quiet moves)
+    fn update_quiet_histories(
+        &mut self,
+        depth: u8,
+        ply: u8,
+        best_mv: Move,
+        quiet_moves_tried: &[Move],
+    ) {
+        self.store_killer(depth, best_mv);
+
+        // Store Countermove against previous move
+        if ply > 0 {
+            if let Some(Some(prev_mv)) = self.move_stack.get((ply - 1) as usize) {
+                let p_from = (prev_mv.from_row as usize) * 9 + (prev_mv.from_col as usize);
+                let p_to = (prev_mv.to_row as usize) * 9 + (prev_mv.to_col as usize);
+                if let Some(row) = self.countermove_table.get_mut(p_from) {
+                    if let Some(slot) = row.get_mut(p_to) {
+                        *slot = Some(best_mv);
+                    }
+                }
+            }
+        }
+
+        let d = i32::from(depth);
+        let bonus = (d * d * 16 + 32 * d).min(1600);
+
+        self.apply_history_gravity(best_mv, bonus);
+        for &q_mv in quiet_moves_tried {
+            if q_mv != best_mv {
+                self.apply_history_gravity(q_mv, -bonus);
+            }
+        }
+    }
+
+    #[inline]
+    fn apply_history_gravity(&mut self, mv: Move, bonus: i32) {
+        let from = (mv.from_row as usize) * 9 + (mv.from_col as usize);
+        let to = (mv.to_row as usize) * 9 + (mv.to_col as usize);
+        if let Some(row) = self.history_table.get_mut(from) {
+            if let Some(entry) = row.get_mut(to) {
+                let current = *entry;
+                *entry = current + bonus - (current * bonus.abs()) / 16_384;
+            }
+        }
+    }
+
+    #[inline]
+    fn get_history_score(&self, mv: Move) -> i32 {
+        let from = (mv.from_row as usize) * 9 + (mv.from_col as usize);
+        let to = (mv.to_row as usize) * 9 + (mv.to_col as usize);
+        self.history_table
+            .get(from)
+            .and_then(|r| r.get(to))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    #[inline]
+    fn get_countermove(&self, ply: u8) -> Option<Move> {
+        if ply == 0 {
+            return None;
+        }
+        let prev_mv = (*self.move_stack.get((ply - 1) as usize)?)?;
+        let p_from = (prev_mv.from_row as usize) * 9 + (prev_mv.from_col as usize);
+        let p_to = (prev_mv.to_row as usize) * 9 + (prev_mv.to_col as usize);
+        self.countermove_table
+            .get(p_from)
+            .and_then(|r| r.get(p_to))
+            .copied()
+            .flatten()
+    }
+
     #[allow(clippy::too_many_arguments)]
+    fn search_pvs_child(
+        &mut self,
+        board: &mut Board,
+        alpha: i32,
+        beta: i32,
+        depth: u8,
+        reduction: u8,
+        extension: u8,
+        turn: Color,
+        ply: u8,
+        legal_moves_count: usize,
+    ) -> Option<i32> {
+        let full_depth = depth.saturating_sub(1).saturating_add(extension);
+        if legal_moves_count == 1 {
+            return self
+                .alpha_beta(board, -beta, -alpha, full_depth, turn.opposite(), ply + 1, None)
+                .map(|v| -v);
+        }
+
+        let reduced_depth = full_depth.saturating_sub(reduction).max(1);
+        let mut val = self.alpha_beta(
+            board,
+            -alpha - 1,
+            -alpha,
+            reduced_depth,
+            turn.opposite(),
+            ply + 1,
+            None,
+        );
+
+        if let Some(v) = val {
+            let s = -v;
+            if s > alpha && reduction > 0 {
+                val = self.alpha_beta(
+                    board,
+                    -alpha - 1,
+                    -alpha,
+                    full_depth,
+                    turn.opposite(),
+                    ply + 1,
+                    None,
+                );
+            }
+            if let Some(v2) = val {
+                let s2 = -v2;
+                if s2 > alpha && s2 < beta {
+                    val = self.alpha_beta(
+                        board,
+                        -beta,
+                        -alpha,
+                        full_depth,
+                        turn.opposite(),
+                        ply + 1,
+                        None,
+                    );
+                }
+            }
+        }
+
+        val.map(|v| -v)
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn alpha_beta(
         &mut self,
         board: &mut Board,
         mut alpha: i32,
         mut beta: i32,
-        depth: u8,
+        mut depth: u8,
         turn: Color,
         ply: u8,
         excluded_move: Option<Move>,
@@ -299,15 +495,11 @@ impl AlphaBetaEngine {
             return None;
         }
 
-        // Mate Distance Pruning
-        // If we have already found a mate at a shallower depth (represented by alpha/beta),
-        // we can prune this branch if it cannot possibly beat that mate score.
-        // Or if the best possible outcome here is a mate slower than what we already have.
+        let is_pv = beta - alpha > 1;
+
+        // 1. Mate Distance Pruning
         if ply > 0 {
             let mat = self.config.mate_score - i32::from(ply);
-            // Alpha could be a mate found elsewhere (e.g., Mate in 5 -> 29995)
-            // If current ply is 10, max score is 29990.
-            // If alpha (29995) >= max_score (29990), we prune.
             alpha = alpha.max(-mat);
             beta = beta.min(mat);
             if alpha >= beta {
@@ -322,29 +514,30 @@ impl AlphaBetaEngine {
 
         self.history_stack.push(hash);
 
-        // TT Probe
-        let tt_entry = self.tt.probe(hash);
+        // 2. Transposition Table Probe
+        let tt_entry = if excluded_move.is_none() {
+            self.tt.probe(hash)
+        } else {
+            None
+        };
+
         if let Some(entry) = tt_entry {
-            if entry.depth >= depth {
+            if entry.depth >= depth && (!is_pv || entry.flag == TTFlag::Exact) {
                 match entry.flag {
                     TTFlag::Exact => {
                         self.history_stack.pop();
                         return Some(entry.score);
                     }
-                    TTFlag::LowerBound => {
-                        if entry.score >= beta {
-                            self.history_stack.pop();
-                            return Some(entry.score);
-                        }
-                        alpha = alpha.max(entry.score);
+                    TTFlag::LowerBound if entry.score >= beta => {
+                        self.history_stack.pop();
+                        return Some(entry.score);
                     }
-                    TTFlag::UpperBound => {
-                        if entry.score <= alpha {
-                            self.history_stack.pop();
-                            return Some(entry.score);
-                        }
-                        beta = beta.min(entry.score);
+                    TTFlag::UpperBound if entry.score <= alpha => {
+                        self.history_stack.pop();
+                        return Some(entry.score);
                     }
+                    TTFlag::LowerBound => alpha = alpha.max(entry.score),
+                    TTFlag::UpperBound => beta = beta.min(entry.score),
                 }
                 if alpha >= beta {
                     self.history_stack.pop();
@@ -359,43 +552,69 @@ impl AlphaBetaEngine {
             return Some(score);
         }
 
-        if let Some(res) = self.probcut(board, beta, depth, turn, ply) {
-            self.history_stack.pop();
-            return res;
-        }
-
         let in_check = is_in_check(board, turn);
 
-        // Reverse Futility Pruning
-        if depth <= 3 && !in_check && beta.abs() < 15000 {
-            let eval = if turn == Color::Red {
-                self.evaluator.evaluate(board)
-            } else {
-                -self.evaluator.evaluate(board)
-            };
-            let margin = 120 * i32::from(depth);
-            if eval - margin >= beta {
+        // 3. Static Evaluation & Pikafish `improving` Heuristic
+        let (static_eval, eval, improving) = if in_check {
+            (-INF_SCORE, -INF_SCORE, false)
+        } else {
+            let raw_eval = self.eval_for_turn(board, turn);
+            if let Some(slot) = self.static_eval_stack.get_mut(ply as usize) {
+                *slot = raw_eval;
+            }
+            let refined = Self::refine_eval_with_tt(raw_eval, tt_entry);
+            let imp = ply >= 2
+                && self
+                    .static_eval_stack
+                    .get((ply - 2) as usize)
+                    .is_some_and(|&prev_eval| prev_eval > -INF_SCORE && raw_eval > prev_eval);
+            (raw_eval, refined, imp)
+        };
+
+        // 4. Non-PV Pre-Move-Loop Pruning (Pikafish & Fairy-Stockfish Pipeline)
+        if !is_pv && !in_check && excluded_move.is_none() {
+            // 4a. Razoring
+            if depth <= 2 && alpha.abs() < MATE_THRESHOLD {
+                let razor_margin = 210 * i32::from(depth);
+                if eval + razor_margin <= alpha {
+                    let qscore = self.quiescence(board, alpha, beta, turn);
+                    if qscore <= alpha {
+                        self.history_stack.pop();
+                        return Some(qscore);
+                    }
+                }
+            }
+
+            // 4b. Reverse Futility Pruning (RFP / Static Null Move Pruning)
+            if depth <= 6 && beta.abs() < MATE_THRESHOLD {
+                let rfp_margin = 85 * i32::from(depth) - if improving { 40 } else { 0 };
+                if eval - rfp_margin >= beta {
+                    self.history_stack.pop();
+                    return Some((eval + beta) / 2);
+                }
+            }
+
+            // 4c. Null Move Pruning (NMP)
+            if let Some(res) = self.null_move_pruning(board, eval, beta, depth, turn, ply) {
                 self.history_stack.pop();
-                return Some(eval);
+                return res;
+            }
+
+            // 4d. ProbCut
+            if let Some(res) = self.probcut(board, beta, depth, turn, ply) {
+                self.history_stack.pop();
+                return res;
             }
         }
 
-        if let Some(res) = self.null_move_pruning(board, beta, depth, turn, ply) {
-            self.history_stack.pop();
-            return res;
+        let best_move_tt = tt_entry.and_then(|e| e.best_move);
+
+        // 5. Internal Iterative Reductions (IIR - Pikafish / Stockfish replacement for IID)
+        if depth >= 4 && best_move_tt.is_none() && excluded_move.is_none() {
+            depth -= 1;
         }
 
-        let mut best_move_tt = tt_entry.and_then(|e| e.best_move);
-
-        // Internal Iterative Deepening (IID)
-        if best_move_tt.is_none() && depth >= 4 {
-            let _ = self.alpha_beta(board, alpha, beta, depth - 2, turn, ply, None);
-            if let Some(entry) = self.tt.probe(hash) {
-                best_move_tt = entry.best_move;
-            }
-        }
-
-        let singular_extension = self.singular_extension(
+        let singular_ext = self.singular_extension(
             board,
             tt_entry,
             depth,
@@ -405,13 +624,18 @@ impl AlphaBetaEngine {
             excluded_move,
         );
 
+        let countermove = self.get_countermove(ply);
         let movegen = EngineMoveGen::new(&self.config, &self.history_table);
-        let mut moves =
-            movegen.generate_moves(board, turn, best_move_tt, &self.killer_moves, depth);
+        let mut moves = movegen.generate_moves_with_counter(
+            board,
+            turn,
+            best_move_tt,
+            &self.killer_moves,
+            countermove,
+            depth,
+        );
 
         if in_check {
-            // If in check, filter for legal moves immediately.
-            // We cannot prune because the only legal moves might be "bad" ones.
             moves.retain(|mv| {
                 let captured = board.get_piece(unsafe {
                     BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
@@ -426,85 +650,68 @@ impl AlphaBetaEngine {
                 self.history_stack.pop();
                 return Some(-self.calculate_mate_score(ply));
             }
-        }
-
-        if moves.is_empty() {
+        } else if moves.is_empty() {
             self.history_stack.pop();
             return Some(-self.calculate_mate_score(ply));
         }
 
-        // Dynamic Limiting Limit Calculation (Moved here, but applied inside loop)
         let dynamic_limit =
             if !in_check && (self.config.pruning_method == 0 || self.config.pruning_method == 2) {
-                if (depth as usize) < 64 {
-                    self.dynamic_limits[depth as usize]
-                } else {
-                    moves.len()
-                }
+                self.dynamic_limits
+                    .get(depth as usize)
+                    .copied()
+                    .unwrap_or_else(|| moves.len())
             } else {
                 moves.len()
             };
 
-        let mut best_score = -500000;
-        let mut best_move_this_node = None;
-        let mut tt_flag = TTFlag::UpperBound;
-
-        let mut legal_moves_count = 0;
-        let mut has_repetition_move = false;
-
-        // Static Eval for Futility Pruning
-        let static_eval = if depth <= 3 && !in_check {
-            if turn == Color::Red {
-                self.evaluator.evaluate(board)
+        // Pikafish / Fairy-Stockfish Late Move Pruning (LMP) count
+        let lmp_limit = if !in_check && depth <= 6 {
+            let d = usize::from(depth);
+            let base = 4 + d * d;
+            if improving {
+                base + d * 2
             } else {
-                -self.evaluator.evaluate(board)
+                (base * 2) / 3
             }
         } else {
-            -500000 // Dummy
+            moves.len()
         };
 
+        let mut best_score = -INF_SCORE;
+        let mut best_move_this_node = None;
+        let mut tt_flag = TTFlag::UpperBound;
+        let mut legal_moves_count = 0usize;
+        let mut has_repetition_move = false;
+        let mut quiet_moves_tried = [Move::default(); 64];
+        let mut quiet_count = 0usize;
+
         for (moves_searched, mv) in moves.into_iter().enumerate() {
+            if excluded_move == Some(mv) {
+                continue;
+            }
+
             let is_capture = board
                 .get_piece(unsafe {
                     BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
                 })
                 .is_some();
 
-            // Safe Dynamic Limiting:
-            // Only prune if:
-            // 1. We have searched enough moves (moves_searched >= dynamic_limit)
-            // 2. It is NOT a capture (captures are important)
-            // 3. Not in check (already handled by limit calculation usually, but good to be safe)
-            if !in_check && moves_searched >= dynamic_limit && !is_capture {
-                continue;
-            }
-
-            // Late Move Pruning (LMP)
-            // Prune quiet moves if we have searched enough moves at low depth
-            if !in_check
-                && depth <= 4
-                && !is_capture
-                && moves_searched >= (8 + 5 * (depth as usize * depth as usize))
-            {
-                continue;
-            }
-
-            if let Some(ex_mv) = excluded_move {
-                if mv == ex_mv {
+            // Quiet Move Pruning (LMP, Dynamic Limiting & Futility Pruning)
+            if !is_pv && !in_check && !is_capture && best_score > -MATE_THRESHOLD {
+                if moves_searched >= dynamic_limit || legal_moves_count >= lmp_limit {
                     continue;
                 }
-            }
 
-            // Futility Pruning
-            // Prune quiet moves at low depth if static eval is far below alpha
-            if !in_check
-                && depth <= 3
-                && !is_capture
-                && (self.config.pruning_method == 0 || self.config.pruning_method == 2)
-            {
-                let margin = 150 * i32::from(depth);
-                if static_eval + margin < alpha {
-                    continue;
+                if depth <= 4
+                    && legal_moves_count > 0
+                    && (self.config.pruning_method == 0 || self.config.pruning_method == 2)
+                {
+                    let hist = self.get_history_score(mv);
+                    let margin = 100 + 85 * i32::from(depth) + (hist / 128);
+                    if static_eval + margin <= alpha {
+                        continue;
+                    }
                 }
             }
 
@@ -513,32 +720,22 @@ impl AlphaBetaEngine {
             });
             board.apply_move(&mv, turn);
 
-            // Deferred Legality Check
             if !in_check && (is_in_check(board, turn) || is_flying_general(board)) {
                 board.undo_move(&mv, captured, turn);
                 continue;
             }
 
-            // Absolute Checkmate Detection - Optimized
-            // Check if this move mates the opponent
-            {
-                let generator = MoveGenerator::new();
-                if !generator.has_legal_moves(board, turn.opposite()) {
-                    self.history_stack.pop();
-                    board.undo_move(&mv, captured, turn);
-                    return Some(self.calculate_mate_score(ply + 1));
-                }
+            if !MoveGenerator::new().has_legal_moves(board, turn.opposite()) {
+                self.history_stack.pop();
+                board.undo_move(&mv, captured, turn);
+                return Some(self.calculate_mate_score(ply + 1));
             }
 
-            // Repetition Check (Pruning)
-            // Check if this position has occurred 2 times before (so this is the 3rd)
-            let mut rep_count = 0;
-            for &h in &self.history_stack {
-                if h == board.zobrist_hash {
-                    rep_count += 1;
-                }
-            }
-
+            let rep_count = self
+                .history_stack
+                .iter()
+                .filter(|&&h| h == board.zobrist_hash)
+                .count();
             if rep_count >= 2 {
                 board.undo_move(&mv, captured, turn);
                 has_repetition_move = true;
@@ -546,103 +743,69 @@ impl AlphaBetaEngine {
             }
 
             legal_moves_count += 1;
+            if !is_capture {
+                if let Some(slot) = quiet_moves_tried.get_mut(quiet_count) {
+                    *slot = mv;
+                    quiet_count += 1;
+                }
+            }
+            if let Some(slot) = self.move_stack.get_mut(ply as usize) {
+                *slot = Some(mv);
+            }
 
-            let score;
-
-            // LMR
-            let mut reduction = 0;
+            // Pikafish / Fairy-Stockfish Late Move Reductions (LMR)
+            let mut reduction = 0u8;
             if depth >= 3
-                && moves_searched >= 4
+                && legal_moves_count >= 3
                 && (self.config.pruning_method == 1 || self.config.pruning_method == 2)
                 && !in_check
                 && !is_capture
             {
                 let d = (depth as usize).min(63);
-                let m = moves_searched.min(63);
-                reduction = self.lmr_table[d][m];
+                let m = legal_moves_count.min(63);
+                let mut r = i32::from(
+                    self.lmr_table
+                        .get(d)
+                        .and_then(|row| row.get(m))
+                        .copied()
+                        .unwrap_or(0),
+                );
+                if !is_pv {
+                    r += 1;
+                }
+                if !improving {
+                    r += 1;
+                }
+                if mv.score >= self.config.score_killer_move.saturating_sub(20_000) {
+                    r -= 1;
+                }
+                let hist_adj = (self.get_history_score(mv) / 4096).clamp(-2, 2);
+                r -= hist_adj;
+
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                {
+                    reduction = r.clamp(0, i32::from(depth.saturating_sub(2))) as u8;
+                }
             }
 
-            let extension = if in_check { 1 } else { 0 } + singular_extension;
+            let is_tt_move = best_move_tt == Some(mv);
+            let extension = u8::from(in_check) + if is_tt_move { singular_ext } else { 0 };
 
-            // PVS (Principal Variation Search)
-            if moves_searched == 0 {
-                // Full window for the first move (PV-node)
-                let val = self.alpha_beta(
-                    board,
-                    -beta,
-                    -alpha,
-                    depth - 1 + extension,
-                    turn.opposite(),
-                    ply + 1,
-                    None,
-                );
-
-                match val {
-                    None => {
-                        board.undo_move(&mv, captured, turn);
-                        self.history_stack.pop();
-                        return None;
-                    }
-                    Some(v) => score = -v,
-                }
-            } else {
-                // Null window search for other moves (Cut-nodes)
-                // Try to prove that this move is NOT better than alpha
-                let search_depth = depth - 1 - reduction + extension;
-
-                let mut val = self.alpha_beta(
-                    board,
-                    -alpha - 1,
-                    -alpha,
-                    search_depth,
-                    turn.opposite(),
-                    ply + 1,
-                    None,
-                );
-
-                if let Some(v) = val {
-                    let s = -v;
-                    if s > alpha {
-                        // Fail High: Re-search with full window
-                        if reduction > 0 {
-                            val = self.alpha_beta(
-                                board,
-                                -alpha - 1,
-                                -alpha,
-                                depth - 1 + extension,
-                                turn.opposite(),
-                                ply + 1,
-                                None,
-                            );
-                        }
-
-                        if let Some(v2) = val {
-                            let s2 = -v2;
-                            if s2 > alpha {
-                                val = self.alpha_beta(
-                                    board,
-                                    -beta,
-                                    -alpha,
-                                    depth - 1 + extension,
-                                    turn.opposite(),
-                                    ply + 1,
-                                    None,
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // Handle result
-                match val {
-                    None => {
-                        board.undo_move(&mv, captured, turn);
-                        self.history_stack.pop();
-                        return None;
-                    }
-                    Some(v) => score = -v,
-                }
-            }
+            let Some(score) = self.search_pvs_child(
+                board,
+                alpha,
+                beta,
+                depth,
+                reduction,
+                extension,
+                turn,
+                ply,
+                legal_moves_count,
+            ) else {
+                board.undo_move(&mv, captured, turn);
+                self.history_stack.pop();
+                return None;
+            };
 
             board.undo_move(&mv, captured, turn);
 
@@ -656,13 +819,9 @@ impl AlphaBetaEngine {
             }
 
             if alpha >= beta {
-                self.store_killer(depth, mv);
-                let from = (mv.from_row as usize) * 9 + (mv.from_col as usize);
-                let to = (mv.to_row as usize) * 9 + (mv.to_col as usize);
-                if let Some(row) = self.history_table.get_mut(from) {
-                    if let Some(s) = row.get_mut(to) {
-                        *s += i32::from(depth) * i32::from(depth);
-                    }
+                if !is_capture {
+                    let tried = quiet_moves_tried.get(..quiet_count).unwrap_or(&[]);
+                    self.update_quiet_histories(depth, ply, mv, tried);
                 }
                 tt_flag = TTFlag::LowerBound;
                 break;
@@ -671,21 +830,16 @@ impl AlphaBetaEngine {
 
         if legal_moves_count == 0 {
             self.history_stack.pop();
-            // Checkmate or Stalemate
-            if in_check {
-                // Checkmate
-                return Some(-self.calculate_mate_score(ply));
-            }
-            if has_repetition_move {
-                // All legal moves were pruned due to repetition -> Draw
+            if !in_check && has_repetition_move {
                 return Some(0);
             }
-            // Stalemate (Loss in Xiangqi)
             return Some(-self.calculate_mate_score(ply));
         }
 
-        self.tt
-            .store(hash, best_move_this_node, best_score, depth, tt_flag);
+        if excluded_move.is_none() {
+            self.tt
+                .store(hash, best_move_this_node, best_score, depth, tt_flag);
+        }
 
         self.history_stack.pop();
         Some(best_score)
@@ -694,14 +848,17 @@ impl AlphaBetaEngine {
     fn quiescence(&mut self, board: &mut Board, mut alpha: i32, beta: i32, turn: Color) -> i32 {
         self.nodes_searched += 1;
 
-        // Q-Search doesn't check time strictly to avoid partial evaluations,
-        // but we could add it if needed. For now, let it finish.
+        let hash = board.zobrist_hash;
+        if let Some(entry) = self.tt.probe(hash) {
+            match entry.flag {
+                TTFlag::Exact => return entry.score,
+                TTFlag::LowerBound if entry.score >= beta => return entry.score,
+                TTFlag::UpperBound if entry.score <= alpha => return entry.score,
+                _ => {}
+            }
+        }
 
-        let stand_pat = if turn == Color::Red {
-            self.evaluator.evaluate(board)
-        } else {
-            -self.evaluator.evaluate(board)
-        };
+        let stand_pat = self.eval_for_turn(board, turn);
 
         if stand_pat >= beta {
             return beta;
@@ -719,22 +876,16 @@ impl AlphaBetaEngine {
             });
 
             // Delta Pruning
-            // If stand_pat + capture_value + margin < alpha, we can skip this capture.
-            // We need to know the value of the captured piece.
             if let Some(cap_piece) = captured {
                 let cap_val = self.get_piece_value(cap_piece.piece_type);
-                // Margin of 200 for safety (e.g. positional gains)
-                if stand_pat + cap_val + 200 < alpha {
+                if stand_pat + cap_val + 180 < alpha {
                     continue;
                 }
             }
 
             board.apply_move(&mv, turn);
 
-            // Legality Check (Crucial for Q-Search to avoid illegal captures)
-            if crate::logic::rules::is_in_check(board, turn)
-                || crate::logic::rules::is_flying_general(board)
-            {
+            if is_in_check(board, turn) || is_flying_general(board) {
                 board.undo_move(&mv, captured, turn);
                 continue;
             }
@@ -755,20 +906,15 @@ impl AlphaBetaEngine {
     }
 
     fn store_killer(&mut self, depth: u8, mv: Move) {
-        if depth >= 64 {
-            return;
-        }
-        let d = depth as usize;
-        // Shift: 0 -> 1, New -> 0
-        if let Some(killers) = self.killer_moves.get_mut(d) {
-            if killers[0] != Some(mv) {
-                killers[1] = killers[0];
-                killers[0] = Some(mv);
+        if let Some([k0, k1]) = self.killer_moves.get_mut(depth as usize) {
+            if *k0 != Some(mv) {
+                *k1 = *k0;
+                *k0 = Some(mv);
             }
         }
     }
 
-    fn get_piece_value(&self, pt: PieceType) -> i32 {
+    const fn get_piece_value(&self, pt: PieceType) -> i32 {
         match pt {
             PieceType::General => self.config.val_king,
             PieceType::Chariot => self.config.val_rook,
@@ -782,6 +928,7 @@ impl AlphaBetaEngine {
 }
 
 impl Searcher for AlphaBetaEngine {
+    #[allow(clippy::too_many_lines)]
     fn search(
         &mut self,
         game_state: &GameState,
@@ -795,16 +942,16 @@ impl Searcher for AlphaBetaEngine {
         let (max_depth, time_limit) = match limit {
             SearchLimit::Depth(d) => (d.min(63), None),
             #[allow(clippy::cast_precision_loss)]
-            SearchLimit::Time(t) => (64, Some(t as f64)), // Max depth 64 (was 20)
+            SearchLimit::Time(t) => (64, Some(t as f64)),
         };
         self.time_limit = time_limit;
         let soft_limit = time_limit.map(|t| t * 0.6);
 
         let mut board = game_state.board.clone();
+        board.refresh_nnue();
         let board = &mut board;
         let turn = game_state.turn;
 
-        // Initialize history stack with initial board state and all historical moves
         self.history_stack.clear();
         let initial_hash = Board::new().zobrist_hash;
         if !game_state.history.is_empty() {
@@ -819,15 +966,13 @@ impl Searcher for AlphaBetaEngine {
         let mut previous_score: Option<i32> = None;
 
         // History Aging
-        // Decay history scores to adapt to new positions
-        for row in self.history_table.iter_mut() {
+        for row in &mut self.history_table {
             for val in row.iter_mut() {
                 *val /= 2;
             }
         }
 
         for d in 1..=max_depth {
-            // Check soft limit before starting new depth
             if let Some(sl) = soft_limit {
                 let elapsed = Self::now() - self.start_time;
                 if elapsed > sl {
@@ -835,31 +980,30 @@ impl Searcher for AlphaBetaEngine {
                 }
             }
 
-            let mut alpha = -500000;
-            let mut beta = 500000;
-            let mut delta = 50;
+            let mut alpha = -INF_SCORE;
+            let mut beta = INF_SCORE;
+            let mut delta = 35;
 
             if let Some(score) = previous_score {
-                if d >= 3 {
-                    alpha = (score - delta).max(-500000);
-                    beta = (score + delta).min(500000);
+                if d >= 4 && score.abs() < MATE_THRESHOLD {
+                    alpha = (score - delta).max(-INF_SCORE);
+                    beta = (score + delta).min(INF_SCORE);
                 }
             }
 
             loop {
                 let alpha_orig = alpha;
                 let beta_orig = beta;
-                let mut best_score_this_iteration = -500000;
+                let mut best_score_this_iteration = -INF_SCORE;
                 let mut current_best_move_this_iteration = None;
 
-                // Try to get best move from TT for this depth (or previous)
                 let hash = board.zobrist_hash;
-                let tt_move = self.tt.get_move(hash);
+                let tt_move = best_move.or_else(|| self.tt.get_move(hash));
 
                 let movegen = EngineMoveGen::new(&self.config, &self.history_table);
-                let mut moves = movegen.generate_moves(board, turn, tt_move, &self.killer_moves, d);
+                let mut moves =
+                    movegen.generate_moves(board, turn, tt_move, &self.killer_moves, d);
 
-                // Filter excluded moves at root
                 if !excluded_moves.is_empty() {
                     moves.retain(|m| {
                         !excluded_moves.iter().any(|ex| {
@@ -871,19 +1015,16 @@ impl Searcher for AlphaBetaEngine {
                     });
                 }
 
-                // Filter for legal moves immediately to handle checks and flying generals
                 moves.retain(|mv| {
                     let captured = board.get_piece(unsafe {
                         BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
                     });
                     board.apply_move(mv, turn);
-                    let legal = !crate::logic::rules::is_in_check(board, turn)
-                        && !crate::logic::rules::is_flying_general(board);
+                    let legal = !is_in_check(board, turn) && !is_flying_general(board);
                     board.undo_move(mv, captured, turn);
                     legal
                 });
 
-                // Filter out repetition moves at root so the engine never sees illegal repetition moves
                 if moves.len() > 1 {
                     let non_repetition_moves: Vec<Move> = moves
                         .iter()
@@ -923,16 +1064,13 @@ impl Searcher for AlphaBetaEngine {
                         BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
                     });
                     board.apply_move(&mv, turn);
+                    if let Some(first_slot) = self.move_stack.first_mut() {
+                        *first_slot = Some(mv);
+                    }
 
-                    // Absolute Checkmate Detection at Root - REMOVED for performance
-                    // Trust the search to find mates.
-
-                    let score_opt;
-                    if moves_searched == 0 {
-                        score_opt =
-                            self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), 1, None);
+                    let score_opt = if moves_searched == 0 {
+                        self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), 1, None)
                     } else {
-                        // Root PVS
                         let mut val = self.alpha_beta(
                             board,
                             -alpha - 1,
@@ -956,8 +1094,8 @@ impl Searcher for AlphaBetaEngine {
                                 );
                             }
                         }
-                        score_opt = val;
-                    }
+                        val
+                    };
 
                     board.undo_move(&mv, captured, turn);
 
@@ -977,7 +1115,6 @@ impl Searcher for AlphaBetaEngine {
                 }
 
                 if time_out {
-                    // If we timed out during a depth, don't use partial results unless we have nothing else
                     if best_move.is_none() && current_best_move_this_iteration.is_some() {
                         best_move = current_best_move_this_iteration;
                         final_depth = d;
@@ -986,14 +1123,12 @@ impl Searcher for AlphaBetaEngine {
                 }
 
                 if best_score_this_iteration <= alpha_orig {
-                    // Fail Low
-                    alpha = (alpha_orig.saturating_sub(delta)).max(-500000);
+                    alpha = (alpha_orig.saturating_sub(delta)).max(-INF_SCORE);
                     delta = delta.saturating_add(delta / 2);
                     continue;
                 }
                 if best_score_this_iteration >= beta_orig {
-                    // Fail High
-                    beta = (beta_orig.saturating_add(delta)).min(500000);
+                    beta = (beta_orig.saturating_add(delta)).min(INF_SCORE);
                     delta = delta.saturating_add(delta / 2);
                     continue;
                 }
@@ -1002,6 +1137,13 @@ impl Searcher for AlphaBetaEngine {
                     best_move = Some(mv);
                     final_depth = d;
                     previous_score = Some(best_score_this_iteration);
+                    self.tt.store(
+                        board.zobrist_hash,
+                        Some(mv),
+                        best_score_this_iteration,
+                        d,
+                        TTFlag::Exact,
+                    );
                 }
                 break;
             }

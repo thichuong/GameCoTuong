@@ -1,11 +1,12 @@
 use cotuong_core::engine::config::EngineConfig;
 use cotuong_core::engine::nnue::{
     NnueWeights, FILE_SIZE, L1_INPUT_SIZE, L1_OUTPUT_SIZE, L2_INPUT_SIZE, L2_OUTPUT_SIZE,
-    L3_INPUT_SIZE, L3_OUTPUT_SIZE, NNUE_MAGIC, NNUE_VERSION,
+    L3_INPUT_SIZE, L3_OUTPUT_SIZE, NNUE_MAGIC, NNUE_VERSION, PSQT_BUCKETS,
 };
 use cotuong_core::engine::search::AlphaBetaEngine;
 use cotuong_core::engine::{Move, SearchLimit, Searcher};
-use cotuong_core::logic::board::{Board, BoardCoordinate, Color};
+use cotuong_core::logic::board::{Board, BoardCoordinate, Color, PieceType};
+use cotuong_core::logic::eval_constants::get_pst_value;
 use cotuong_core::logic::generator::MoveGenerator;
 use cotuong_core::logic::rules::{is_flying_general, is_in_check};
 use rand::seq::SliceRandom;
@@ -26,6 +27,7 @@ use protocol::{EngineProtocol, ExternalEngineClient};
 pub struct FloatNnue {
     pub w1: Box<[[f32; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]>,
     pub b1: [f32; L1_OUTPUT_SIZE],
+    pub w_psqt: Box<[[f32; PSQT_BUCKETS]; L1_INPUT_SIZE]>,
     pub w2: Box<[[f32; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]>,
     pub b2: [f32; L2_OUTPUT_SIZE],
     pub w3: Box<[[f32; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]>,
@@ -42,81 +44,278 @@ impl Default for FloatNnue {
 
 impl FloatNnue {
     #[must_use]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::cast_precision_loss,
+        clippy::cognitive_complexity,
+        clippy::indexing_slicing
+    )]
     pub fn new() -> Self {
         let mut w1_vec = vec![[0.0f32; L1_OUTPUT_SIZE]; L1_INPUT_SIZE];
-        let b1 = [0.1f32; L1_OUTPUT_SIZE];
+        let mut b1 = [0.0f32; L1_OUTPUT_SIZE];
+        let mut w_psqt_vec = vec![[0.0f32; PSQT_BUCKETS]; L1_INPUT_SIZE];
         let mut w2_vec = vec![[0.0f32; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
         let b2 = [0.0f32; L2_OUTPUT_SIZE];
         let mut w3_vec = vec![[0.0f32; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
         let b3 = [0.0f32; L3_OUTPUT_SIZE];
         let mut w4 = [0.0f32; L3_OUTPUT_SIZE];
 
-        // Piece values for smart initial weights
-        let piece_values = [12.0f32, 12.0, 27.0, 60.0, 28.5, 3.0, 600.0];
+        // Set threshold biases for non-linear synergy & King safety ReLU circuits
+        b1[8] = -0.55; // Connected Advisors (activates when 2 Advisors present)
+        b1[9] = -0.55; // Connected Elephants (activates when 2 Elephants present)
+        b1[10] = -0.55; // Double Chariot Battery
+        b1[11] = -0.75; // Horse + Cannon Coordination
+        b1[16] = 0.0; // King Line Cannon & Chariot Threat
+        b1[17] = -1.25; // King File Cannon Double-Blocker Shield (cancels threat at >=2 blockers)
+        b1[18] = -0.70; // King File Chariot Single-Blocker Shield
+
+        // Friendly HalfKP types: 0=Advisor, 1=Elephant, 2=Horse, 3=Chariot, 4=Cannon, 5=Soldier
+        // Enemy HalfKP types: 6=General, 7=Advisor, 8=Elephant, 9=Horse, 10=Chariot, 11=Cannon, 12=Soldier
+        let friendly_types = [
+            PieceType::Advisor,
+            PieceType::Elephant,
+            PieceType::Horse,
+            PieceType::Chariot,
+            PieceType::Cannon,
+            PieceType::Soldier,
+        ];
+        let enemy_types = [
+            PieceType::General,
+            PieceType::Advisor,
+            PieceType::Elephant,
+            PieceType::Horse,
+            PieceType::Chariot,
+            PieceType::Cannon,
+            PieceType::Soldier,
+        ];
+
         for k in 0..9 {
-            for (ptype_idx, &val) in piece_values.iter().enumerate() {
-                // Friendly
-                if ptype_idx < 6 {
-                    for sq in 0..90 {
-                        let feat = (k * 13 + ptype_idx) * 90 + sq;
-                        if let Some(row) = w1_vec.get_mut(feat) {
-                            if let Some(cell) = row.first_mut() {
-                                *cell = val * 0.05;
+            let kr = k / 3;
+            let kc = 3 + (k % 3);
+
+            // 1. Friendly piece features (ptype_idx 0..6)
+            for (ptype_idx, &pt) in friendly_types.iter().enumerate() {
+                for sq in 0..90 {
+                    let r = sq / 9;
+                    let c = sq % 9;
+                    let feat = k * 1170 + ptype_idx * 90 + sq;
+                    let pst = get_pst_value(pt, Color::Red, r, c) as f32;
+
+                    if let Some(psqt_row) = w_psqt_vec.get_mut(feat) {
+                        for (bucket, cell) in psqt_row.iter_mut().enumerate() {
+                            let phase = bucket as f32 / (PSQT_BUCKETS.saturating_sub(1) as f32);
+                            let base_cp = match pt {
+                                PieceType::Advisor | PieceType::Elephant => {
+                                    120.0 + 10.0 * (1.0 - phase)
+                                }
+                                PieceType::Horse => 265.0 + 30.0 * (1.0 - phase),
+                                PieceType::Chariot => 600.0,
+                                PieceType::Cannon => 270.0 + 30.0 * phase,
+                                PieceType::Soldier => 30.0 + 25.0 * (1.0 - phase),
+                                PieceType::General => 0.0,
+                            };
+                            let dev_bonus = match pt {
+                                PieceType::Chariot if r == 0 && (c == 1 || c == 7) => 16.0,
+                                PieceType::Chariot if r == 0 && (c == 0 || c == 8) => -6.0,
+                                PieceType::Horse if r == 2 && (c == 2 || c == 6) => 12.0,
+                                PieceType::Advisor if r == 1 && c == 4 => 12.0,
+                                _ => 0.0,
+                            };
+                            let king_home_bonus = if kr == 0 && kc == 4 {
+                                3.0 * phase
+                            } else if kr >= 1 {
+                                -4.0 * phase
+                            } else {
+                                0.0
+                            };
+                            // Shield bonus when friendly piece protects King file in front of King
+                            let shield_bonus = if c == kc && r > kr && r <= 3 {
+                                8.0
+                            } else {
+                                0.0
+                            };
+                            *cell = base_cp + pst + dev_bonus + king_home_bonus + shield_bonus;
+                        }
+                    }
+
+                    if let Some(row) = w1_vec.get_mut(feat) {
+                        // Synergy & structure detectors
+                        match pt {
+                            PieceType::Advisor => {
+                                row[8] += 0.55;
+                            }
+                            PieceType::Elephant => {
+                                row[9] += if r == 2 && c == 4 { 0.65 } else { 0.50 };
+                            }
+                            PieceType::Chariot => {
+                                row[10] += 0.55;
+                                if r >= 5 {
+                                    row[12] += 0.35;
+                                }
+                            }
+                            PieceType::Horse => {
+                                if r >= 3 {
+                                    row[11] += 0.45;
+                                }
+                                if r >= 6 && (2..=6).contains(&c) {
+                                    row[12] += 0.40;
+                                }
+                            }
+                            PieceType::Cannon => {
+                                row[11] += 0.45;
+                                if c == 4 {
+                                    row[13] += 0.35;
+                                }
+                            }
+                            PieceType::Soldier => {
+                                if r >= 5 {
+                                    row[14] += 0.30;
+                                }
+                            }
+                            PieceType::General => {}
+                        }
+
+                        // Blocker on King file between King and river (for Cannon/Chariot shield circuits)
+                        if c == kc && r > kr && r <= 4 {
+                            row[17] += 0.625;
+                            row[18] += 0.70;
+                        }
+
+                        // Distributed positional channels (neurons 24..192)
+                        for idx in 24..L1_OUTPUT_SIZE {
+                            let h = ((feat.wrapping_mul(2_654_435_761)) ^ (idx.wrapping_mul(97)))
+                                & 0xFF;
+                            let signed = (h as f32 - 128.0) / 128.0;
+                            row[idx] = signed * 0.04;
+                        }
+                    }
+                }
+            }
+
+            // 2. Enemy piece features (enemy_halfkp_idx 6..13)
+            for (e_idx, &pt) in enemy_types.iter().enumerate() {
+                let ptype_idx = 6 + e_idx;
+                for sq in 0..90 {
+                    let r = sq / 9;
+                    let c = sq % 9;
+                    let feat = k * 1170 + ptype_idx * 90 + sq;
+
+                    if let Some(row) = w1_vec.get_mut(feat) {
+                        // King Safety circuits conditioned on friendly King at (kr, kc)
+                        if pt == PieceType::Cannon && (r == kr || c == kc) && (r != kr || c != kc) {
+                            row[16] += 0.78;
+                            if c == kc && r > kr {
+                                row[17] += 0.78;
+                            }
+                        } else if pt == PieceType::Chariot
+                            && (r == kr || c == kc)
+                            && (r != kr || c != kc)
+                        {
+                            row[16] += 0.65;
+                            if c == kc && r > kr {
+                                row[18] += 0.70;
                             }
                         }
-                    }
-                }
-                // Enemy
-                let enemy_halfkp_idx = 6 + ptype_idx;
-                for sq in 0..90 {
-                    let feat = (k * 13 + enemy_halfkp_idx) * 90 + sq;
-                    if let Some(row) = w1_vec.get_mut(feat) {
-                        if let Some(cell) = row.get_mut(4) {
-                            *cell = val * 0.05;
+
+                        // Enemy pieces invading friendly palace zone
+                        if r <= 3 && (2..=6).contains(&c) {
+                            match pt {
+                                PieceType::Chariot | PieceType::Horse | PieceType::Cannon => {
+                                    row[19] += 0.40;
+                                }
+                                PieceType::Soldier => {
+                                    row[19] += 0.30;
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        // Blocker on King file (an enemy non-cannon piece at r <= 4 also acts as a screen)
+                        if c == kc && r > kr && r <= 4 && pt != PieceType::Cannon {
+                            row[17] += 0.625;
+                            row[18] += 0.70;
+                        }
+
+                        // Distributed positional channels (neurons 24..192)
+                        for idx in 24..L1_OUTPUT_SIZE {
+                            let h = ((feat.wrapping_mul(2_654_435_761)) ^ (idx.wrapping_mul(131)))
+                                & 0xFF;
+                            let signed = (h as f32 - 128.0) / 128.0;
+                            row[idx] = signed * 0.04;
                         }
                     }
                 }
             }
         }
 
-        // Layer 2
-        if let Some(row) = w2_vec.first_mut() {
-            if let Some(cell) = row.first_mut() {
-                *cell = 1.0;
-            }
-            if let Some(cell) = row.get_mut(192 + 4) {
-                *cell = -1.0;
+        // Layer 2: Wire active (0..192) and opponent (192..384) feature detectors into L2 neurons
+        // Neuron 0: Friendly synergies (Advisors, Elephants, Double Chariot, Horse+Cannon, Siege)
+        w2_vec[0][8] = 0.55;
+        w2_vec[0][9] = 0.55;
+        w2_vec[0][10] = 0.65;
+        w2_vec[0][11] = 0.50;
+        w2_vec[0][12] = 0.60;
+        w2_vec[0][13] = 0.45;
+        w2_vec[0][14] = 0.50;
+
+        // Neuron 1: Opponent King danger (Opponent's Neuron 16 minus Opponent's Shields 17 & 18) -> good for us!
+        w2_vec[1][L1_OUTPUT_SIZE + 16] = 1.45;
+        w2_vec[1][L1_OUTPUT_SIZE + 17] = -1.45;
+        w2_vec[1][L1_OUTPUT_SIZE + 18] = -1.10;
+        w2_vec[1][L1_OUTPUT_SIZE + 19] = 0.85;
+
+        // Neuron 2: Our King danger (Our Neuron 16 minus Our Shields 17 & 18) -> bad for us!
+        w2_vec[2][16] = 1.45;
+        w2_vec[2][17] = -1.45;
+        w2_vec[2][18] = -1.10;
+        w2_vec[2][19] = 0.85;
+
+        // Neurons 3..32: Distributed cross-perspective connections for training
+        for (j, row) in w2_vec.iter_mut().enumerate().skip(3) {
+            for (i, cell) in row.iter_mut().enumerate() {
+                let h = ((j.wrapping_mul(313)) ^ (i.wrapping_mul(1_000_003))) & 0xFF;
+                *cell = ((h as f32 - 128.0) / 128.0) * 0.08;
             }
         }
 
-        // Layer 3
+        // Layer 3: Identity + cross-channel mixing
         for (i, row) in w3_vec.iter_mut().enumerate() {
-            if let Some(cell) = row.get_mut(i) {
-                *cell = 1.0;
+            for (j, cell) in row.iter_mut().enumerate() {
+                if i == j {
+                    *cell = 1.0;
+                } else {
+                    let h = ((i.wrapping_mul(73)) ^ (j.wrapping_mul(199))) & 0xFF;
+                    *cell = ((h as f32 - 128.0) / 128.0) * 0.04;
+                }
             }
         }
 
-        // Layer 4
-        if let Some(cell) = w4.first_mut() {
-            *cell = 100.0;
+        // Layer 4: Output weights
+        w4[0] = 65.0; // Friendly synergy bonus
+        w4[1] = 135.0; // Enemy King exposed penalty (good for us)
+        w4[2] = -135.0; // Our King exposed penalty (bad for us)
+        for (k, cell) in w4.iter_mut().enumerate().skip(3) {
+            let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
+            *cell = sign * 8.0;
         }
 
-        let w1: Box<[[f32; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]> = w1_vec
-            .into_boxed_slice()
-            .try_into()
-            .unwrap_or_else(|_| Box::new([[0.0f32; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]));
-        let w2: Box<[[f32; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]> = w2_vec
-            .into_boxed_slice()
-            .try_into()
-            .unwrap_or_else(|_| Box::new([[0.0f32; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]));
-        let w3: Box<[[f32; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]> = w3_vec
-            .into_boxed_slice()
-            .try_into()
-            .unwrap_or_else(|_| Box::new([[0.0f32; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]));
+        let Ok(w1) = w1_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+        let Ok(w_psqt) = w_psqt_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+        let Ok(w2) = w2_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+        let Ok(w3) = w3_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
 
         Self {
             w1,
             b1,
+            w_psqt,
             w2,
             b2,
             w3,
@@ -127,7 +326,7 @@ impl FloatNnue {
     }
 
     #[must_use]
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::cast_precision_loss)]
     pub fn forward(
         &self,
         red_features: &[usize],
@@ -135,38 +334,59 @@ impl FloatNnue {
     ) -> (
         f32,
         [f32; L2_INPUT_SIZE],
+        [f32; L2_INPUT_SIZE],
         [f32; L2_OUTPUT_SIZE],
         [f32; L3_OUTPUT_SIZE],
+        usize,
     ) {
+        let piece_count = red_features.len().max(black_features.len()) + 2;
+        let bucket = ((piece_count.saturating_sub(2)) * PSQT_BUCKETS / 30).min(PSQT_BUCKETS - 1);
+
         let mut acc_red = self.b1;
+        let mut psqt_red = 0.0f32;
         for &feat in red_features {
             if let Some(row) = self.w1.get(feat) {
                 for (a, &w) in acc_red.iter_mut().zip(row.iter()) {
                     *a += w;
                 }
             }
+            if let Some(psqt_row) = self.w_psqt.get(feat) {
+                if let Some(&p) = psqt_row.get(bucket) {
+                    psqt_red += p;
+                }
+            }
         }
 
         let mut acc_black = self.b1;
+        let mut psqt_black = 0.0f32;
         for &feat in black_features {
             if let Some(row) = self.w1.get(feat) {
                 for (a, &w) in acc_black.iter_mut().zip(row.iter()) {
                     *a += w;
                 }
             }
+            if let Some(psqt_row) = self.w_psqt.get(feat) {
+                if let Some(&p) = psqt_row.get(bucket) {
+                    psqt_black += p;
+                }
+            }
         }
 
-        // L1 activation (CReLU: clamp 0.0 .. 1.0)
+        // L1 SCReLU activation: clamped in [0.0, 1.0], squared
+        let mut l1_clamped = [0.0f32; L2_INPUT_SIZE];
         let mut l2_input = [0.0f32; L2_INPUT_SIZE];
-        if let Some(left) = l2_input.get_mut(..L1_OUTPUT_SIZE) {
-            for (out, &val) in left.iter_mut().zip(acc_red.iter()) {
-                *out = val.clamp(0.0, 1.0);
+        if let Some(left_c) = l1_clamped.get_mut(..L1_OUTPUT_SIZE) {
+            for (c_out, &val) in left_c.iter_mut().zip(acc_red.iter()) {
+                *c_out = val.clamp(0.0, 1.0);
             }
         }
-        if let Some(right) = l2_input.get_mut(L1_OUTPUT_SIZE..) {
-            for (out, &val) in right.iter_mut().zip(acc_black.iter()) {
-                *out = val.clamp(0.0, 1.0);
+        if let Some(right_c) = l1_clamped.get_mut(L1_OUTPUT_SIZE..) {
+            for (c_out, &val) in right_c.iter_mut().zip(acc_black.iter()) {
+                *c_out = val.clamp(0.0, 1.0);
             }
+        }
+        for (act_out, &c_val) in l2_input.iter_mut().zip(l1_clamped.iter()) {
+            *act_out = c_val * c_val;
         }
 
         // Layer 2: 384 -> 32
@@ -193,17 +413,26 @@ impl FloatNnue {
             }
         }
 
-        // Layer 4 (Output): 32 -> 1
-        let mut final_sum = self.b4;
+        // Layer 4 (Output): 32 -> 1 + PSQT Head
+        let mut nn_sum = self.b4;
         for (&val, &w) in l3_output.iter().zip(self.w4.iter()) {
-            final_sum += val * w;
+            nn_sum += val * w;
         }
 
-        (final_sum, l2_input, l2_output, l3_output)
+        let total_eval = (psqt_red - psqt_black) + nn_sum;
+        (
+            total_eval,
+            l1_clamped,
+            l2_input,
+            l2_output,
+            l3_output,
+            bucket,
+        )
     }
 
+    #[allow(clippy::indexing_slicing, clippy::too_many_lines)]
     pub fn train_step(&mut self, sample: &PositionSample, lr: f32) -> f32 {
-        let (pred, l2_inp, l2_out, l3_out) =
+        let (pred, l1_clamped, l2_inp, l2_out, l3_out, bucket) =
             self.forward(&sample.red_features, &sample.black_features);
 
         let target_score = if sample.search_eval.abs() > 1e-4 {
@@ -215,23 +444,41 @@ impl FloatNnue {
         let pred_prob = sigmoid(pred / 400.0);
         let error = pred_prob - target_score;
 
-        let grad_l4 = (error * (pred_prob * (1.0 - pred_prob)) / 400.0).clamp(-1.0, 1.0);
+        let grad_out = (error * (pred_prob * (1.0 - pred_prob)) / 400.0).clamp(-1.0, 1.0);
 
-        // Update Layer 4
-        self.b4 -= lr * grad_l4;
-        for (w, &val) in self.w4.iter_mut().zip(l3_out.iter()) {
-            *w -= lr * grad_l4 * val;
+        // 1. Update PSQT Head for active features
+        let psqt_lr = lr * 2.5;
+        for &feat in &sample.red_features {
+            if let Some(psqt_row) = self.w_psqt.get_mut(feat) {
+                if let Some(cell) = psqt_row.get_mut(bucket) {
+                    *cell -= psqt_lr * grad_out;
+                }
+            }
         }
-
-        // Backprop to Layer 3
-        let mut grad_l3 = [0.0f32; L3_OUTPUT_SIZE];
-        for (k, (&w4_val, &l3_val)) in self.w4.iter().zip(l3_out.iter()).enumerate() {
-            if l3_val > 0.0 && l3_val < 1.0 {
-                grad_l3[k] = (grad_l4 * w4_val).clamp(-1.0, 1.0);
+        for &feat in &sample.black_features {
+            if let Some(psqt_row) = self.w_psqt.get_mut(feat) {
+                if let Some(cell) = psqt_row.get_mut(bucket) {
+                    *cell += psqt_lr * grad_out;
+                }
             }
         }
 
-        // Update Layer 3
+        // 2. Update Layer 4
+        self.b4 -= lr * grad_out;
+        for (w, &val) in self.w4.iter_mut().zip(l3_out.iter()) {
+            *w -= lr * grad_out * val;
+        }
+
+        // 3. Backprop to Layer 3
+        let mut grad_l3 = [0.0f32; L3_OUTPUT_SIZE];
+        for (k, (&w4_val, &l3_val)) in self.w4.iter().zip(l3_out.iter()).enumerate() {
+            if l3_val > 0.0 && l3_val < 1.0 {
+                if let Some(g) = grad_l3.get_mut(k) {
+                    *g = (grad_out * w4_val).clamp(-1.0, 1.0);
+                }
+            }
+        }
+
         for (k, &g_l3) in grad_l3.iter().enumerate() {
             if g_l3.abs() > 1e-7 {
                 if let Some(b) = self.b3.get_mut(k) {
@@ -245,7 +492,7 @@ impl FloatNnue {
             }
         }
 
-        // Backprop to Layer 2
+        // 4. Backprop to Layer 2
         let mut grad_l2 = [0.0f32; L2_OUTPUT_SIZE];
         for (j, &l2_val) in l2_out.iter().enumerate() {
             if l2_val > 0.0 && l2_val < 1.0 {
@@ -257,11 +504,30 @@ impl FloatNnue {
                         }
                     }
                 }
-                grad_l2[j] = sum_g.clamp(-1.0, 1.0);
+                if let Some(g) = grad_l2.get_mut(j) {
+                    *g = sum_g.clamp(-1.0, 1.0);
+                }
             }
         }
 
-        // Update Layer 2
+        // 5. Backprop to Layer 1 (SCReLU derivative: 2 * c_val for c_val in (0, 1))
+        let mut grad_l1 = [0.0f32; L2_INPUT_SIZE];
+        for (i, &c_val) in l1_clamped.iter().enumerate() {
+            if c_val > 0.0 && c_val < 1.0 {
+                let mut sum_g = 0.0f32;
+                for (j, &g_l2) in grad_l2.iter().enumerate() {
+                    if let Some(w_row) = self.w2.get(j) {
+                        if let Some(&w) = w_row.get(i) {
+                            sum_g += g_l2 * w;
+                        }
+                    }
+                }
+                if let Some(g1) = grad_l1.get_mut(i) {
+                    *g1 = (sum_g * 2.0 * c_val).clamp(-1.0, 1.0);
+                }
+            }
+        }
+
         for (j, &g_l2) in grad_l2.iter().enumerate() {
             if g_l2.abs() > 1e-7 {
                 if let Some(b) = self.b2.get_mut(j) {
@@ -270,6 +536,29 @@ impl FloatNnue {
                 if let Some(w_row) = self.w2.get_mut(j) {
                     for (w, &inp) in w_row.iter_mut().zip(l2_inp.iter()) {
                         *w -= lr * g_l2 * inp;
+                    }
+                }
+            }
+        }
+
+        // Update sparse active features in W1 (trainable channels 24..L1_OUTPUT_SIZE)
+        let l1_lr = lr * 0.25;
+        for &feat in &sample.red_features {
+            if let Some(row) = self.w1.get_mut(feat) {
+                for idx in 24..L1_OUTPUT_SIZE {
+                    let g = grad_l1[idx];
+                    if g.abs() > 1e-7 {
+                        row[idx] = (row[idx] - l1_lr * g).clamp(-4.0, 4.0);
+                    }
+                }
+            }
+        }
+        for &feat in &sample.black_features {
+            if let Some(row) = self.w1.get_mut(feat) {
+                for idx in 24..L1_OUTPUT_SIZE {
+                    let g = grad_l1[L1_OUTPUT_SIZE + idx];
+                    if g.abs() > 1e-7 {
+                        row[idx] = (row[idx] - l1_lr * g).clamp(-4.0, 4.0);
                     }
                 }
             }
@@ -289,10 +578,9 @@ impl FloatNnue {
                 }
             }
         }
-        let w1: Box<[[i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]> = w1_vec
-            .into_boxed_slice()
-            .try_into()
-            .unwrap_or_else(|_| Box::new([[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]));
+        let Ok(w1) = w1_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
 
         let mut b1 = [0i16; L1_OUTPUT_SIZE];
         for (dst, &val) in b1.iter_mut().zip(self.b1.iter()) {
@@ -301,6 +589,19 @@ impl FloatNnue {
                 *dst = (val * 256.0).clamp(-32767.0, 32767.0) as i16;
             }
         }
+
+        let mut w_psqt_vec = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE];
+        for (dst_row, src_row) in w_psqt_vec.iter_mut().zip(self.w_psqt.iter()) {
+            for (dst, &val) in dst_row.iter_mut().zip(src_row.iter()) {
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *dst = (val * 16.0).clamp(-32767.0, 32767.0) as i16;
+                }
+            }
+        }
+        let Ok(w_psqt) = w_psqt_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
 
         let mut w2_vec = vec![[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
         for (dst_row, src_row) in w2_vec.iter_mut().zip(self.w2.iter()) {
@@ -311,10 +612,10 @@ impl FloatNnue {
                 }
             }
         }
-        let w2: Box<[[i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]> = w2_vec
-            .into_boxed_slice()
-            .try_into()
-            .unwrap_or_else(|_| Box::new([[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]));
+        let Ok(w2) = w2_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+        let w2_col = NnueWeights::transpose_w2(&w2);
 
         let mut b2 = [0i32; L2_OUTPUT_SIZE];
         for (dst, &val) in b2.iter_mut().zip(self.b2.iter()) {
@@ -333,10 +634,10 @@ impl FloatNnue {
                 }
             }
         }
-        let w3: Box<[[i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]> = w3_vec
-            .into_boxed_slice()
-            .try_into()
-            .unwrap_or_else(|_| Box::new([[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]));
+        let Ok(w3) = w3_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+        let w3_col = NnueWeights::transpose_w3(&w3);
 
         let mut b3 = [0i32; L3_OUTPUT_SIZE];
         for (dst, &val) in b3.iter_mut().zip(self.b3.iter()) {
@@ -360,9 +661,12 @@ impl FloatNnue {
         NnueWeights {
             w1,
             b1,
+            w_psqt,
             w2,
+            w2_col,
             b2,
             w3,
+            w3_col,
             b3,
             w4,
             b4,
@@ -390,6 +694,15 @@ impl FloatNnue {
             #[allow(clippy::cast_possible_truncation)]
             let q = (val * 256.0).clamp(-32767.0, 32767.0) as i16;
             bytes.extend_from_slice(&q.to_le_bytes());
+        }
+
+        // W_PSQT: scale f32 to i16 (x16)
+        for row in self.w_psqt.iter() {
+            for &val in row.iter() {
+                #[allow(clippy::cast_possible_truncation)]
+                let q = (val * 16.0).clamp(-32767.0, 32767.0) as i16;
+                bytes.extend_from_slice(&q.to_le_bytes());
+            }
         }
 
         // W2: scale f32 to i8

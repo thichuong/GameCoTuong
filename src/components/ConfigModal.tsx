@@ -202,7 +202,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
           <section>
             <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
-              01. Giá trị quân cờ cơ bản (Piece Values)
+              01. Giá trị quân cờ (Dùng cho sắp xếp nước bắt quân MVV-LVA & SEE)
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Slider
@@ -266,7 +266,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
           <section>
             <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
-              02. Trọng số Tìm kiếm & Heuristics
+              02. Trọng số Tìm kiếm & Heuristics (TT, MVV-LVA, Killer, Countermove, History Gravity)
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Slider
@@ -306,7 +306,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
           <section>
             <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
-              03. Cắt tỉa & Điểm chiếu bí (Pruning & Mate)
+              03. Cắt tỉa Pikafish & Fairy-Stockfish (Pruning & Mate)
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
@@ -314,7 +314,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   className="text-xs font-medium text-stone-300"
                   htmlFor="pruning-method-select"
                 >
-                  Phương pháp cắt tỉa
+                  Chiến lược cắt tỉa (Pikafish / Fairy-SF)
                 </label>
                 <select
                   id="pruning-method-select"
@@ -324,14 +324,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   }
                   className="bg-[#26201C] text-[#F5EFE6] text-xs font-medium rounded-lg px-3 py-2 border border-stone-700 focus:border-amber-400 focus:outline-none"
                 >
-                  <option value={0}>Dynamic Limiting</option>
-                  <option value={1}>Late Move Reductions (LMR)</option>
-                  <option value={2}>Kết hợp cả hai (Aggressive)</option>
+                  <option value={0}>LMP + RFP + NMP + Razoring (Giới hạn nhánh tĩnh)</option>
+                  <option value={1}>Pikafish Chuẩn (LMR + NMP + RFP + Singular + IIR)</option>
+                  <option value={2}>Pikafish Tối đa (LMP + LMR + ProbCut + Futility)</option>
                 </select>
               </div>
 
               <Slider
-                label="Pruning Multiplier"
+                label="Hệ số cắt tỉa (Pruning Multiplier)"
                 value={currentConfig.pruning_multiplier}
                 min={0.1}
                 max={2.0}
@@ -340,7 +340,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               />
 
               <Slider
-                label="Mate Score"
+                label="Điểm Chiếu Bí (Mate Score)"
                 value={currentConfig.mate_score}
                 min={10000}
                 max={50000}
@@ -352,7 +352,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
           <section>
             <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
-              04. Lượng giá Mạng Nơ-ron (NNUE & RL)
+              04. Kiến trúc Mạng Nơ-ron Thuần (Pure NNUE HalfKP v3)
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
@@ -360,27 +360,27 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   className="text-xs font-medium text-stone-300"
                   htmlFor="eval-mode-select"
                 >
-                  Chế độ lượng giá AI
+                  Kiến trúc lượng giá NNUE
                 </label>
                 <select
                   id="eval-mode-select"
-                  value={currentConfig.eval_mode ?? 0}
+                  value={currentConfig.eval_mode ?? 2}
                   onChange={(e) =>
                     handleSliderChange('eval_mode', Number(e.target.value))
                   }
                   className="bg-[#26201C] text-[#F5EFE6] text-xs font-medium rounded-lg px-3 py-2 border border-stone-700 focus:border-amber-400 focus:outline-none"
                 >
-                  <option value={0}>0 - Cổ điển (Handcrafted SimpleEvaluator)</option>
-                  <option value={1}>1 - Kết hợp (Hybrid: Handcrafted + NNUE)</option>
-                  <option value={2}>2 - Thuần Mạng Nơ-ron (Pure NNUE 1260→2x256→32→1)</option>
+                  <option value={2}>
+                    Pure NNUE HalfKP v3 (10530→2×192→32→32→1 + 8-Bucket PSQT, SCReLU)
+                  </option>
                 </select>
               </div>
 
               <Slider
-                label="Tỷ trọng NNUE trong chế độ Hybrid (%)"
-                value={currentConfig.nnue_weight ?? 50}
-                min={0}
-                max={100}
+                label="Hệ số khuếch đại NNUE (%)"
+                value={currentConfig.nnue_weight ?? 100}
+                min={50}
+                max={150}
                 step={5}
                 onChange={(v) => handleSliderChange('nnue_weight', v)}
               />

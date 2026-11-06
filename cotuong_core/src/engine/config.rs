@@ -81,8 +81,8 @@ impl Default for EngineConfig {
             mate_score: 300_000, // Increased to be higher than score_capture_base (200,000)
 
             tt_size_mb: 256,
-            eval_mode: 0,
-            nnue_weight: 50,
+            eval_mode: 2,
+            nnue_weight: 100,
         }
     }
 }

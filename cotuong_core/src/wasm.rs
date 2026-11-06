@@ -305,8 +305,9 @@ impl WasmGameState {
 
     /// Load game state from JSON string, preserving full move history
     pub fn from_json(json_str: &str) -> Result<WasmGameState, JsValue> {
-        let state: GameState = serde_json::from_str(json_str)
+        let mut state: GameState = serde_json::from_str(json_str)
             .map_err(|e| JsValue::from_str(&format!("Deserialization error: {e}")))?;
+        state.board.refresh_nnue();
         Ok(Self { inner: state })
     }
 }

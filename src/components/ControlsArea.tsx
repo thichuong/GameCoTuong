@@ -207,10 +207,10 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
           <button
             type="button"
             onClick={onOpenConfig}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/40 shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
           >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>Cấu hình AI</span>
+            <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400" />
+            <span>Cấu hình AI (NNUE)</span>
           </button>
         </div>
       </div>

@@ -10,6 +10,7 @@ pub struct MoveGenContext<'a> {
     pub moves: &'a mut MoveList,
     pub best_move: Option<Move>,
     pub killers: &'a [Option<Move>; 2],
+    pub countermove: Option<Move>,
     pub only_captures: bool,
     pub enemy_bb: u128,
 }
@@ -20,7 +21,8 @@ pub struct EngineMoveGen<'a> {
 }
 
 impl<'a> EngineMoveGen<'a> {
-    pub fn new(config: &'a EngineConfig, history_table: &'a [[i32; 90]]) -> Self {
+    #[must_use]
+    pub const fn new(config: &'a EngineConfig, history_table: &'a [[i32; 90]]) -> Self {
         Self {
             config,
             history_table,
@@ -35,7 +37,27 @@ impl<'a> EngineMoveGen<'a> {
         killer_moves: &[[Option<Move>; 2]; 64],
         depth: u8,
     ) -> MoveList {
-        self.generate_moves_internal(board, turn, best_move, killer_moves, depth, false)
+        self.generate_moves_internal(board, turn, best_move, killer_moves, None, depth, false)
+    }
+
+    pub fn generate_moves_with_counter(
+        &self,
+        board: &Board,
+        turn: Color,
+        best_move: Option<Move>,
+        killer_moves: &[[Option<Move>; 2]; 64],
+        countermove: Option<Move>,
+        depth: u8,
+    ) -> MoveList {
+        self.generate_moves_internal(
+            board,
+            turn,
+            best_move,
+            killer_moves,
+            countermove,
+            depth,
+            false,
+        )
     }
 
     pub fn generate_captures(
@@ -44,15 +66,17 @@ impl<'a> EngineMoveGen<'a> {
         turn: Color,
         killer_moves: &[[Option<Move>; 2]; 64],
     ) -> MoveList {
-        self.generate_moves_internal(board, turn, None, killer_moves, 0, true)
+        self.generate_moves_internal(board, turn, None, killer_moves, None, 0, true)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn generate_moves_internal(
         &self,
         board: &Board,
         turn: Color,
         best_move: Option<Move>,
         killer_moves: &[[Option<Move>; 2]; 64],
+        countermove: Option<Move>,
         depth: u8,
         only_captures: bool,
     ) -> MoveList {
@@ -71,6 +95,7 @@ impl<'a> EngineMoveGen<'a> {
             moves: &mut moves,
             best_move,
             killers,
+            countermove,
             only_captures,
             enemy_bb,
         };
@@ -79,7 +104,9 @@ impl<'a> EngineMoveGen<'a> {
 
         let start = turn.index() * 7;
         for pt_idx in 0..7 {
-            let bb = board.bitboards[start + pt_idx];
+            let Some(&bb) = board.bitboards.get(start + pt_idx) else {
+                continue;
+            };
             for sq in BitboardIterator::new(bb) {
                 let (r, c) = Board::index_to_coord(sq);
                 let piece_type = match pt_idx {
@@ -131,7 +158,6 @@ impl<'a> EngineMoveGen<'a> {
             None
         };
 
-        let mut score;
         let is_hash_move = ctx.best_move.is_some_and(|bm| {
             bm.from_row as usize == r
                 && bm.from_col as usize == c
@@ -139,41 +165,48 @@ impl<'a> EngineMoveGen<'a> {
                 && bm.to_col as usize == tc
         });
 
-        if is_hash_move {
-            score = self.config.score_hash_move;
+        let score = if is_hash_move {
+            self.config.score_hash_move
         } else if let Some(t) = target {
             let victim_val = self.get_piece_value(t.piece_type);
             let attacker_val = ctx
                 .board
                 .get_piece(unsafe { BoardCoordinate::new_unchecked(r, c) })
                 .map_or(0, |p| self.get_piece_value(p.piece_type));
-            score = self.config.score_capture_base + victim_val - (attacker_val / 10);
+            self.config.score_capture_base + victim_val * 10 - attacker_val
+        } else if ctx.killers.first().copied().flatten().is_some_and(|km| {
+            km.from_row as usize == r
+                && km.from_col as usize == c
+                && km.to_row as usize == tr
+                && km.to_col as usize == tc
+        }) {
+            self.config.score_killer_move
+        } else if ctx.killers.get(1).copied().flatten().is_some_and(|km| {
+            km.from_row as usize == r
+                && km.from_col as usize == c
+                && km.to_row as usize == tr
+                && km.to_col as usize == tc
+        }) {
+            self.config.score_killer_move.saturating_sub(10_000)
+        } else if ctx.countermove.is_some_and(|cm| {
+            cm.from_row as usize == r
+                && cm.from_col as usize == c
+                && cm.to_row as usize == tr
+                && cm.to_col as usize == tc
+        }) {
+            self.config.score_killer_move.saturating_sub(20_000)
         } else {
-            let is_killer_move = ctx.killers.iter().any(|k| {
-                k.is_some_and(|km| {
-                    km.from_row as usize == r
-                        && km.from_col as usize == c
-                        && km.to_row as usize == tr
-                        && km.to_col as usize == tc
-                })
-            });
+            let from_idx = r * 9 + c;
+            let to_idx = tr * 9 + tc;
+            let hist = *self
+                .history_table
+                .get(from_idx)
+                .and_then(|row| row.get(to_idx))
+                .unwrap_or(&0);
+            hist.min(self.config.score_history_max)
+        };
 
-            if is_killer_move {
-                score = self.config.score_killer_move;
-            } else {
-                let from_idx = r * 9 + c;
-                let to_idx = tr * 9 + tc;
-                score = *self
-                    .history_table
-                    .get(from_idx)
-                    .and_then(|row| row.get(to_idx))
-                    .unwrap_or(&0);
-                if score > self.config.score_history_max {
-                    score = self.config.score_history_max;
-                }
-            }
-        }
-
+        #[allow(clippy::cast_possible_truncation)]
         ctx.moves.push(Move {
             from_row: r as u8,
             from_col: c as u8,
@@ -185,11 +218,12 @@ impl<'a> EngineMoveGen<'a> {
 
     fn gen_rook_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         let tables = AttackTables::get();
-        let rank_occ = ctx.board.occupied_rows[r];
+        let rank_occ = ctx.board.occupied_rows.get(r).copied().unwrap_or(0);
         let rank_attacks = tables.get_rook_attacks(c, rank_occ, 9);
         let mut attacks = rank_attacks;
 
         if ctx.only_captures {
+            #[allow(clippy::cast_possible_truncation)]
             let enemy_rank = (ctx.enemy_bb >> (r * 9)) as u16 & 0x1FF;
             attacks &= enemy_rank;
         }
@@ -200,7 +234,7 @@ impl<'a> EngineMoveGen<'a> {
             self.add_move(ctx, (r, c), (r, col));
         }
 
-        let file_occ = ctx.board.occupied_cols[c];
+        let file_occ = ctx.board.occupied_cols.get(c).copied().unwrap_or(0);
         let file_attacks = tables.get_rook_attacks(r, file_occ, 10);
         let mut attacks = file_attacks;
 
@@ -223,11 +257,12 @@ impl<'a> EngineMoveGen<'a> {
 
     fn gen_cannon_moves(&self, ctx: &mut MoveGenContext, r: usize, c: usize) {
         let tables = AttackTables::get();
-        let rank_occ = ctx.board.occupied_rows[r];
+        let rank_occ = ctx.board.occupied_rows.get(r).copied().unwrap_or(0);
         let rank_attacks = tables.get_cannon_attacks(c, rank_occ, 9);
         let mut attacks = rank_attacks;
 
         if ctx.only_captures {
+            #[allow(clippy::cast_possible_truncation)]
             let enemy_rank = (ctx.enemy_bb >> (r * 9)) as u16 & 0x1FF;
             attacks &= enemy_rank;
         }
@@ -238,7 +273,7 @@ impl<'a> EngineMoveGen<'a> {
             self.add_move(ctx, (r, c), (r, col));
         }
 
-        let file_occ = ctx.board.occupied_cols[c];
+        let file_occ = ctx.board.occupied_cols.get(c).copied().unwrap_or(0);
         let file_attacks = tables.get_cannon_attacks(r, file_occ, 10);
         let mut attacks = file_attacks;
 
@@ -263,10 +298,12 @@ impl<'a> EngineMoveGen<'a> {
         let tables = AttackTables::get();
         let sq = r * 9 + c;
 
-        for &(target_sq, leg_sq) in &tables.horse_moves[sq] {
-            if (ctx.board.occupied & (1 << leg_sq)) == 0 {
-                let (tr, tc) = Board::index_to_coord(target_sq);
-                self.add_move(ctx, (r, c), (tr, tc));
+        if let Some(horse_list) = tables.horse_moves.get(sq) {
+            for &(target_sq, leg_sq) in horse_list {
+                if (ctx.board.occupied & (1 << leg_sq)) == 0 {
+                    let (tr, tc) = Board::index_to_coord(target_sq);
+                    self.add_move(ctx, (r, c), (tr, tc));
+                }
             }
         }
     }
@@ -275,10 +312,12 @@ impl<'a> EngineMoveGen<'a> {
         let tables = AttackTables::get();
         let sq = r * 9 + c;
 
-        for &(target_sq, eye_sq) in &tables.elephant_moves[sq] {
-            if (ctx.board.occupied & (1 << eye_sq)) == 0 {
-                let (tr, tc) = Board::index_to_coord(target_sq);
-                self.add_move(ctx, (r, c), (tr, tc));
+        if let Some(elephant_list) = tables.elephant_moves.get(sq) {
+            for &(target_sq, eye_sq) in elephant_list {
+                if (ctx.board.occupied & (1 << eye_sq)) == 0 {
+                    let (tr, tc) = Board::index_to_coord(target_sq);
+                    self.add_move(ctx, (r, c), (tr, tc));
+                }
             }
         }
     }
@@ -287,9 +326,11 @@ impl<'a> EngineMoveGen<'a> {
         let tables = AttackTables::get();
         let sq = r * 9 + c;
 
-        for &target_sq in &tables.advisor_moves[sq] {
-            let (tr, tc) = Board::index_to_coord(target_sq);
-            self.add_move(ctx, (r, c), (tr, tc));
+        if let Some(advisor_list) = tables.advisor_moves.get(sq) {
+            for &target_sq in advisor_list {
+                let (tr, tc) = Board::index_to_coord(target_sq);
+                self.add_move(ctx, (r, c), (tr, tc));
+            }
         }
     }
 
@@ -297,9 +338,11 @@ impl<'a> EngineMoveGen<'a> {
         let tables = AttackTables::get();
         let sq = r * 9 + c;
 
-        for &target_sq in &tables.general_moves[sq] {
-            let (tr, tc) = Board::index_to_coord(target_sq);
-            self.add_move(ctx, (r, c), (tr, tc));
+        if let Some(general_list) = tables.general_moves.get(sq) {
+            for &target_sq in general_list {
+                let (tr, tc) = Board::index_to_coord(target_sq);
+                self.add_move(ctx, (r, c), (tr, tc));
+            }
         }
     }
 
@@ -308,13 +351,19 @@ impl<'a> EngineMoveGen<'a> {
         let sq = r * 9 + c;
         let color_idx = ctx.turn.index();
 
-        for &target_sq in &tables.soldier_moves[color_idx][sq] {
-            let (tr, tc) = Board::index_to_coord(target_sq);
-            self.add_move(ctx, (r, c), (tr, tc));
+        if let Some(soldier_list) = tables
+            .soldier_moves
+            .get(color_idx)
+            .and_then(|arr| arr.get(sq))
+        {
+            for &target_sq in soldier_list {
+                let (tr, tc) = Board::index_to_coord(target_sq);
+                self.add_move(ctx, (r, c), (tr, tc));
+            }
         }
     }
 
-    fn get_piece_value(&self, pt: PieceType) -> i32 {
+    const fn get_piece_value(&self, pt: PieceType) -> i32 {
         match pt {
             PieceType::General => self.config.val_king,
             PieceType::Chariot => self.config.val_rook,

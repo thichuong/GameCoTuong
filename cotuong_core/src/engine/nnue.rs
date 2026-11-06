@@ -2,10 +2,11 @@ use crate::logic::board::{Board, Color, Piece, PieceType};
 use std::sync::OnceLock;
 
 pub const NNUE_MAGIC: &[u8; 4] = b"XNNU";
-pub const NNUE_VERSION: u32 = 2;
+pub const NNUE_VERSION: u32 = 3;
 
 pub const L1_INPUT_SIZE: usize = 10_530; // 9 king palace squares * 13 piece types * 90 board squares
 pub const L1_OUTPUT_SIZE: usize = 192;
+pub const PSQT_BUCKETS: usize = 8; // 8 game-phase material & king-relative positional buckets (Pikafish style)
 pub const L2_INPUT_SIZE: usize = 384; // 2 * L1_OUTPUT_SIZE
 pub const L2_OUTPUT_SIZE: usize = 32;
 pub const L3_INPUT_SIZE: usize = 32;
@@ -15,6 +16,7 @@ pub const FILE_SIZE: usize = 4
     + 4
     + (L1_INPUT_SIZE * L1_OUTPUT_SIZE * 2)
     + (L1_OUTPUT_SIZE * 2)
+    + (L1_INPUT_SIZE * PSQT_BUCKETS * 2)
     + (L2_INPUT_SIZE * L2_OUTPUT_SIZE)
     + (L2_OUTPUT_SIZE * 4)
     + (L3_INPUT_SIZE * L3_OUTPUT_SIZE)
@@ -28,6 +30,8 @@ const EMBEDDED_WEIGHTS: &[u8] = include_bytes!("../../assets/default.nnue");
 pub struct NnueAccumulator {
     pub red: [i16; L1_OUTPUT_SIZE],
     pub black: [i16; L1_OUTPUT_SIZE],
+    pub psqt_red: [i32; PSQT_BUCKETS],
+    pub psqt_black: [i32; PSQT_BUCKETS],
 }
 
 impl Default for NnueAccumulator {
@@ -35,6 +39,8 @@ impl Default for NnueAccumulator {
         Self {
             red: [0; L1_OUTPUT_SIZE],
             black: [0; L1_OUTPUT_SIZE],
+            psqt_red: [0; PSQT_BUCKETS],
+            psqt_black: [0; PSQT_BUCKETS],
         }
     }
 }
@@ -42,9 +48,13 @@ impl Default for NnueAccumulator {
 pub struct NnueWeights {
     pub w1: Box<[[i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]>,
     pub b1: [i16; L1_OUTPUT_SIZE],
+    pub w_psqt: Box<[[i16; PSQT_BUCKETS]; L1_INPUT_SIZE]>,
     pub w2: Box<[[i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]>,
+    /// Pre-transposed column-major W2 (`[L2_INPUT_SIZE][L2_OUTPUT_SIZE]`) for sparse SIMD-friendly forward pass
+    pub w2_col: Box<[[i8; L2_OUTPUT_SIZE]; L2_INPUT_SIZE]>,
     pub b2: [i32; L2_OUTPUT_SIZE],
     pub w3: Box<[[i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]>,
+    pub w3_col: Box<[[i8; L3_OUTPUT_SIZE]; L3_INPUT_SIZE]>,
     pub b3: [i32; L3_OUTPUT_SIZE],
     pub w4: [i16; L3_OUTPUT_SIZE],
     pub b4: i32,
@@ -62,25 +72,95 @@ impl NnueWeights {
 
     #[must_use]
     pub fn empty() -> Self {
+        let Ok(w1) = vec![[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]
+            .into_boxed_slice()
+            .try_into()
+        else {
+            unreachable!()
+        };
+        let Ok(w_psqt) = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE]
+            .into_boxed_slice()
+            .try_into()
+        else {
+            unreachable!()
+        };
+        let Ok(w2) = vec![[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]
+            .into_boxed_slice()
+            .try_into()
+        else {
+            unreachable!()
+        };
+        let Ok(w2_col) = vec![[0i8; L2_OUTPUT_SIZE]; L2_INPUT_SIZE]
+            .into_boxed_slice()
+            .try_into()
+        else {
+            unreachable!()
+        };
+        let Ok(w3) = vec![[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]
+            .into_boxed_slice()
+            .try_into()
+        else {
+            unreachable!()
+        };
+        let Ok(w3_col) = vec![[0i8; L3_OUTPUT_SIZE]; L3_INPUT_SIZE]
+            .into_boxed_slice()
+            .try_into()
+        else {
+            unreachable!()
+        };
         Self {
-            w1: vec![[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]
-                .into_boxed_slice()
-                .try_into()
-                .unwrap_or_else(|_| Box::new([[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE])),
+            w1,
             b1: [0i16; L1_OUTPUT_SIZE],
-            w2: vec![[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]
-                .into_boxed_slice()
-                .try_into()
-                .unwrap_or_else(|_| Box::new([[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE])),
+            w_psqt,
+            w2,
+            w2_col,
             b2: [0i32; L2_OUTPUT_SIZE],
-            w3: vec![[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]
-                .into_boxed_slice()
-                .try_into()
-                .unwrap_or_else(|_| Box::new([[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE])),
+            w3,
+            w3_col,
             b3: [0i32; L3_OUTPUT_SIZE],
             w4: [0i16; L3_OUTPUT_SIZE],
             b4: 0,
         }
+    }
+
+    #[must_use]
+    pub fn transpose_w2(
+        w2: &[[i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE],
+    ) -> Box<[[i8; L2_OUTPUT_SIZE]; L2_INPUT_SIZE]> {
+        let mut w2_col_vec = vec![[0i8; L2_OUTPUT_SIZE]; L2_INPUT_SIZE];
+        for (j, row) in w2.iter().enumerate() {
+            for (i, &val) in row.iter().enumerate() {
+                if let Some(col_slice) = w2_col_vec.get_mut(i) {
+                    if let Some(cell) = col_slice.get_mut(j) {
+                        *cell = val;
+                    }
+                }
+            }
+        }
+        let Ok(boxed) = w2_col_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+        boxed
+    }
+
+    #[must_use]
+    pub fn transpose_w3(
+        w3: &[[i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE],
+    ) -> Box<[[i8; L3_OUTPUT_SIZE]; L3_INPUT_SIZE]> {
+        let mut w3_col_vec = vec![[0i8; L3_OUTPUT_SIZE]; L3_INPUT_SIZE];
+        for (k, row) in w3.iter().enumerate() {
+            for (j, &val) in row.iter().enumerate() {
+                if let Some(col_slice) = w3_col_vec.get_mut(j) {
+                    if let Some(cell) = col_slice.get_mut(k) {
+                        *cell = val;
+                    }
+                }
+            }
+        }
+        let Ok(boxed) = w3_col_vec.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+        boxed
     }
 
     pub fn load_from_bytes(bytes: &[u8]) -> Result<Self, String> {
@@ -138,6 +218,22 @@ impl NnueWeights {
             offset += 2;
         }
 
+        let mut w_psqt_vec = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE];
+        for row in &mut w_psqt_vec {
+            for val in row {
+                let slice = bytes
+                    .get(offset..offset + 2)
+                    .ok_or_else(|| "Unexpected EOF while reading W_PSQT".to_string())?;
+                *val =
+                    i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
+                offset += 2;
+            }
+        }
+        let w_psqt: Box<[[i16; PSQT_BUCKETS]; L1_INPUT_SIZE]> = w_psqt_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W_PSQT array".to_string())?;
+
         let mut w2_vec = vec![[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
         for row in &mut w2_vec {
             for val in row {
@@ -156,6 +252,7 @@ impl NnueWeights {
                 .into_boxed_slice()
                 .try_into()
                 .map_err(|_| "Failed to allocate boxed W2 array".to_string())?;
+        let w2_col = Self::transpose_w2(&w2);
 
         let mut b2 = [0i32; L2_OUTPUT_SIZE];
         for val in &mut b2 {
@@ -189,6 +286,7 @@ impl NnueWeights {
                 .into_boxed_slice()
                 .try_into()
                 .map_err(|_| "Failed to allocate boxed W3 array".to_string())?;
+        let w3_col = Self::transpose_w3(&w3);
 
         let mut b3 = [0i32; L3_OUTPUT_SIZE];
         for val in &mut b3 {
@@ -226,9 +324,12 @@ impl NnueWeights {
         Ok(Self {
             w1,
             b1,
+            w_psqt,
             w2,
+            w2_col,
             b2,
             w3,
+            w3_col,
             b3,
             w4,
             b4,
@@ -237,13 +338,9 @@ impl NnueWeights {
 }
 
 /// Maps square (0..90) to a palace index (0..9).
-/// Red palace:
-/// row 0, cols 3, 4, 5 -> 3, 4, 5 (0, 1, 2)
-/// row 1, cols 3, 4, 5 -> 12, 13, 14 (3, 4, 5)
-/// row 2, cols 3, 4, 5 -> 21, 22, 23 (6, 7, 8)
 #[inline]
 #[must_use]
-pub fn palace_index(sq: usize) -> usize {
+pub const fn palace_index(sq: usize) -> usize {
     match sq {
         3 => 0,
         4 => 1,
@@ -264,7 +361,7 @@ pub fn palace_index(sq: usize) -> usize {
 /// Enemy pieces (0..=6): General=6, Advisor=7, Elephant=8, Horse=9, Chariot=10, Cannon=11, Soldier=12.
 #[inline]
 #[must_use]
-pub fn halfkp_piece_type_idx(is_enemy: bool, piece_type: PieceType) -> Option<usize> {
+pub const fn halfkp_piece_type_idx(is_enemy: bool, piece_type: PieceType) -> Option<usize> {
     if is_enemy {
         Some(6 + piece_type.index())
     } else {
@@ -308,7 +405,7 @@ pub fn halfkp_feature_idx_black(
 
 #[inline]
 #[must_use]
-pub fn get_red_king_palace_idx(board: &Board) -> usize {
+pub const fn get_red_king_palace_idx(board: &Board) -> usize {
     if board.bitboards[0] != 0 {
         let sq = board.bitboards[0].trailing_zeros() as usize;
         palace_index(sq)
@@ -319,7 +416,7 @@ pub fn get_red_king_palace_idx(board: &Board) -> usize {
 
 #[inline]
 #[must_use]
-pub fn get_black_king_palace_idx(board: &Board) -> usize {
+pub const fn get_black_king_palace_idx(board: &Board) -> usize {
     if board.bitboards[7] != 0 {
         let sq = board.bitboards[7].trailing_zeros() as usize;
         let flipped_sq = 89_usize.saturating_sub(sq);
@@ -344,20 +441,10 @@ impl NnueAccumulator {
         weights: &NnueWeights,
     ) {
         self.red = weights.b1;
+        self.psqt_red = [0; PSQT_BUCKETS];
         for (sq, maybe_piece) in grid.iter().enumerate() {
             if let Some(piece) = maybe_piece {
-                if let Some(feat) = halfkp_feature_idx_red(
-                    k_red_palace_idx,
-                    piece.color == Color::Black,
-                    piece.piece_type,
-                    sq,
-                ) {
-                    if let Some(row) = weights.w1.get(feat) {
-                        for (a, &w) in self.red.iter_mut().zip(row.iter()) {
-                            *a = a.saturating_add(w);
-                        }
-                    }
-                }
+                self.add_piece_red(*piece, sq, k_red_palace_idx, weights);
             }
         }
     }
@@ -369,19 +456,105 @@ impl NnueAccumulator {
         weights: &NnueWeights,
     ) {
         self.black = weights.b1;
+        self.psqt_black = [0; PSQT_BUCKETS];
         for (sq, maybe_piece) in grid.iter().enumerate() {
             if let Some(piece) = maybe_piece {
-                if let Some(feat) = halfkp_feature_idx_black(
-                    k_black_palace_idx,
-                    piece.color == Color::Red,
-                    piece.piece_type,
-                    sq,
-                ) {
-                    if let Some(row) = weights.w1.get(feat) {
-                        for (a, &w) in self.black.iter_mut().zip(row.iter()) {
-                            *a = a.saturating_add(w);
-                        }
-                    }
+                self.add_piece_black(*piece, sq, k_black_palace_idx, weights);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn add_piece_red(
+        &mut self,
+        piece: Piece,
+        sq: usize,
+        k_red: usize,
+        weights: &NnueWeights,
+    ) {
+        if let Some(red_feat) =
+            halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
+        {
+            if let Some(row) = weights.w1.get(red_feat) {
+                for (a, &w) in self.red.iter_mut().zip(row.iter()) {
+                    *a = a.saturating_add(w);
+                }
+            }
+            if let Some(psqt_row) = weights.w_psqt.get(red_feat) {
+                for (p, &w) in self.psqt_red.iter_mut().zip(psqt_row.iter()) {
+                    *p = p.saturating_add(i32::from(w));
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn remove_piece_red(
+        &mut self,
+        piece: Piece,
+        sq: usize,
+        k_red: usize,
+        weights: &NnueWeights,
+    ) {
+        if let Some(red_feat) =
+            halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
+        {
+            if let Some(row) = weights.w1.get(red_feat) {
+                for (a, &w) in self.red.iter_mut().zip(row.iter()) {
+                    *a = a.saturating_sub(w);
+                }
+            }
+            if let Some(psqt_row) = weights.w_psqt.get(red_feat) {
+                for (p, &w) in self.psqt_red.iter_mut().zip(psqt_row.iter()) {
+                    *p = p.saturating_sub(i32::from(w));
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn add_piece_black(
+        &mut self,
+        piece: Piece,
+        sq: usize,
+        k_black: usize,
+        weights: &NnueWeights,
+    ) {
+        if let Some(black_feat) =
+            halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
+        {
+            if let Some(row) = weights.w1.get(black_feat) {
+                for (a, &w) in self.black.iter_mut().zip(row.iter()) {
+                    *a = a.saturating_add(w);
+                }
+            }
+            if let Some(psqt_row) = weights.w_psqt.get(black_feat) {
+                for (p, &w) in self.psqt_black.iter_mut().zip(psqt_row.iter()) {
+                    *p = p.saturating_add(i32::from(w));
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn remove_piece_black(
+        &mut self,
+        piece: Piece,
+        sq: usize,
+        k_black: usize,
+        weights: &NnueWeights,
+    ) {
+        if let Some(black_feat) =
+            halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
+        {
+            if let Some(row) = weights.w1.get(black_feat) {
+                for (a, &w) in self.black.iter_mut().zip(row.iter()) {
+                    *a = a.saturating_sub(w);
+                }
+            }
+            if let Some(psqt_row) = weights.w_psqt.get(black_feat) {
+                for (p, &w) in self.psqt_black.iter_mut().zip(psqt_row.iter()) {
+                    *p = p.saturating_sub(i32::from(w));
                 }
             }
         }
@@ -396,25 +569,8 @@ impl NnueAccumulator {
         k_black: usize,
         weights: &NnueWeights,
     ) {
-        if let Some(red_feat) =
-            halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
-        {
-            if let Some(row) = weights.w1.get(red_feat) {
-                for (a, &w) in self.red.iter_mut().zip(row.iter()) {
-                    *a = a.saturating_add(w);
-                }
-            }
-        }
-
-        if let Some(black_feat) =
-            halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
-        {
-            if let Some(row) = weights.w1.get(black_feat) {
-                for (a, &w) in self.black.iter_mut().zip(row.iter()) {
-                    *a = a.saturating_add(w);
-                }
-            }
-        }
+        self.add_piece_red(piece, sq, k_red, weights);
+        self.add_piece_black(piece, sq, k_black, weights);
     }
 
     #[inline]
@@ -426,87 +582,97 @@ impl NnueAccumulator {
         k_black: usize,
         weights: &NnueWeights,
     ) {
-        if let Some(red_feat) =
-            halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
-        {
-            if let Some(row) = weights.w1.get(red_feat) {
-                for (a, &w) in self.red.iter_mut().zip(row.iter()) {
-                    *a = a.saturating_sub(w);
-                }
-            }
-        }
-
-        if let Some(black_feat) =
-            halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
-        {
-            if let Some(row) = weights.w1.get(black_feat) {
-                for (a, &w) in self.black.iter_mut().zip(row.iter()) {
-                    *a = a.saturating_sub(w);
-                }
-            }
-        }
+        self.remove_piece_red(piece, sq, k_red, weights);
+        self.remove_piece_black(piece, sq, k_black, weights);
     }
 }
 
+/// Evaluates the deep FC layers (L1 -> L2 -> L3 -> Out) using SCReLU activation
+/// and sparse non-zero input skipping over pre-transposed column-major matrices.
+#[inline]
 #[must_use]
 pub fn evaluate_forward(
     active_acc: &[i16; L1_OUTPUT_SIZE],
     opp_acc: &[i16; L1_OUTPUT_SIZE],
     weights: &NnueWeights,
 ) -> i32 {
-    // 1. Layer 1 activation (CReLU: clamp [0, 256])
-    let mut l2_input = [0i32; L2_INPUT_SIZE];
-    if let Some(left) = l2_input.get_mut(..L1_OUTPUT_SIZE) {
-        for (out, &val) in left.iter_mut().zip(active_acc.iter()) {
-            *out = i32::from(val.clamp(0, 256));
-        }
-    }
-    if let Some(right) = l2_input.get_mut(L1_OUTPUT_SIZE..) {
-        for (out, &val) in right.iter_mut().zip(opp_acc.iter()) {
-            *out = i32::from(val.clamp(0, 256));
-        }
-    }
+    // 1. Layer 1 -> Layer 2 (384 -> 32) with SCReLU activation & sparse zero-skipping
+    let mut l2_acc = weights.b2;
 
-    // 2. Layer 2: 384 -> 32
-    let mut l2_output = [0i32; L2_OUTPUT_SIZE];
-    for (j, (out, &b)) in l2_output.iter_mut().zip(weights.b2.iter()).enumerate() {
-        if let Some(w_row) = weights.w2.get(j) {
-            let mut sum = b;
-            for (&inp, &w) in l2_input.iter().zip(w_row.iter()) {
-                sum = sum.saturating_add(inp * i32::from(w));
+    for (i, &val) in active_acc.iter().enumerate() {
+        if val > 0 {
+            let clamped = i32::from(val.min(256));
+            // SCReLU: (clamped^2) >> 8 in [0, 256]
+            let act = (clamped * clamped) >> 8;
+            if act != 0 {
+                if let Some(col) = weights.w2_col.get(i) {
+                    for (out, &w) in l2_acc.iter_mut().zip(col.iter()) {
+                        *out = out.saturating_add(act * i32::from(w));
+                    }
+                }
             }
-            *out = (sum / 64).clamp(0, 127);
         }
     }
 
-    // 3. Layer 3: 32 -> 32
-    let mut l3_output = [0i32; L3_OUTPUT_SIZE];
-    for (j, (out, &b)) in l3_output.iter_mut().zip(weights.b3.iter()).enumerate() {
-        if let Some(w_row) = weights.w3.get(j) {
-            let mut sum = b;
-            for (&inp, &w) in l2_output.iter().zip(w_row.iter()) {
-                sum = sum.saturating_add(inp * i32::from(w));
+    for (i, &val) in opp_acc.iter().enumerate() {
+        if val > 0 {
+            let clamped = i32::from(val.min(256));
+            let act = (clamped * clamped) >> 8;
+            if act != 0 {
+                if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + i) {
+                    for (out, &w) in l2_acc.iter_mut().zip(col.iter()) {
+                        *out = out.saturating_add(act * i32::from(w));
+                    }
+                }
             }
-            *out = (sum / 64).clamp(0, 127);
         }
     }
 
-    // 4. Layer 4: 32 -> 1
+    // 2. Layer 2 -> Layer 3 (32 -> 32) with sparse zero-skipping
+    let mut l3_acc = weights.b3;
+    for (j, &sum) in l2_acc.iter().enumerate() {
+        let l2_act = (sum >> 6).clamp(0, 127);
+        if l2_act != 0 {
+            if let Some(col) = weights.w3_col.get(j) {
+                for (out, &w) in l3_acc.iter_mut().zip(col.iter()) {
+                    *out = out.saturating_add(l2_act * i32::from(w));
+                }
+            }
+        }
+    }
+
+    // 3. Layer 3 -> Layer 4 Output (32 -> 1)
     let mut final_sum = weights.b4;
-    for (&val, &w) in l3_output.iter().zip(weights.w4.iter()) {
-        final_sum = final_sum.saturating_add(val * i32::from(w));
+    for (&sum, &w) in l3_acc.iter().zip(weights.w4.iter()) {
+        let l3_act = (sum >> 6).clamp(0, 127);
+        if l3_act != 0 {
+            final_sum = final_sum.saturating_add(l3_act * i32::from(w));
+        }
     }
 
     final_sum / 16
 }
 
+/// Evaluates the board position from Red's perspective using the Pikafish-style
+/// Dual-Head HalfKP NNUE (8-Bucket Phase PSQT Head + Deep SCReLU Positional Head).
+#[inline]
 #[must_use]
 pub fn evaluate_nnue_with_weights(board: &Board, weights: &NnueWeights) -> i32 {
+    let piece_count = board.occupied.count_ones() as usize;
+    let bucket = ((piece_count.saturating_sub(2)) * PSQT_BUCKETS / 30).min(PSQT_BUCKETS - 1);
+
+    let psqt_red = board.nnue_acc.psqt_red.get(bucket).copied().unwrap_or(0);
+    let psqt_black = board.nnue_acc.psqt_black.get(bucket).copied().unwrap_or(0);
+    let psqt_score = (psqt_red - psqt_black) / 16;
+
     let red_score = evaluate_forward(&board.nnue_acc.red, &board.nnue_acc.black, weights);
     let black_score = evaluate_forward(&board.nnue_acc.black, &board.nnue_acc.red, weights);
-    (red_score - black_score) / 2
+    let positional_score = (red_score - black_score) / 2;
+
+    psqt_score + positional_score
 }
 
+#[inline]
 #[must_use]
 pub fn evaluate_nnue(board: &Board) -> i32 {
     evaluate_nnue_with_weights(board, NnueWeights::get())
@@ -520,6 +686,7 @@ mod tests {
     fn test_embedded_weights_validity() {
         let weights = NnueWeights::get();
         assert_eq!(weights.b1.len(), L1_OUTPUT_SIZE);
+        assert_eq!(weights.w_psqt.len(), L1_INPUT_SIZE);
         assert_eq!(weights.b2.len(), L2_OUTPUT_SIZE);
         assert_eq!(weights.b3.len(), L3_OUTPUT_SIZE);
         assert_eq!(weights.w4.len(), L3_OUTPUT_SIZE);
@@ -546,13 +713,10 @@ mod tests {
 
     #[test]
     fn test_halfkp_feature_bounds() {
-        // Red palace idx 0..8
         for k in 0..9 {
-            // Friendly Chariot at sq 0
             let feat = halfkp_feature_idx_red(k, false, PieceType::Chariot, 0).expect("Valid feat");
             assert!(feat < L1_INPUT_SIZE);
 
-            // Enemy General at sq 85
             let feat_eg =
                 halfkp_feature_idx_red(k, true, PieceType::General, 85).expect("Valid feat");
             assert!(feat_eg < L1_INPUT_SIZE);
@@ -572,6 +736,8 @@ mod tests {
         expected.refresh_nnue();
         assert_eq!(board.nnue_acc.red, expected.nnue_acc.red);
         assert_eq!(board.nnue_acc.black, expected.nnue_acc.black);
+        assert_eq!(board.nnue_acc.psqt_red, expected.nnue_acc.psqt_red);
+        assert_eq!(board.nnue_acc.psqt_black, expected.nnue_acc.psqt_black);
 
         // 2. Play 10 moves, verifying incremental match after each move
         let mut history = Vec::new();
@@ -592,6 +758,8 @@ mod tests {
             fresh.refresh_nnue();
             assert_eq!(board.nnue_acc.red, fresh.nnue_acc.red);
             assert_eq!(board.nnue_acc.black, fresh.nnue_acc.black);
+            assert_eq!(board.nnue_acc.psqt_red, fresh.nnue_acc.psqt_red);
+            assert_eq!(board.nnue_acc.psqt_black, fresh.nnue_acc.psqt_black);
 
             turn = turn.opposite();
         }
@@ -603,6 +771,8 @@ mod tests {
             fresh.refresh_nnue();
             assert_eq!(board.nnue_acc.red, fresh.nnue_acc.red);
             assert_eq!(board.nnue_acc.black, fresh.nnue_acc.black);
+            assert_eq!(board.nnue_acc.psqt_red, fresh.nnue_acc.psqt_red);
+            assert_eq!(board.nnue_acc.psqt_black, fresh.nnue_acc.psqt_black);
         }
     }
 }

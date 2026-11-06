@@ -1,19 +1,25 @@
-import init, { WasmEngine, WasmGameState } from '../wasm/cotuong_core.js';
+import init, { WasmGameState } from '../wasm/cotuong_core.js';
 import wasmUrl from '../wasm/cotuong_core_bg.wasm?url';
-import type { SearchResult } from '../types/game.js';
+import { PikafishNnueEngine } from '../engine/pikafishNnue.js';
+import type { EngineConfig, SearchResult } from '../types/game.js';
 
 let isWasmInitialized = false;
-let engine: WasmEngine | null = null;
+let engine: PikafishNnueEngine | null = null;
 let currentConfigJson: string | null = null;
 
-async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
+async function ensureInitialized(
+  configJson?: string
+): Promise<PikafishNnueEngine> {
   if (!isWasmInitialized) {
     await init(wasmUrl);
     isWasmInitialized = true;
   }
 
   if (!engine || (configJson && configJson !== currentConfigJson)) {
-    engine = new WasmEngine(configJson ?? null);
+    const parsedConfig = configJson
+      ? (JSON.parse(configJson) as EngineConfig)
+      : null;
+    engine = new PikafishNnueEngine(parsedConfig);
     currentConfigJson = configJson ?? null;
   }
 
@@ -30,10 +36,13 @@ self.onmessage = async (e: MessageEvent) => {
         ? WasmGameState.from_json(stateJson)
         : WasmGameState.from_fen(fen);
 
-      // Execute search
-      const result: SearchResult | null = eng.search(
-        state,
-        BigInt(timeLimitMs),
+      const boardFen = state.to_fen();
+      state.free();
+
+      // Execute Pure NNUE v3 + Pikafish/Fairy-Stockfish search
+      const result: SearchResult | null = eng.searchFen(
+        boardFen,
+        Number(timeLimitMs),
         maxDepth ?? null
       );
 
@@ -48,4 +57,5 @@ self.onmessage = async (e: MessageEvent) => {
     }
   }
 };
+
 

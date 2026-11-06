@@ -90,10 +90,10 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   score_capture_base: 1000000,
   score_killer_move: 900000,
   score_history_max: 800000,
-  pruning_method: 0,
+  pruning_method: 1,
   pruning_multiplier: 1.0,
   mate_score: 30000,
-  eval_mode: 0,
-  nnue_weight: 50,
+  eval_mode: 2,
+  nnue_weight: 100,
 };
 
