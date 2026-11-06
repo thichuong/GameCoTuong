@@ -19,9 +19,16 @@ pub struct AttackTables {
     pub general_moves: [Vec<usize>; 90],
     // Soldier: [color_idx][sq] -> target_sq
     pub soldier_moves: [[Vec<usize>; 90]; 2],
+    // Precomputed bitboards for fast check detection
+    pub rank_masks: [u128; 10],
+    pub file_masks: [u128; 9],
+    pub horse_attacks_to_king: [Vec<(usize, usize)>; 90],
+    pub horse_attack_mask: [u128; 90],
+    pub soldier_attack_mask: [[u128; 90]; 2],
 }
 
 impl AttackTables {
+    #[allow(clippy::needless_range_loop)]
     fn new() -> Self {
         let mut rook_table = [[0; OCC_SIZE]; MAX_DIM];
         let mut cannon_table = [[0; OCC_SIZE]; MAX_DIM];
@@ -51,6 +58,92 @@ impl AttackTables {
             soldier_moves[1][i] = compute_soldier_moves(i, 1); // Black
         }
 
+        let mut rank_masks = [0u128; 10];
+        for (r, mask) in rank_masks.iter_mut().enumerate() {
+            *mask = 0x1FF_u128 << (r * 9);
+        }
+
+        let mut file_masks = [0u128; 9];
+        for (c, mask) in file_masks.iter_mut().enumerate() {
+            let mut m = 0u128;
+            for r in 0..10 {
+                m |= 1u128 << (r * 9 + c);
+            }
+            *mask = m;
+        }
+
+        let mut horse_attacks_to_king: [Vec<(usize, usize)>; 90] =
+            core::array::from_fn(|_| Vec::new());
+        let mut horse_attack_mask = [0u128; 90];
+        let horse_check_offsets = [
+            (-2isize, -1isize, -1isize, -1isize),
+            (-2, 1, -1, 1),
+            (2, -1, 1, -1),
+            (2, 1, 1, 1),
+            (-1, -2, -1, -1),
+            (-1, 2, -1, 1),
+            (1, -2, 1, -1),
+            (1, 2, 1, 1),
+        ];
+
+        for sq in 0..90 {
+            let gr = (sq / 9) as isize;
+            let gc = (sq % 9) as isize;
+            let mut mask = 0u128;
+            let mut list = Vec::new();
+
+            for &(dr, dc, lr, lc) in &horse_check_offsets {
+                let tr = gr + dr;
+                let tc = gc + dc;
+                if (0..10).contains(&tr) && (0..9).contains(&tc) {
+                    let leg_r = gr + lr;
+                    let leg_c = gc + lc;
+                    let horse_sq = (tr * 9 + tc) as usize;
+                    let leg_sq = (leg_r * 9 + leg_c) as usize;
+                    mask |= 1u128 << horse_sq;
+                    list.push((horse_sq, leg_sq));
+                }
+            }
+            horse_attack_mask[sq] = mask;
+            horse_attacks_to_king[sq] = list;
+        }
+
+        let mut soldier_attack_mask = [[0u128; 90]; 2];
+        for sq in 0..90 {
+            let gr = (sq / 9) as isize;
+            let gc = (sq % 9) as isize;
+
+            // Red enemy soldier attacking sq at (gr, gc):
+            // Red moves with +1 row, so attacking from row - 1
+            let mut red_mask = 0u128;
+            let fr_red = gr - 1;
+            if (0..10).contains(&fr_red) {
+                red_mask |= 1u128 << (fr_red as usize * 9 + gc as usize);
+            }
+            for dc in [-1isize, 1] {
+                let sc = gc + dc;
+                if (0..9).contains(&sc) {
+                    red_mask |= 1u128 << (gr as usize * 9 + sc as usize);
+                }
+            }
+            soldier_attack_mask[0][sq] = red_mask;
+
+            // Black enemy soldier attacking sq at (gr, gc):
+            // Black moves with -1 row, so attacking from row + 1
+            let mut black_mask = 0u128;
+            let fr_black = gr + 1;
+            if (0..10).contains(&fr_black) {
+                black_mask |= 1u128 << (fr_black as usize * 9 + gc as usize);
+            }
+            for dc in [-1isize, 1] {
+                let sc = gc + dc;
+                if (0..9).contains(&sc) {
+                    black_mask |= 1u128 << (gr as usize * 9 + sc as usize);
+                }
+            }
+            soldier_attack_mask[1][sq] = black_mask;
+        }
+
         Self {
             rook_table,
             cannon_table,
@@ -59,6 +152,11 @@ impl AttackTables {
             advisor_moves,
             general_moves,
             soldier_moves,
+            rank_masks,
+            file_masks,
+            horse_attacks_to_king,
+            horse_attack_mask,
+            soldier_attack_mask,
         }
     }
 

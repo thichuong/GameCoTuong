@@ -309,16 +309,11 @@ impl AlphaBetaEngine {
 
         let in_check = is_in_check(board, turn);
 
-        // 3. Static Evaluation
-        let eval = if in_check {
-            -INF_SCORE
-        } else {
-            let raw_eval = self.eval_for_turn(board, turn);
-            Self::refine_eval_with_tt(raw_eval, tt_entry)
-        };
-
-        // 4. Non-PV Pruning: Reverse Futility Pruning (RFP) & Null Move Pruning (NMP)
+        // 3. Non-PV Pruning: Reverse Futility Pruning (RFP) & Null Move Pruning (NMP)
         if !is_pv && !in_check {
+            let raw_eval = self.eval_for_turn(board, turn);
+            let eval = Self::refine_eval_with_tt(raw_eval, tt_entry);
+
             // Reverse Futility Pruning (Static Null Move Pruning)
             if depth <= 6 && beta.abs() < MATE_THRESHOLD {
                 let rfp_margin = 90 * i32::from(depth);
@@ -343,27 +338,7 @@ impl AlphaBetaEngine {
         }
 
         let movegen = EngineMoveGen::new();
-        let mut moves = movegen.generate_moves(board, turn, best_move_tt);
-
-        if in_check {
-            moves.retain(|mv| {
-                let captured = board.get_piece(unsafe {
-                    BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
-                });
-                board.apply_move(mv, turn);
-                let legal = !is_in_check(board, turn) && !is_flying_general(board);
-                board.undo_move(mv, captured, turn);
-                legal
-            });
-
-            if moves.is_empty() {
-                self.history_stack.pop();
-                return Some(-self.calculate_mate_score(ply));
-            }
-        } else if moves.is_empty() {
-            self.history_stack.pop();
-            return Some(-self.calculate_mate_score(ply));
-        }
+        let moves = movegen.generate_moves(board, turn, best_move_tt);
 
         let mut best_score = -INF_SCORE;
         let mut best_move_this_node = None;
@@ -373,16 +348,14 @@ impl AlphaBetaEngine {
 
         let full_depth = depth.saturating_sub(1) + if in_check { 1 } else { 0 };
 
-        for mv in moves.into_iter() {
-            let captured = board.get_piece(unsafe {
-                BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
-            });
-            let is_capture = captured.is_some();
+        for mv in moves.iter() {
+            let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(mv) else {
+                continue;
+            };
 
-            board.apply_move(&mv, turn);
-
-            if !in_check && (is_in_check(board, turn) || is_flying_general(board)) {
-                board.undo_move(&mv, captured, turn);
+            // Fast legal validation: self-check and flying general
+            if is_in_check(board, turn) || is_flying_general(board) {
+                board.undo_move_board_only(mv, piece, captured);
                 continue;
             }
 
@@ -392,12 +365,17 @@ impl AlphaBetaEngine {
                 .filter(|&&h| h == board.zobrist_hash)
                 .count();
             if rep_count >= 2 {
-                board.undo_move(&mv, captured, turn);
+                board.undo_move_board_only(mv, piece, captured);
                 has_repetition_move = true;
                 continue;
             }
 
             legal_moves_count += 1;
+            let is_capture = captured.is_some();
+
+            // Lazy NNUE update: save accumulator on stack, update for this move
+            let saved_acc = board.nnue_acc;
+            board.update_nnue_for_move(from_sq, to_sq, piece, captured);
 
             // Late Move Reductions (LMR)
             let mut reduction = 0u8;
@@ -456,7 +434,8 @@ impl AlphaBetaEngine {
                 val
             };
 
-            board.undo_move(&mv, captured, turn);
+            board.undo_move_board_only(mv, piece, captured);
+            board.nnue_acc = saved_acc;
 
             let Some(score) = score_opt else {
                 self.history_stack.pop();
@@ -465,7 +444,7 @@ impl AlphaBetaEngine {
 
             if score > best_score {
                 best_score = score;
-                best_move_this_node = Some(mv);
+                best_move_this_node = Some(*mv);
             }
             if score > alpha {
                 alpha = score;
@@ -577,34 +556,31 @@ impl Searcher for AlphaBetaEngine {
                 }
 
                 moves.retain(|mv| {
-                    let captured = board.get_piece(unsafe {
-                        BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
-                    });
-                    board.apply_move(mv, turn);
-                    let legal = !is_in_check(board, turn) && !is_flying_general(board);
-                    board.undo_move(mv, captured, turn);
-                    legal
+                    if let Some((piece, captured, _, _)) = board.apply_move_board_only(mv) {
+                        let legal = !is_in_check(board, turn) && !is_flying_general(board);
+                        board.undo_move_board_only(mv, piece, captured);
+                        legal
+                    } else {
+                        false
+                    }
                 });
 
                 if moves.len() > 1 {
                     let non_repetition_moves: Vec<Move> = moves
                         .iter()
                         .filter(|mv| {
-                            let captured = board.get_piece(unsafe {
-                                BoardCoordinate::new_unchecked(
-                                    mv.to_row as usize,
-                                    mv.to_col as usize,
-                                )
-                            });
-                            board.apply_move(mv, turn);
-                            let next_hash = board.zobrist_hash;
-                            let rep_count = self
-                                .history_stack
-                                .iter()
-                                .filter(|&&h| h == next_hash)
-                                .count();
-                            board.undo_move(mv, captured, turn);
-                            rep_count < 2
+                            if let Some((piece, captured, _, _)) = board.apply_move_board_only(mv) {
+                                let next_hash = board.zobrist_hash;
+                                let rep_count = self
+                                    .history_stack
+                                    .iter()
+                                    .filter(|&&h| h == next_hash)
+                                    .count();
+                                board.undo_move_board_only(mv, piece, captured);
+                                rep_count < 2
+                            } else {
+                                false
+                            }
                         })
                         .copied()
                         .collect();
@@ -624,11 +600,13 @@ impl Searcher for AlphaBetaEngine {
 
                 let mut time_out = false;
 
-                for (moves_searched, mv) in moves.into_iter().enumerate() {
-                    let captured = board.get_piece(unsafe {
-                        BoardCoordinate::new_unchecked(mv.to_row as usize, mv.to_col as usize)
-                    });
-                    board.apply_move(&mv, turn);
+                for (moves_searched, mv) in moves.iter().enumerate() {
+                    let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(mv)
+                    else {
+                        continue;
+                    };
+                    let saved_acc = board.nnue_acc;
+                    board.update_nnue_for_move(from_sq, to_sq, piece, captured);
 
                     let score_opt = if moves_searched == 0 {
                         self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), 1)
@@ -651,13 +629,14 @@ impl Searcher for AlphaBetaEngine {
                         val
                     };
 
-                    board.undo_move(&mv, captured, turn);
+                    board.undo_move_board_only(mv, piece, captured);
+                    board.nnue_acc = saved_acc;
 
                     if let Some(s) = score_opt {
                         let score = -s;
                         if score > best_score_this_iteration {
                             best_score_this_iteration = score;
-                            current_best_move_this_iteration = Some(mv);
+                            current_best_move_this_iteration = Some(*mv);
                         }
                         if score > alpha {
                             alpha = score;

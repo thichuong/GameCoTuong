@@ -42,25 +42,20 @@ pub fn is_valid_move(
 }
 
 /// Checks if the `color` is currently in check.
-use crate::logic::board::BitboardIterator;
 use crate::logic::lookup::AttackTables;
 
 /// Checks if the `color` is currently in check.
+#[inline]
 pub fn is_in_check(board: &Board, color: Color) -> bool {
-    // Locate the General
     let general_idx = match color {
         Color::Red => 0,
         Color::Black => 7,
     };
     let general_bb = board.bitboards[general_idx];
-
-    // Get general position (should be exactly one)
-    let general_sq = if let Some(sq) = BitboardIterator::new(general_bb).next() {
-        sq
-    } else {
-        return true; // No general means invalid state (or captured), treat as check
-    };
-
+    if general_bb == 0 {
+        return true;
+    }
+    let general_sq = general_bb.trailing_zeros() as usize;
     let (gr, gc) = Board::index_to_coord(general_sq);
     let enemy_color = color.opposite();
     let tables = AttackTables::get();
@@ -71,24 +66,26 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
         Color::Black => 11,
     }];
     if enemy_rooks != 0 {
-        let rank_occ = board.occupied_rows[gr];
-        let file_occ = board.occupied_cols[gc];
-
-        // Rank Check
-        let rank_attacks = tables.get_rook_attacks(gc, rank_occ, 9);
-        let er_rank = (enemy_rooks >> (gr * 9)) as u16 & 0x1FF;
-        if (er_rank & rank_attacks) != 0 {
-            return true;
-        }
-
-        // File Check
-        let file_attacks = tables.get_rook_attacks(gr, file_occ, 10);
-        let mut attacks = file_attacks;
-        while attacks != 0 {
-            let r = attacks.trailing_zeros() as usize;
-            attacks &= attacks - 1;
-            if (enemy_rooks & (1u128 << (r * 9 + gc))) != 0 {
+        let align_mask = tables.rank_masks.get(gr).copied().unwrap_or(0)
+            | tables.file_masks.get(gc).copied().unwrap_or(0);
+        if (enemy_rooks & align_mask) != 0 {
+            let rank_occ = board.occupied_rows.get(gr).copied().unwrap_or(0);
+            let rank_attacks = tables.get_rook_attacks(gc, rank_occ, 9);
+            #[allow(clippy::cast_possible_truncation)]
+            let er_rank = (enemy_rooks >> (gr * 9)) as u16 & 0x1FF;
+            if (er_rank & rank_attacks) != 0 {
                 return true;
+            }
+
+            let file_occ = board.occupied_cols.get(gc).copied().unwrap_or(0);
+            let file_attacks = tables.get_rook_attacks(gr, file_occ, 10);
+            let mut attacks = file_attacks;
+            while attacks != 0 {
+                let r = attacks.trailing_zeros() as usize;
+                attacks &= attacks - 1;
+                if (enemy_rooks & (1u128 << (r * 9 + gc))) != 0 {
+                    return true;
+                }
             }
         }
     }
@@ -99,82 +96,47 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
         Color::Black => 12,
     }];
     if enemy_cannons != 0 {
-        let rank_occ = board.occupied_rows[gr];
-        let file_occ = board.occupied_cols[gc];
-
-        let rank_attacks = tables.get_cannon_attacks(gc, rank_occ, 9);
-        let er_rank = (enemy_cannons >> (gr * 9)) as u16 & 0x1FF;
-        if (er_rank & rank_attacks) != 0 {
-            return true;
-        }
-
-        let file_attacks = tables.get_cannon_attacks(gr, file_occ, 10);
-        let mut attacks = file_attacks;
-        while attacks != 0 {
-            let r = attacks.trailing_zeros() as usize;
-            attacks &= attacks - 1;
-            if (enemy_cannons & (1u128 << (r * 9 + gc))) != 0 {
+        let align_mask = tables.rank_masks.get(gr).copied().unwrap_or(0)
+            | tables.file_masks.get(gc).copied().unwrap_or(0);
+        if (enemy_cannons & align_mask) != 0 {
+            let rank_occ = board.occupied_rows.get(gr).copied().unwrap_or(0);
+            let rank_attacks = tables.get_cannon_attacks(gc, rank_occ, 9);
+            #[allow(clippy::cast_possible_truncation)]
+            let er_rank = (enemy_cannons >> (gr * 9)) as u16 & 0x1FF;
+            if (er_rank & rank_attacks) != 0 {
                 return true;
+            }
+
+            let file_occ = board.occupied_cols.get(gc).copied().unwrap_or(0);
+            let file_attacks = tables.get_cannon_attacks(gr, file_occ, 10);
+            let mut attacks = file_attacks;
+            while attacks != 0 {
+                let r = attacks.trailing_zeros() as usize;
+                attacks &= attacks - 1;
+                if (enemy_cannons & (1u128 << (r * 9 + gc))) != 0 {
+                    return true;
+                }
             }
         }
     }
 
-    // 3. Check Horse Attacks
+    // 3. Check Horse Attacks (Single Bitmask test first)
     let enemy_horses = board.bitboards[match enemy_color {
         Color::Red => 3,
         Color::Black => 10,
     }];
     if enemy_horses != 0 {
-        // Offsets: (dr, dc, leg_r_off, leg_c_off)
-        // Offsets: (dr, dc, leg_r_off, leg_c_off)
-        // Correct logic: leg is at (Start + dir). Start = Target - move.
-        // For check, we look from General (Target) to Horse (Source).
-        // Move is Source -> Target.
-        // Leg is Source + 1 step orthogonal.
-        // If relative to General, Source is at (dr, dc).
-        // Leg is at (dr, dc) + 1 step towards General? No.
-        // Leg is at Source + 1 step towards Target.
-        // Source = (gr+dr, gc+dc). Target = (gr, gc).
-        // If |dr|=2, step is row-wise towards Target. dr has sign S. Step is -S.
-        // LegRow = (gr+dr) - sign(dr). LegCol = gc+dc.
-        // LegRow relative to Gr: dr - sign(dr). LegCol relative to Gc: dc.
-        // Example: dr=-2, dc=-1. sign(dr)=-1.
-        // LegRelRow = -2 - (-1) = -1. LegRelCol = -1.
-        // Wait, my previous manual calc was (-1, -1).
-        // Yes.
-        // So offsets should be (dr - sign(dr), dc)?
-        // For |dr|=2: LegRel = (dr/2, dc).
-        // For |dr|=1 (|dc|=2): LegRel = (dr, dc/2).
-        // Let's re-verify.
-        // Case 1: (-2, -1). LegRel (-1, -1).
-        // Formula 1: (-1, -1). Correct.
-        // Case 5: (-1, -2). LegRel (-1, -1).
-        // Formula 2: (-1, -1). Correct.
-        // So the table values should be:
-        let offsets = [
-            (-2, -1, -1, -1),
-            (-2, 1, -1, 1),
-            (2, -1, 1, -1),
-            (2, 1, 1, 1),
-            (-1, -2, -1, -1),
-            (-1, 2, -1, 1),
-            (1, -2, 1, -1),
-            (1, 2, 1, 1),
-        ];
-
-        for (dr, dc, lr, lc) in offsets {
-            let tr = gr as isize + dr;
-            let tc = gc as isize + dc;
-
-            if (0..10).contains(&tr) && (0..9).contains(&tc) {
-                let check_sr = tr as usize;
-                let check_sc = tc as usize;
-
-                if (enemy_horses & (1u128 << (check_sr * 9 + check_sc))) != 0 {
-                    // Found enemy horse, check leg
-                    let leg_r = (gr as isize + lr) as usize;
-                    let leg_c = (gc as isize + lc) as usize;
-                    if (board.occupied & (1u128 << (leg_r * 9 + leg_c))) == 0 {
+        let possible_attackers = tables
+            .horse_attack_mask
+            .get(general_sq)
+            .copied()
+            .unwrap_or(0);
+        if (enemy_horses & possible_attackers) != 0 {
+            if let Some(attacks) = tables.horse_attacks_to_king.get(general_sq) {
+                for &(horse_sq, leg_sq) in attacks {
+                    if (enemy_horses & (1u128 << horse_sq)) != 0
+                        && (board.occupied & (1u128 << leg_sq)) == 0
+                    {
                         return true;
                     }
                 }
@@ -182,73 +144,56 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
         }
     }
 
-    // 4. Check Soldier Attacks
+    // 4. Check Soldier Attacks (Single Bitmask test)
     let enemy_soldiers = board.bitboards[match enemy_color {
         Color::Red => 6,
         Color::Black => 13,
     }];
     if enemy_soldiers != 0 {
-        // Red soldiers attack upwards (+1 row normally), but from perspective of General being attacked:
-        // If we are Black Gen, Red Soldier below us (row - 1) attacks us.
-        // If we are Red Gen, Black Soldier above us (row + 1) attacks us.
-        let backward_check = if enemy_color == Color::Red { -1 } else { 1 };
-
-        let fr = gr as isize + backward_check;
-        if (0..10).contains(&fr) && (enemy_soldiers & (1u128 << (fr as usize * 9 + gc))) != 0 {
+        let soldier_mask = tables
+            .soldier_attack_mask
+            .get(enemy_color.index())
+            .and_then(|arr| arr.get(general_sq))
+            .copied()
+            .unwrap_or(0);
+        if (enemy_soldiers & soldier_mask) != 0 {
             return true;
-        }
-
-        // Side attacks
-        for dc in [-1, 1] {
-            let sc = gc as isize + dc;
-            if (0..9).contains(&sc) && (enemy_soldiers & (1u128 << (gr * 9 + sc as usize))) != 0 {
-                return true;
-            }
         }
     }
 
     false
 }
 
+#[inline]
 pub fn is_flying_general(board: &Board) -> bool {
     let red_gen_bb = board.bitboards[0];
     let black_gen_bb = board.bitboards[7];
 
-    let red_sq = if let Some(sq) = BitboardIterator::new(red_gen_bb).next() {
-        sq
-    } else {
-        return false;
-    };
-
-    let black_sq = if let Some(sq) = BitboardIterator::new(black_gen_bb).next() {
-        sq
-    } else {
-        return false;
-    };
-
-    let (r1, c1) = Board::index_to_coord(red_sq);
-    let (r2, c2) = Board::index_to_coord(black_sq);
-
-    if c1 != c2 {
+    if red_gen_bb == 0 || black_gen_bb == 0 {
         return false;
     }
 
-    // Check for pieces in between
+    let red_sq = red_gen_bb.trailing_zeros() as usize;
+    let black_sq = black_gen_bb.trailing_zeros() as usize;
+
+    if (red_sq % 9) != (black_sq % 9) {
+        return false;
+    }
+
+    let c = red_sq % 9;
+    let r1 = red_sq / 9;
+    let r2 = black_sq / 9;
+
     let min_r = r1.min(r2);
     let max_r = r1.max(r2);
 
     if max_r > min_r + 1 {
         let mask = ((1u16 << max_r) - 1) ^ ((1u16 << (min_r + 1)) - 1);
-        let col_occ = board.occupied_cols[c1];
-        if (col_occ & mask) == 0 {
-            return true;
-        }
+        let col_occ = board.occupied_cols.get(c).copied().unwrap_or(0);
+        (col_occ & mask) == 0
     } else {
-        // Generals are adjacent on same file (no pieces between)
-        return true;
+        true
     }
-
-    false
 }
 
 /// Validates the geometry and specific rules for a piece move, IGNORING self-check.

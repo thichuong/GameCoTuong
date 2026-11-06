@@ -1,6 +1,6 @@
 use crate::engine::move_list::MoveList;
 use crate::engine::Move;
-use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
+use crate::logic::board::{Board, Color, PieceType};
 use crate::logic::eval_constants::get_piece_value;
 use crate::logic::lookup::AttackTables;
 
@@ -14,6 +14,8 @@ pub struct MoveGenContext<'a> {
     pub best_move: Option<Move>,
     pub only_captures: bool,
     pub enemy_bb: u128,
+    pub friendly_bb: u128,
+    pub attacker_val: i32,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -44,6 +46,7 @@ impl EngineMoveGen {
     ) -> MoveList {
         let mut moves = MoveList::new();
         let enemy_bb = board.get_color_bb(turn.opposite());
+        let friendly_bb = board.get_color_bb(turn);
 
         let mut ctx = MoveGenContext {
             board,
@@ -52,6 +55,8 @@ impl EngineMoveGen {
             best_move,
             only_captures,
             enemy_bb,
+            friendly_bb,
+            attacker_val: 0,
         };
 
         use crate::logic::board::BitboardIterator;
@@ -61,18 +66,20 @@ impl EngineMoveGen {
             let Some(&bb) = board.bitboards.get(start + pt_idx) else {
                 continue;
             };
+            let piece_type = match pt_idx {
+                0 => PieceType::General,
+                1 => PieceType::Advisor,
+                2 => PieceType::Elephant,
+                3 => PieceType::Horse,
+                4 => PieceType::Chariot,
+                5 => PieceType::Cannon,
+                6 => PieceType::Soldier,
+                _ => unreachable!(),
+            };
+            ctx.attacker_val = get_piece_value(piece_type);
+
             for sq in BitboardIterator::new(bb) {
                 let (r, c) = Board::index_to_coord(sq);
-                let piece_type = match pt_idx {
-                    0 => PieceType::General,
-                    1 => PieceType::Advisor,
-                    2 => PieceType::Elephant,
-                    3 => PieceType::Horse,
-                    4 => PieceType::Chariot,
-                    5 => PieceType::Cannon,
-                    6 => PieceType::Soldier,
-                    _ => unreachable!(),
-                };
 
                 match piece_type {
                     PieceType::Chariot => self.gen_rook_moves(&mut ctx, r, c),
@@ -98,7 +105,7 @@ impl EngineMoveGen {
         let is_occupied = (ctx.board.occupied & (1 << target_sq)) != 0;
 
         if is_occupied {
-            if (ctx.board.get_color_bb(ctx.turn) & (1 << target_sq)) != 0 {
+            if (ctx.friendly_bb & (1 << target_sq)) != 0 {
                 return; // Blocked by friendly
             }
         } else if ctx.only_captures {
@@ -106,8 +113,7 @@ impl EngineMoveGen {
         }
 
         let target = if is_occupied {
-            ctx.board
-                .get_piece(unsafe { BoardCoordinate::new_unchecked(tr, tc) })
+            ctx.board.grid.get(target_sq).copied().flatten()
         } else {
             None
         };
@@ -123,12 +129,8 @@ impl EngineMoveGen {
             SCORE_HASH_MOVE
         } else if let Some(t) = target {
             let victim_val = get_piece_value(t.piece_type);
-            let attacker_val = ctx
-                .board
-                .get_piece(unsafe { BoardCoordinate::new_unchecked(r, c) })
-                .map_or(0, |p| get_piece_value(p.piece_type));
             // MVV-LVA: Most Valuable Victim - Least Valuable Attacker
-            SCORE_CAPTURE_BASE + victim_val * 10 - attacker_val
+            SCORE_CAPTURE_BASE + victim_val * 10 - ctx.attacker_val
         } else {
             0
         };

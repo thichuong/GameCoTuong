@@ -15,6 +15,14 @@ pub struct PositionSample {
     pub black_features: Vec<usize>,
     pub search_eval: f32, // Centipawns from Red's perspective
     pub game_result: f32, // 1.0 (Red win), 0.5 (Draw), 0.0 (Black win)
+    #[serde(default)]
+    pub fen: String,
+    #[serde(default = "default_turn")]
+    pub turn: Color,
+}
+
+const fn default_turn() -> Color {
+    Color::Red
 }
 
 /// Extracts HalfKP active feature indices for Red and Black accumulator sides.
@@ -83,7 +91,7 @@ pub fn load_dataset_file<P: AsRef<Path>>(path: P) -> Result<Vec<PositionSample>,
         if trimmed.starts_with('{') {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
                 if let Some(fen_str) = val.get("fen").and_then(|v| v.as_str()) {
-                    if let Ok((board, _turn)) = Board::from_fen(fen_str) {
+                    if let Ok((board, board_turn)) = Board::from_fen(fen_str) {
                         let (red_feats, black_feats) = extract_features(&board);
                         let result = val
                             .get("result")
@@ -98,6 +106,8 @@ pub fn load_dataset_file<P: AsRef<Path>>(path: P) -> Result<Vec<PositionSample>,
                             black_features: black_feats,
                             search_eval: eval,
                             game_result: result,
+                            fen: fen_str.to_string(),
+                            turn: board_turn,
                         });
                         continue;
                     }
@@ -121,6 +131,8 @@ pub fn load_dataset_file<P: AsRef<Path>>(path: P) -> Result<Vec<PositionSample>,
                                     black_features: black_feats,
                                     search_eval: 0.0,
                                     game_result: res_val,
+                                    fen: board.to_fen_string(turn),
+                                    turn,
                                 });
                                 board.apply_move(&mv, turn);
                                 turn = turn.opposite();
@@ -174,6 +186,8 @@ pub fn load_dataset_file<P: AsRef<Path>>(path: P) -> Result<Vec<PositionSample>,
                                 black_features: black_feats,
                                 search_eval: 0.0,
                                 game_result: result_score,
+                                fen: board.to_fen_string(turn),
+                                turn,
                             });
                             board.apply_move(&mv, turn);
                             turn = turn.opposite();
@@ -199,7 +213,7 @@ pub fn load_dataset_file<P: AsRef<Path>>(path: P) -> Result<Vec<PositionSample>,
             trimmed
         };
 
-        if let Ok((board, _turn)) = Board::from_fen(fen_part.trim()) {
+        if let Ok((board, board_turn)) = Board::from_fen(fen_part.trim()) {
             let mut result_score = 0.5f32;
             let mut eval_cp = 0.0f32;
 
@@ -223,6 +237,8 @@ pub fn load_dataset_file<P: AsRef<Path>>(path: P) -> Result<Vec<PositionSample>,
                 black_features: black_feats,
                 search_eval: eval_cp,
                 game_result: result_score,
+                fen: fen_part.trim().to_string(),
+                turn: board_turn,
             });
         }
     }

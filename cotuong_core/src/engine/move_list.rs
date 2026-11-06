@@ -60,13 +60,13 @@ impl MoveList {
             .iter_mut()
     }
 
-    // Helper for sorting
+    // Helper for sorting without heap allocation
     pub fn sort_by<F>(&mut self, mut compare: F)
     where
         F: FnMut(&Move, &Move) -> std::cmp::Ordering,
     {
         if let Some(slice) = self.moves.get_mut(0..self.count) {
-            slice.sort_by(|a, b| compare(a, b));
+            slice.sort_unstable_by(|a, b| compare(a, b));
         }
     }
     #[allow(clippy::indexing_slicing)]

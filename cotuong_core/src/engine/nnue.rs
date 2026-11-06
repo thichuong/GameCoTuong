@@ -581,6 +581,120 @@ impl NnueAccumulator {
     }
 }
 
+/// Evaluates both Red and Black forward passes simultaneously with shared SCReLU activations,
+/// zero-skipping, and auto-vectorized SIMD accumulation.
+#[inline]
+#[must_use]
+pub fn evaluate_dual_forward(
+    red_acc: &[i16; L1_OUTPUT_SIZE],
+    black_acc: &[i16; L1_OUTPUT_SIZE],
+    weights: &NnueWeights,
+) -> (i32, i32) {
+    let mut red_acts = [(0usize, 0i32); L1_OUTPUT_SIZE];
+    let mut red_count = 0;
+    for (i, &val) in red_acc.iter().enumerate() {
+        if val > 0 {
+            let clamped = i32::from(val.min(256));
+            let act = (clamped * clamped) >> 8;
+            if act != 0 {
+                if let Some(slot) = red_acts.get_mut(red_count) {
+                    *slot = (i, act);
+                    red_count += 1;
+                }
+            }
+        }
+    }
+
+    let mut black_acts = [(0usize, 0i32); L1_OUTPUT_SIZE];
+    let mut black_count = 0;
+    for (i, &val) in black_acc.iter().enumerate() {
+        if val > 0 {
+            let clamped = i32::from(val.min(256));
+            let act = (clamped * clamped) >> 8;
+            if act != 0 {
+                if let Some(slot) = black_acts.get_mut(black_count) {
+                    *slot = (i, act);
+                    black_count += 1;
+                }
+            }
+        }
+    }
+
+    // 1. Layer 1 -> Layer 2 (384 -> 32)
+    let mut l2_red = weights.b2;
+    let mut l2_black = weights.b2;
+
+    for &(i, act) in red_acts.get(..red_count).unwrap_or(&[]) {
+        if let Some(col) = weights.w2_col.get(i) {
+            for (out, &w) in l2_red.iter_mut().zip(col.iter()) {
+                *out += act * i32::from(w);
+            }
+        }
+        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + i) {
+            for (out, &w) in l2_black.iter_mut().zip(col.iter()) {
+                *out += act * i32::from(w);
+            }
+        }
+    }
+
+    for &(i, act) in black_acts.get(..black_count).unwrap_or(&[]) {
+        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + i) {
+            for (out, &w) in l2_red.iter_mut().zip(col.iter()) {
+                *out += act * i32::from(w);
+            }
+        }
+        if let Some(col) = weights.w2_col.get(i) {
+            for (out, &w) in l2_black.iter_mut().zip(col.iter()) {
+                *out += act * i32::from(w);
+            }
+        }
+    }
+
+    // 2. Layer 2 -> Layer 3 (32 -> 32)
+    let mut l3_red = weights.b3;
+    for (j, &sum) in l2_red.iter().enumerate() {
+        let act = (sum >> 6).clamp(0, 127);
+        if act != 0 {
+            if let Some(col) = weights.w3_col.get(j) {
+                for (out, &w) in l3_red.iter_mut().zip(col.iter()) {
+                    *out += act * i32::from(w);
+                }
+            }
+        }
+    }
+
+    let mut l3_black = weights.b3;
+    for (j, &sum) in l2_black.iter().enumerate() {
+        let act = (sum >> 6).clamp(0, 127);
+        if act != 0 {
+            if let Some(col) = weights.w3_col.get(j) {
+                for (out, &w) in l3_black.iter_mut().zip(col.iter()) {
+                    *out += act * i32::from(w);
+                }
+            }
+        }
+    }
+
+    // 3. Layer 3 -> Layer 4 (32 -> 1)
+    let mut final_red = weights.b4;
+    for (&sum, &w) in l3_red.iter().zip(weights.w4.iter()) {
+        let act = (sum >> 6).clamp(0, 127);
+        if act != 0 {
+            final_red += act * i32::from(w);
+        }
+    }
+
+    let mut final_black = weights.b4;
+    for (&sum, &w) in l3_black.iter().zip(weights.w4.iter()) {
+        let act = (sum >> 6).clamp(0, 127);
+        if act != 0 {
+            final_black += act * i32::from(w);
+        }
+    }
+
+    (final_red / 16, final_black / 16)
+}
+
 /// Evaluates the deep FC layers (L1 -> L2 -> L3 -> Out) using SCReLU activation
 /// and sparse non-zero input skipping over pre-transposed column-major matrices.
 #[inline]
@@ -590,61 +704,8 @@ pub fn evaluate_forward(
     opp_acc: &[i16; L1_OUTPUT_SIZE],
     weights: &NnueWeights,
 ) -> i32 {
-    // 1. Layer 1 -> Layer 2 (384 -> 32) with SCReLU activation & sparse zero-skipping
-    let mut l2_acc = weights.b2;
-
-    for (i, &val) in active_acc.iter().enumerate() {
-        if val > 0 {
-            let clamped = i32::from(val.min(256));
-            // SCReLU: (clamped^2) >> 8 in [0, 256]
-            let act = (clamped * clamped) >> 8;
-            if act != 0 {
-                if let Some(col) = weights.w2_col.get(i) {
-                    for (out, &w) in l2_acc.iter_mut().zip(col.iter()) {
-                        *out = out.saturating_add(act * i32::from(w));
-                    }
-                }
-            }
-        }
-    }
-
-    for (i, &val) in opp_acc.iter().enumerate() {
-        if val > 0 {
-            let clamped = i32::from(val.min(256));
-            let act = (clamped * clamped) >> 8;
-            if act != 0 {
-                if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + i) {
-                    for (out, &w) in l2_acc.iter_mut().zip(col.iter()) {
-                        *out = out.saturating_add(act * i32::from(w));
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. Layer 2 -> Layer 3 (32 -> 32) with sparse zero-skipping
-    let mut l3_acc = weights.b3;
-    for (j, &sum) in l2_acc.iter().enumerate() {
-        let l2_act = (sum >> 6).clamp(0, 127);
-        if l2_act != 0 {
-            if let Some(col) = weights.w3_col.get(j) {
-                for (out, &w) in l3_acc.iter_mut().zip(col.iter()) {
-                    *out = out.saturating_add(l2_act * i32::from(w));
-                }
-            }
-        }
-    }
-
-    // 3. Layer 3 -> Layer 4 Output (32 -> 1)
-    let mut final_sum = weights.b4;
-    for (&sum, &w) in l3_acc.iter().zip(weights.w4.iter()) {
-        let l3_act = (sum >> 6).clamp(0, 127);
-        if l3_act != 0 {
-            final_sum = final_sum.saturating_add(l3_act * i32::from(w));
-        }
-    }
-
-    final_sum / 16
+    let (score, _) = evaluate_dual_forward(active_acc, opp_acc, weights);
+    score
 }
 
 /// Evaluates the board position from Red's perspective using the Pikafish-style
@@ -659,8 +720,8 @@ pub fn evaluate_nnue_with_weights(board: &Board, weights: &NnueWeights) -> i32 {
     let psqt_black = board.nnue_acc.psqt_black.get(bucket).copied().unwrap_or(0);
     let psqt_score = (psqt_red - psqt_black) / 16;
 
-    let red_score = evaluate_forward(&board.nnue_acc.red, &board.nnue_acc.black, weights);
-    let black_score = evaluate_forward(&board.nnue_acc.black, &board.nnue_acc.red, weights);
+    let (red_score, black_score) =
+        evaluate_dual_forward(&board.nnue_acc.red, &board.nnue_acc.black, weights);
     let positional_score = (red_score - black_score) / 2;
 
     psqt_score + positional_score

@@ -30,3 +30,5 @@ engines/*
 /checkpoints/
 checkpoints/*
 
+.aistudio/
+.aistudio

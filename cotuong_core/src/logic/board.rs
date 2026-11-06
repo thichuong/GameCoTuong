@@ -306,7 +306,6 @@ impl Board {
             self.raw_remove_piece(to, cap.piece_type, cap.color);
         }
         self.raw_add_piece(to, piece.piece_type, piece.color);
-        self.refresh_nnue();
         captured
     }
 
@@ -322,7 +321,6 @@ impl Board {
             if let Some(cap) = captured {
                 self.raw_add_piece(to, cap.piece_type, cap.color);
             }
-            self.refresh_nnue();
         }
     }
 
@@ -434,8 +432,39 @@ impl Board {
         self.zobrist_hash ^= keys.side_key;
     }
 
-    pub fn apply_move(&mut self, mv: &Move, _turn: Color) {
+    #[inline]
+    pub fn apply_move_board_only(
+        &mut self,
+        mv: &Move,
+    ) -> Option<(Piece, Option<Piece>, usize, usize)> {
+        let from_row = mv.from_row as usize;
+        let from_col = mv.from_col as usize;
+        let to_row = mv.to_row as usize;
+        let to_col = mv.to_col as usize;
+
+        let from = BoardCoordinate::new(from_row, from_col)?;
+        let to = BoardCoordinate::new(to_row, to_col)?;
+        let piece = self.get_piece(from)?;
+
         let keys = ZobristKeys::get();
+        self.raw_remove_piece(from, piece.piece_type, piece.color);
+        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
+
+        let captured = self.get_piece(to);
+        if let Some(cap) = captured {
+            self.raw_remove_piece(to, cap.piece_type, cap.color);
+            self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
+        }
+
+        self.raw_add_piece(to, piece.piece_type, piece.color);
+        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
+        self.zobrist_hash ^= keys.side_key;
+
+        Some((piece, captured, from.index(), to.index()))
+    }
+
+    #[inline]
+    pub fn undo_move_board_only(&mut self, mv: &Move, piece: Piece, captured: Option<Piece>) {
         let from_row = mv.from_row as usize;
         let from_col = mv.from_col as usize;
         let to_row = mv.to_row as usize;
@@ -447,70 +476,75 @@ impl Board {
         let Some(to) = BoardCoordinate::new(to_row, to_col) else {
             return;
         };
-        let Some(piece) = self.get_piece(from) else {
-            return;
-        };
 
+        let keys = ZobristKeys::get();
+        self.zobrist_hash ^= keys.side_key;
+
+        self.raw_remove_piece(to, piece.piece_type, piece.color);
+        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
+
+        self.raw_add_piece(from, piece.piece_type, piece.color);
+        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
+
+        if let Some(cap) = captured {
+            self.raw_add_piece(to, cap.piece_type, cap.color);
+            self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
+        }
+    }
+
+    #[inline]
+    pub fn update_nnue_for_move(
+        &mut self,
+        from_sq: usize,
+        to_sq: usize,
+        piece: Piece,
+        captured: Option<Piece>,
+    ) {
         let weights = NnueWeights::get();
         let k_red = crate::engine::nnue::get_red_king_palace_idx(self);
         let k_black = crate::engine::nnue::get_black_king_palace_idx(self);
         let is_general = piece.piece_type == PieceType::General;
 
-        // 1. Remove from source
-        self.raw_remove_piece(from, piece.piece_type, piece.color);
-        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
-
-        // 2. Remove captured piece (if any)
-        let captured = self.get_piece(to);
-        if let Some(cap) = captured {
-            self.raw_remove_piece(to, cap.piece_type, cap.color);
-            self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
-        }
-
-        // 3. Place piece at destination
-        self.raw_add_piece(to, piece.piece_type, piece.color);
-        self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
-
-        // 4. Update NNUE accumulator accurately
         if is_general {
             if piece.color == Color::Red {
-                let new_k_red = crate::engine::nnue::palace_index(to.index());
+                let new_k_red = crate::engine::nnue::palace_index(to_sq);
                 self.nnue_acc.refresh_red(&self.grid, new_k_red, weights);
                 if let Some(cap) = captured {
                     self.nnue_acc
-                        .remove_piece_black(cap, to.index(), k_black, weights);
+                        .remove_piece_black(cap, to_sq, k_black, weights);
                 }
                 self.nnue_acc
-                    .remove_piece_black(piece, from.index(), k_black, weights);
+                    .remove_piece_black(piece, from_sq, k_black, weights);
                 self.nnue_acc
-                    .add_piece_black(piece, to.index(), k_black, weights);
+                    .add_piece_black(piece, to_sq, k_black, weights);
             } else {
-                let flipped_to = 89_usize.saturating_sub(to.index());
+                let flipped_to = 89_usize.saturating_sub(to_sq);
                 let new_k_black = crate::engine::nnue::palace_index(flipped_to);
                 self.nnue_acc
                     .refresh_black(&self.grid, new_k_black, weights);
                 if let Some(cap) = captured {
-                    self.nnue_acc
-                        .remove_piece_red(cap, to.index(), k_red, weights);
+                    self.nnue_acc.remove_piece_red(cap, to_sq, k_red, weights);
                 }
                 self.nnue_acc
-                    .remove_piece_red(piece, from.index(), k_red, weights);
-                self.nnue_acc
-                    .add_piece_red(piece, to.index(), k_red, weights);
+                    .remove_piece_red(piece, from_sq, k_red, weights);
+                self.nnue_acc.add_piece_red(piece, to_sq, k_red, weights);
             }
         } else {
             if let Some(cap) = captured {
                 self.nnue_acc
-                    .remove_piece(cap, to.index(), k_red, k_black, weights);
+                    .remove_piece(cap, to_sq, k_red, k_black, weights);
             }
             self.nnue_acc
-                .remove_piece(piece, from.index(), k_red, k_black, weights);
+                .remove_piece(piece, from_sq, k_red, k_black, weights);
             self.nnue_acc
-                .add_piece(piece, to.index(), k_red, k_black, weights);
+                .add_piece(piece, to_sq, k_red, k_black, weights);
         }
+    }
 
-        // 5. Switch turn hash
-        self.zobrist_hash ^= keys.side_key;
+    pub fn apply_move(&mut self, mv: &Move, _turn: Color) {
+        if let Some((piece, captured, from_sq, to_sq)) = self.apply_move_board_only(mv) {
+            self.update_nnue_for_move(from_sq, to_sq, piece, captured);
+        }
     }
 
     pub fn undo_move(&mut self, mv: &Move, captured: Option<Piece>, _turn: Color) {

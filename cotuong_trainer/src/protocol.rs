@@ -101,6 +101,8 @@ impl ExternalEngineClient {
                 self.send_line("ucci")?;
                 match self.wait_for_token("ucciok", Duration::from_secs(2)) {
                     Ok(_) => {
+                        let _ = self.send_line("setoption name Threads value 1");
+                        let _ = self.send_line("setoption name Hash value 32");
                         self.send_line("isready")?;
                         self.wait_for_token("readyok", Duration::from_secs(5))?;
                     }
@@ -110,6 +112,8 @@ impl ExternalEngineClient {
                         self.send_line("uci")?;
                         self.wait_for_token("uciok", Duration::from_secs(5))?;
                         let _ = self.send_line("setoption name UCI_Variant value xiangqi");
+                        let _ = self.send_line("setoption name Threads value 1");
+                        let _ = self.send_line("setoption name Hash value 32");
                         self.send_line("isready")?;
                         self.wait_for_token("readyok", Duration::from_secs(5))?;
                     }
@@ -120,6 +124,8 @@ impl ExternalEngineClient {
                 self.wait_for_token("uciok", Duration::from_secs(5))?;
                 // Configure variant for Fairy-Stockfish if needed
                 let _ = self.send_line("setoption name UCI_Variant value xiangqi");
+                let _ = self.send_line("setoption name Threads value 1");
+                let _ = self.send_line("setoption name Hash value 32");
                 self.send_line("isready")?;
                 self.wait_for_token("readyok", Duration::from_secs(5))?;
             }
@@ -195,7 +201,14 @@ impl ExternalEngineClient {
                     let trimmed = line.trim();
 
                     if trimmed.starts_with("info") {
-                        if let Some(cp_idx) = trimmed.find("score cp ") {
+                        if let Some(mate_idx) = trimmed.find("score mate ") {
+                            let sub = &trimmed[mate_idx + 11..];
+                            if let Some(val_str) = sub.split_whitespace().next() {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    last_eval_cp = if val > 0.0 { 10000.0 } else { -10000.0 };
+                                }
+                            }
+                        } else if let Some(cp_idx) = trimmed.find("score cp ") {
                             let sub = &trimmed[cp_idx + 9..];
                             if let Some(val_str) = sub.split_whitespace().next() {
                                 if let Ok(val) = val_str.parse::<f32>() {
@@ -207,13 +220,6 @@ impl ExternalEngineClient {
                             if let Some(val_str) = sub.split_whitespace().next() {
                                 if let Ok(val) = val_str.parse::<f32>() {
                                     last_eval_cp = val;
-                                }
-                            }
-                        } else if let Some(mate_idx) = trimmed.find("score mate ") {
-                            let sub = &trimmed[mate_idx + 11..];
-                            if let Some(val_str) = sub.split_whitespace().next() {
-                                if let Ok(val) = val_str.parse::<f32>() {
-                                    last_eval_cp = if val > 0.0 { 10000.0 } else { -10000.0 };
                                 }
                             }
                         }

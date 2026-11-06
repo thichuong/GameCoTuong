@@ -1116,6 +1116,8 @@ fn play_selfplay_game(
         }
 
         let (red_feats, black_feats) = extract_features(&game_state.board);
+        let current_fen = game_state.board.to_fen_string(game_state.turn);
+        let current_turn = game_state.turn;
 
         let best_move = if ply < 6 {
             let Some(m) = generate_random_legal_move(&game_state.board, game_state.turn, &mut rng)
@@ -1138,7 +1140,7 @@ fn play_selfplay_game(
                         Color::Red => stats.depth as f32 * 10.0,
                         Color::Black => -(stats.depth as f32 * 10.0),
                     };
-                    samples.push((red_feats, black_feats, eval));
+                    samples.push((red_feats, black_feats, eval, current_fen, current_turn));
                     mv
                 }
                 None => break,
@@ -1166,11 +1168,13 @@ fn play_selfplay_game(
     samples
         .into_iter()
         .map(
-            |(red_features, black_features, search_eval)| PositionSample {
+            |(red_features, black_features, search_eval, fen, turn)| PositionSample {
                 red_features,
                 black_features,
                 search_eval,
                 game_result: result,
+                fen,
+                turn,
             },
         )
         .collect()
@@ -1422,6 +1426,37 @@ fn run_dataset_training(
     }
 }
 
+fn get_current_timestamp_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now();
+    let duration = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let total_secs = duration.as_secs();
+
+    let sec = total_secs % 60;
+    let total_minutes = total_secs / 60;
+    let min = total_minutes % 60;
+    let total_hours = total_minutes / 60;
+    let hour = total_hours % 24;
+    let mut total_days = (total_hours / 24) as i64;
+
+    total_days += 719_468;
+    let era = if total_days >= 0 {
+        total_days
+    } else {
+        total_days - 146_096
+    } / 146_097;
+    let doe = (total_days - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+
+    format!("{year:04}{m:02}{d:02}_{hour:02}{min:02}{sec:02}")
+}
+
 /// Runs Teacher Distillation: Uses external engine (Pikafish / Fairy-Stockfish) to label positions.
 #[allow(clippy::too_many_arguments)]
 fn run_teacher_distillation(
@@ -1461,12 +1496,21 @@ fn run_teacher_distillation(
 
     // Re-evaluate positions using external engine oracle
     for sample in samples.iter_mut() {
-        let dummy_board = Board::new(); // or extract FEN if available
-        let fen = dummy_board.to_fen_string(Color::Red);
+        let fen = if sample.fen.is_empty() {
+            let dummy_board = Board::new();
+            dummy_board.to_fen_string(sample.turn)
+        } else {
+            sample.fen.clone()
+        };
         if let Ok((eval_cp, _best_mv)) =
-            client.evaluate_fen(&fen, depth, Duration::from_millis(1500))
+            client.evaluate_fen(&fen, depth, Duration::from_millis(2500))
         {
-            sample.search_eval = eval_cp;
+            let eval_from_red = if sample.turn == Color::Black {
+                -eval_cp
+            } else {
+                eval_cp
+            };
+            sample.search_eval = eval_from_red;
             labeled_count += 1;
             if labeled_count % 50 == 0 {
                 print!(".");
@@ -1481,7 +1525,10 @@ fn run_teacher_distillation(
 
     // Train on labeled samples (resuming from existing model if available)
     let mut model = FloatNnue::load_or_init(resume_path, Some(output_path), scratch);
+    let mut rng = rand::thread_rng();
+
     for epoch in 1..=epochs {
+        samples.shuffle(&mut rng);
         let mut total_loss = 0.0f32;
         for sample in &samples {
             total_loss += model.train_step(sample, lr);
@@ -1491,13 +1538,15 @@ fn run_teacher_distillation(
             "  • Epoch {epoch}/{epochs}: Sai số với Engine sư phụ (MAE) = {:.4}",
             avg_loss
         );
+    }
 
-        if let Some(cp_dir) = checkpoint_dir {
-            let _ = std::fs::create_dir_all(cp_dir);
-            let cp_path = format!("{cp_dir}/teacher_epoch_{epoch}.f32");
-            if model.save_float(&cp_path).is_ok() {
-                println!("    📁 Đã lưu checkpoint Float: {cp_path}");
-            }
+    // Only create checkpoint at the final epoch, naming based on completion timestamp
+    if let Some(cp_dir) = checkpoint_dir {
+        let _ = std::fs::create_dir_all(cp_dir);
+        let timestamp = get_current_timestamp_string();
+        let cp_path = format!("{cp_dir}/teacher_{timestamp}.f32");
+        if model.save_float(&cp_path).is_ok() {
+            println!("    📁 Đã lưu checkpoint Float ở epoch cuối: {cp_path}");
         }
     }
 
@@ -1617,6 +1666,217 @@ fn run_sparring_match(
     let score_rate = (wins as f64 + 0.5 * draws as f64) / (num_games as f64);
     println!("   • Tỷ lệ đạt điểm: {:.1}%", score_rate * 100.0);
     println!("💡 Trận đấu tập đánh giá (Sparring) hoàn tất, mô hình được giữ nguyên.");
+}
+
+/// Plays automated matches between two external engines (e.g. Pikafish vs Fairy-Stockfish)
+/// to generate high-quality game records and evaluated positions for training.
+fn run_engine_versus_datagen(
+    engine1_path: &str,
+    proto1: EngineProtocol,
+    engine2_path: &str,
+    proto2: EngineProtocol,
+    num_games: usize,
+    depth: u8,
+    dataset_path: &str,
+) {
+    println!("\n▶ Khởi tạo Đấu Trường Sinh Dữ Liệu (Arena Engine Match):");
+    println!("   • Engine 1: {engine1_path} ({proto1:?})");
+    println!("   • Engine 2: {engine2_path} ({proto2:?})");
+    println!("   • Số ván đấu: {num_games}");
+    println!("   • Độ sâu phân tích mỗi nước: {depth}");
+    println!("   • Tệp lưu dữ liệu: {dataset_path}");
+
+    let mut client1 = match ExternalEngineClient::spawn(engine1_path, proto1) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ Không thể khởi động Engine 1: {e}");
+            return;
+        }
+    };
+
+    let mut client2 = match ExternalEngineClient::spawn(engine2_path, proto2) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ Không thể khởi động Engine 2: {e}");
+            return;
+        }
+    };
+
+    println!("✅ Đã kết nối thành công với cả 2 Engine!");
+
+    if let Some(parent) = std::path::Path::new(dataset_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    use std::fs::OpenOptions;
+    let mut file = match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dataset_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("❌ Lỗi mở tệp dataset '{dataset_path}': {e}");
+            return;
+        }
+    };
+
+    let opening_books = [
+        vec!["h2e2", "b9c7", "b0c2", "h9g7"], // Central Cannon vs Screen Horse
+        vec!["h2e2", "h7e7", "b0c2", "b9c7"], // Central Cannon vs Same Direction Cannon
+        vec!["g3g4", "c6c5", "b0c2", "b9a7"], // Pawn 7.1 vs Pawn Counter
+        vec!["g0e2", "b9c7", "b0a2", "h9g7"], // Elephant 3.5 vs Left Cannon
+        vec!["b0c2", "b9c7", "h2g2", "h9g7"], // Horse 2.3 Opening
+        vec!["h2f2", "b9c7", "b0c2", "h9g7"], // Cross Palace Cannon
+        vec!["h2e2", "b9c7", "b0c2", "h9i7"], // Single Horse
+        vec!["c3c4", "c6c5", "h2e2", "b9c7"], // Pawn 3.1 Opening
+    ];
+
+    let mut rng = rand::thread_rng();
+    let mut total_positions_generated = 0usize;
+
+    for game_idx in 1..=num_games {
+        let e1_is_red = game_idx % 2 == 1;
+        let mut game_state = cotuong_core::logic::game::GameState::new();
+        let mut move_history: Vec<Move> = Vec::new();
+        let mut position_records: Vec<(String, f32)> = Vec::new();
+
+        println!(
+            "\n▶ [Ván {}/{}] {} (ĐỎ) vs {} (ĐEN)",
+            game_idx,
+            num_games,
+            if e1_is_red { "Engine 1" } else { "Engine 2" },
+            if e1_is_red { "Engine 2" } else { "Engine 1" }
+        );
+
+        // 1. Initial opening moves from book
+        if let Some(opening_moves) = opening_books.choose(&mut rng) {
+            for &m_str in opening_moves {
+                if let Ok(mv) = Move::from_uci(m_str) {
+                    if let (Some(from), Some(to)) = (
+                        BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize),
+                        BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize),
+                    ) {
+                        if game_state.make_move(from, to).is_ok() {
+                            move_history.push(mv);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add 1-2 small random legal plies if needed for further entropy
+        if rand::Rng::gen_bool(&mut rng, 0.4) {
+            if let Some(m) =
+                generate_random_legal_move(&game_state.board, game_state.turn, &mut rng)
+            {
+                if let (Some(from), Some(to)) = (
+                    BoardCoordinate::new(m.from_row as usize, m.from_col as usize),
+                    BoardCoordinate::new(m.to_row as usize, m.to_col as usize),
+                ) {
+                    if game_state.make_move(from, to).is_ok() {
+                        move_history.push(m);
+                    }
+                }
+            }
+        }
+
+        // 2. Play game
+        let max_plies = 140;
+        let mut ply_count = move_history.len();
+
+        while ply_count < max_plies
+            && game_state.status == cotuong_core::logic::game::GameStatus::Playing
+        {
+            let turn = game_state.turn;
+            let is_e1_turn =
+                (turn == Color::Red && e1_is_red) || (turn == Color::Black && !e1_is_red);
+            let active_client = if is_e1_turn {
+                &mut client1
+            } else {
+                &mut client2
+            };
+
+            let fen = game_state.board.to_fen_string(turn);
+            let eval_result = active_client.evaluate_fen(&fen, depth, Duration::from_millis(3000));
+
+            match eval_result {
+                Ok((eval_cp, Some(best_mv))) => {
+                    let eval_red = if turn == Color::Black {
+                        -eval_cp
+                    } else {
+                        eval_cp
+                    };
+                    if ply_count.is_multiple_of(2) {
+                        position_records.push((fen, eval_red));
+                    }
+
+                    if let (Some(from), Some(to)) = (
+                        BoardCoordinate::new(best_mv.from_row as usize, best_mv.from_col as usize),
+                        BoardCoordinate::new(best_mv.to_row as usize, best_mv.to_col as usize),
+                    ) {
+                        if game_state.make_move(from, to).is_err() {
+                            break;
+                        }
+                        move_history.push(best_mv);
+                        ply_count += 1;
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        let (result_str, result_score) = match game_state.status {
+            cotuong_core::logic::game::GameStatus::Checkmate(Color::Red) => ("1-0", 1.0f32),
+            cotuong_core::logic::game::GameStatus::Checkmate(Color::Black) => ("0-1", 0.0f32),
+            _ => ("1/2-1/2", 0.5f32),
+        };
+
+        println!(
+            "   🏁 Kết quả ván {}: {} (Tổng {} nước đi, trích xuất {} thế cờ FEN)",
+            game_idx,
+            result_str,
+            move_history.len(),
+            position_records.len()
+        );
+
+        if move_history.len() >= 8 {
+            let moves_str: String = move_history
+                .iter()
+                .map(Move::to_uci)
+                .collect::<Vec<_>>()
+                .join(" ");
+            let _ = writeln!(
+                file,
+                "\n# Arena Game {game_idx}: {} vs {} [{result_str}]",
+                if e1_is_red {
+                    "Pikafish"
+                } else {
+                    "Fairy-Stockfish"
+                },
+                if e1_is_red {
+                    "Fairy-Stockfish"
+                } else {
+                    "Pikafish"
+                }
+            );
+            let _ = writeln!(file, "moves {moves_str} | result: {result_str}");
+
+            for (fen, eval_red) in &position_records {
+                let _ = writeln!(
+                    file,
+                    "{fen} | eval: {eval_red:.0} | result: {result_score:.1}"
+                );
+            }
+            total_positions_generated += position_records.len() + move_history.len();
+        }
+    }
+
+    println!("\n================================================================================");
+    println!("🎉 Hoàn tất sinh dữ liệu! Đã ghi thêm ~{total_positions_generated} mẫu thế cờ vào: {dataset_path}");
+    println!("================================================================================");
 }
 
 /// Runs Self-Play Reinforcement Learning loop.
@@ -1916,6 +2176,58 @@ fn main() {
 
     let scratch = args.iter().any(|a| a == "--scratch");
 
+    let engine1_path = args
+        .iter()
+        .position(|a| a == "--engine1" || a == "--engine1-path")
+        .and_then(|idx| args.get(idx + 1))
+        .map(String::as_str)
+        .unwrap_or("engines/pikafish/pikafish");
+
+    let proto1 = args
+        .iter()
+        .position(|a| a == "--proto1")
+        .and_then(|idx| args.get(idx + 1))
+        .map(|s| {
+            if s.to_lowercase() == "ucci" {
+                EngineProtocol::Ucci
+            } else {
+                EngineProtocol::Uci
+            }
+        })
+        .unwrap_or_else(|| {
+            if engine1_path.contains("fairy-stockfish") {
+                EngineProtocol::Ucci
+            } else {
+                EngineProtocol::Uci
+            }
+        });
+
+    let engine2_path = args
+        .iter()
+        .position(|a| a == "--engine2" || a == "--engine2-path")
+        .and_then(|idx| args.get(idx + 1))
+        .map(String::as_str)
+        .unwrap_or("engines/fairy-stockfish/fairy-stockfish");
+
+    let proto2 = args
+        .iter()
+        .position(|a| a == "--proto2")
+        .and_then(|idx| args.get(idx + 1))
+        .map(|s| {
+            if s.to_lowercase() == "uci" {
+                EngineProtocol::Uci
+            } else {
+                EngineProtocol::Ucci
+            }
+        })
+        .unwrap_or_else(|| {
+            if engine2_path.contains("fairy-stockfish") {
+                EngineProtocol::Ucci
+            } else {
+                EngineProtocol::Uci
+            }
+        });
+
     println!("================================================================================");
     println!(" 🧠 Xiangqi AI Trainer (Master Dataset & External UCCI/UCI Engine Integration)  ");
     println!("================================================================================");
@@ -2019,8 +2331,19 @@ fn main() {
                 scratch,
             );
         }
+        "gendata" | "arena" | "match-gen" => {
+            run_engine_versus_datagen(
+                engine1_path,
+                proto1,
+                engine2_path,
+                proto2,
+                num_games,
+                engine_depth,
+                dataset_path,
+            );
+        }
         unknown => {
-            eprintln!("❌ Chế độ không hợp lệ: '{unknown}'. Hỗ trợ: 'dataset', 'teacher', 'sparring', 'selfplay'.");
+            eprintln!("❌ Chế độ không hợp lệ: '{unknown}'. Hỗ trợ: 'dataset', 'teacher', 'sparring', 'selfplay', 'gendata'.");
         }
     }
 }
