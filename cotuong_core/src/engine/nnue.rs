@@ -1176,6 +1176,22 @@ mod tests {
     }
 
     #[test]
+    fn test_load_all_three_model_variants() {
+        if let Ok(bytes) = std::fs::read("assets/model_f32.bin") {
+            let loaded_f32 = NnueWeights::load_from_bytes(&bytes);
+            assert!(loaded_f32.is_ok(), "Failed to load model_f32.bin: {:?}", loaded_f32.err());
+        }
+        if let Ok(bytes) = std::fs::read("assets/model_int16.nnue") {
+            let loaded_i16 = NnueWeights::load_from_bytes(&bytes);
+            assert!(loaded_i16.is_ok(), "Failed to load model_int16.nnue: {:?}", loaded_i16.err());
+        }
+        if let Ok(bytes) = std::fs::read("assets/model_int8.nnue") {
+            let loaded_i8 = NnueWeights::load_from_bytes(&bytes);
+            assert!(loaded_i8.is_ok(), "Failed to load model_int8.nnue: {:?}", loaded_i8.err());
+        }
+    }
+
+    #[test]
     fn test_palace_mapping() {
         // Red palace squares
         assert_eq!(palace_index(3), 0);
