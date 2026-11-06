@@ -1,8 +1,13 @@
-use crate::engine::config::EngineConfig;
 use crate::engine::move_list::MoveList;
 use crate::engine::Move;
 use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
+use crate::logic::eval_constants::get_piece_value;
 use crate::logic::lookup::AttackTables;
+
+pub const SCORE_HASH_MOVE: i32 = 200_000;
+pub const SCORE_CAPTURE_BASE: i32 = 200_000;
+pub const SCORE_KILLER_MOVE: i32 = 120_000;
+pub const SCORE_HISTORY_MAX: i32 = 80_000;
 
 pub struct MoveGenContext<'a> {
     pub board: &'a Board,
@@ -16,17 +21,13 @@ pub struct MoveGenContext<'a> {
 }
 
 pub struct EngineMoveGen<'a> {
-    config: &'a EngineConfig,
     history_table: &'a [[i32; 90]],
 }
 
 impl<'a> EngineMoveGen<'a> {
     #[must_use]
-    pub const fn new(config: &'a EngineConfig, history_table: &'a [[i32; 90]]) -> Self {
-        Self {
-            config,
-            history_table,
-        }
+    pub const fn new(history_table: &'a [[i32; 90]]) -> Self {
+        Self { history_table }
     }
 
     pub fn generate_moves(
@@ -166,35 +167,35 @@ impl<'a> EngineMoveGen<'a> {
         });
 
         let score = if is_hash_move {
-            self.config.score_hash_move
+            SCORE_HASH_MOVE
         } else if let Some(t) = target {
-            let victim_val = self.get_piece_value(t.piece_type);
+            let victim_val = get_piece_value(t.piece_type);
             let attacker_val = ctx
                 .board
                 .get_piece(unsafe { BoardCoordinate::new_unchecked(r, c) })
-                .map_or(0, |p| self.get_piece_value(p.piece_type));
-            self.config.score_capture_base + victim_val * 10 - attacker_val
+                .map_or(0, |p| get_piece_value(p.piece_type));
+            SCORE_CAPTURE_BASE + victim_val * 10 - attacker_val
         } else if ctx.killers.first().copied().flatten().is_some_and(|km| {
             km.from_row as usize == r
                 && km.from_col as usize == c
                 && km.to_row as usize == tr
                 && km.to_col as usize == tc
         }) {
-            self.config.score_killer_move
+            SCORE_KILLER_MOVE
         } else if ctx.killers.get(1).copied().flatten().is_some_and(|km| {
             km.from_row as usize == r
                 && km.from_col as usize == c
                 && km.to_row as usize == tr
                 && km.to_col as usize == tc
         }) {
-            self.config.score_killer_move.saturating_sub(10_000)
+            SCORE_KILLER_MOVE.saturating_sub(10_000)
         } else if ctx.countermove.is_some_and(|cm| {
             cm.from_row as usize == r
                 && cm.from_col as usize == c
                 && cm.to_row as usize == tr
                 && cm.to_col as usize == tc
         }) {
-            self.config.score_killer_move.saturating_sub(20_000)
+            SCORE_KILLER_MOVE.saturating_sub(20_000)
         } else {
             let from_idx = r * 9 + c;
             let to_idx = tr * 9 + tc;
@@ -203,7 +204,7 @@ impl<'a> EngineMoveGen<'a> {
                 .get(from_idx)
                 .and_then(|row| row.get(to_idx))
                 .unwrap_or(&0);
-            hist.min(self.config.score_history_max)
+            hist.min(SCORE_HISTORY_MAX)
         };
 
         #[allow(clippy::cast_possible_truncation)]
@@ -360,18 +361,6 @@ impl<'a> EngineMoveGen<'a> {
                 let (tr, tc) = Board::index_to_coord(target_sq);
                 self.add_move(ctx, (r, c), (tr, tc));
             }
-        }
-    }
-
-    const fn get_piece_value(&self, pt: PieceType) -> i32 {
-        match pt {
-            PieceType::General => self.config.val_king,
-            PieceType::Chariot => self.config.val_rook,
-            PieceType::Cannon => self.config.val_cannon,
-            PieceType::Horse => self.config.val_horse,
-            PieceType::Elephant => self.config.val_elephant,
-            PieceType::Advisor => self.config.val_advisor,
-            PieceType::Soldier => self.config.val_pawn,
         }
     }
 }

@@ -1,9 +1,10 @@
 use crate::engine::config::EngineConfig;
 use crate::engine::eval::SimpleEvaluator;
-use crate::engine::movegen::EngineMoveGen;
+use crate::engine::movegen::{EngineMoveGen, SCORE_KILLER_MOVE};
 use crate::engine::tt::{TTEntry, TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
-use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
+use crate::logic::board::{Board, BoardCoordinate, Color};
+use crate::logic::eval_constants::get_piece_value;
 use crate::logic::game::GameState;
 use crate::logic::generator::MoveGenerator;
 use crate::logic::rules::{is_flying_general, is_in_check};
@@ -643,7 +644,7 @@ impl AlphaBetaEngine {
         );
 
         let countermove = self.get_countermove(ply);
-        let movegen = EngineMoveGen::new(&self.config, &self.history_table);
+        let movegen = EngineMoveGen::new(&self.history_table);
         let mut moves = movegen.generate_moves_with_counter(
             board,
             turn,
@@ -794,7 +795,7 @@ impl AlphaBetaEngine {
                 if !improving {
                     r += 1;
                 }
-                if mv.score >= self.config.score_killer_move.saturating_sub(20_000) {
+                if mv.score >= SCORE_KILLER_MOVE.saturating_sub(20_000) {
                     r -= 1;
                 }
                 let hist_adj = (self.get_history_score(mv) / 4096).clamp(-2, 2);
@@ -907,7 +908,7 @@ impl AlphaBetaEngine {
             alpha = stand_pat;
         }
 
-        let movegen = EngineMoveGen::new(&self.config, &self.history_table);
+        let movegen = EngineMoveGen::new(&self.history_table);
         let captures = movegen.generate_captures(board, turn, &self.killer_moves);
 
         for mv in captures {
@@ -917,7 +918,7 @@ impl AlphaBetaEngine {
 
             // Delta Pruning
             if let Some(cap_piece) = captured {
-                let cap_val = self.get_piece_value(cap_piece.piece_type);
+                let cap_val = get_piece_value(cap_piece.piece_type);
                 if stand_pat + cap_val + 180 < alpha {
                     continue;
                 }
@@ -952,19 +953,6 @@ impl AlphaBetaEngine {
                 *k1 = *k0;
                 *k0 = Some(mv);
             }
-        }
-    }
-
-    #[inline]
-    fn get_piece_value(&self, pt: PieceType) -> i32 {
-        match pt {
-            PieceType::General => self.config.val_king,
-            PieceType::Chariot => self.config.val_rook,
-            PieceType::Cannon => self.config.val_cannon,
-            PieceType::Horse => self.config.val_horse,
-            PieceType::Elephant => self.config.val_elephant,
-            PieceType::Advisor => self.config.val_advisor,
-            PieceType::Soldier => self.config.val_pawn,
         }
     }
 }
@@ -1044,7 +1032,7 @@ impl Searcher for AlphaBetaEngine {
                 let hash = board.zobrist_hash;
                 let tt_move = best_move.or_else(|| self.tt.get_move(hash));
 
-                let movegen = EngineMoveGen::new(&self.config, &self.history_table);
+                let movegen = EngineMoveGen::new(&self.history_table);
                 let mut moves = movegen.generate_moves(board, turn, tt_move, &self.killer_moves, d);
 
                 if !excluded_moves.is_empty() {

@@ -5,7 +5,6 @@ use crate::logic::board::Board;
 use std::sync::Arc;
 
 pub struct SimpleEvaluator {
-    #[allow(dead_code)]
     config: Arc<EngineConfig>,
     weights: Option<Arc<NnueWeights>>,
 }
@@ -39,7 +38,8 @@ impl Evaluator for SimpleEvaluator {
             Some(w) => w.as_ref(),
             None => NnueWeights::get(),
         };
-        evaluate_nnue_with_weights(board, nnue_weights)
+        let raw = evaluate_nnue_with_weights(board, nnue_weights);
+        (raw * self.config.nnue_weight) / 100
     }
 }
 

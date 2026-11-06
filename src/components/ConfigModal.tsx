@@ -202,111 +202,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
           <section>
             <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
-              01. Giá trị quân cờ (Dùng cho sắp xếp nước bắt quân MVV-LVA & SEE)
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Slider
-                label="Tốt (Pawn)"
-                value={currentConfig.val_pawn}
-                min={0}
-                max={200}
-                step={1}
-                onChange={(v) => handleSliderChange('val_pawn', v)}
-              />
-              <Slider
-                label="Sĩ (Advisor)"
-                value={currentConfig.val_advisor}
-                min={0}
-                max={400}
-                step={1}
-                onChange={(v) => handleSliderChange('val_advisor', v)}
-              />
-              <Slider
-                label="Tượng (Elephant)"
-                value={currentConfig.val_elephant}
-                min={0}
-                max={400}
-                step={1}
-                onChange={(v) => handleSliderChange('val_elephant', v)}
-              />
-              <Slider
-                label="Mã (Horse)"
-                value={currentConfig.val_horse}
-                min={0}
-                max={800}
-                step={1}
-                onChange={(v) => handleSliderChange('val_horse', v)}
-              />
-              <Slider
-                label="Pháo (Cannon)"
-                value={currentConfig.val_cannon}
-                min={0}
-                max={900}
-                step={1}
-                onChange={(v) => handleSliderChange('val_cannon', v)}
-              />
-              <Slider
-                label="Xe (Rook)"
-                value={currentConfig.val_rook}
-                min={0}
-                max={1800}
-                step={1}
-                onChange={(v) => handleSliderChange('val_rook', v)}
-              />
-              <Slider
-                label="Tướng (King)"
-                value={currentConfig.val_king}
-                min={5000}
-                max={20000}
-                step={100}
-                onChange={(v) => handleSliderChange('val_king', v)}
-              />
-            </div>
-          </section>
-
-          <section>
-            <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
-              02. Trọng số Tìm kiếm & Heuristics (TT, MVV-LVA, Killer, Countermove, History Gravity)
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Slider
-                label="Hash Move Score"
-                value={currentConfig.score_hash_move}
-                min={0}
-                max={5000000}
-                step={100000}
-                onChange={(v) => handleSliderChange('score_hash_move', v)}
-              />
-              <Slider
-                label="Capture Base Score"
-                value={currentConfig.score_capture_base}
-                min={0}
-                max={2000000}
-                step={100000}
-                onChange={(v) => handleSliderChange('score_capture_base', v)}
-              />
-              <Slider
-                label="Killer Move Score"
-                value={currentConfig.score_killer_move}
-                min={0}
-                max={2000000}
-                step={100000}
-                onChange={(v) => handleSliderChange('score_killer_move', v)}
-              />
-              <Slider
-                label="History Max Score"
-                value={currentConfig.score_history_max}
-                min={0}
-                max={2000000}
-                step={100000}
-                onChange={(v) => handleSliderChange('score_history_max', v)}
-              />
-            </div>
-          </section>
-
-          <section>
-            <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
-              03. Cắt tỉa Pikafish & Fairy-Stockfish (Pruning & Mate)
+              01. Cắt tỉa Pikafish & Fairy-Stockfish (Pruning & Mate)
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
@@ -352,7 +248,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
           <section>
             <h3 className="text-xs font-semibold tracking-wider text-amber-400 pb-2 mb-3 border-b border-stone-800">
-              04. Kiến trúc Mạng Nơ-ron Thuần (Pure NNUE HalfKP v3)
+              02. Kiến trúc Mạng Nơ-ron Thuần (Pure NNUE HalfKP v3)
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">

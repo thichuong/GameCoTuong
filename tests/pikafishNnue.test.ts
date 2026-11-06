@@ -144,4 +144,15 @@ describe('Pikafish & Fairy-Stockfish Pruning & Search Pipeline', () => {
     assert.equal(res.move.to_row, 5);
     assert.equal(res.move.to_col, 4);
   });
+
+  it('uses streamlined EngineConfig without legacy piece value or move-ordering fields', async () => {
+    const { DEFAULT_ENGINE_CONFIG } = await import('../src/types/game.js');
+    assert.deepEqual(Object.keys(DEFAULT_ENGINE_CONFIG).sort(), [
+      'eval_mode',
+      'mate_score',
+      'nnue_weight',
+      'pruning_method',
+      'pruning_multiplier',
+    ]);
+  });
 });

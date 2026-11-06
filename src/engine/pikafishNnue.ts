@@ -18,6 +18,19 @@ export const L3_OUTPUT_SIZE = 32;
 const MATE_THRESHOLD = 15_000;
 const INF_SCORE = 500_000;
 
+const VAL_KING = 10_000;
+const VAL_ROOK = 600;
+const VAL_CANNON = 300;
+const VAL_HORSE = 300;
+const VAL_ELEPHANT = 120;
+const VAL_ADVISOR = 120;
+const VAL_PAWN = 30;
+
+const SCORE_HASH_MOVE = 3_000_000;
+const SCORE_CAPTURE_BASE = 1_000_000;
+const SCORE_KILLER_MOVE = 900_000;
+const SCORE_HISTORY_MAX = 800_000;
+
 export type ColorIdx = 0 | 1; // 0 = Red, 1 = Black
 export type PieceTypeIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6; // General=0, Advisor=1, Elephant=2, Horse=3, Chariot=4, Cannon=5, Soldier=6
 
@@ -1078,24 +1091,26 @@ export class PikafishNnueEngine {
   private getPieceValue(pt: PieceTypeIdx): number {
     switch (pt) {
       case 0:
-        return this.config.val_king;
+        return VAL_KING;
       case 1:
-        return this.config.val_advisor;
+        return VAL_ADVISOR;
       case 2:
-        return this.config.val_elephant;
+        return VAL_ELEPHANT;
       case 3:
-        return this.config.val_horse;
+        return VAL_HORSE;
       case 4:
-        return this.config.val_rook;
+        return VAL_ROOK;
       case 5:
-        return this.config.val_cannon;
+        return VAL_CANNON;
       case 6:
-        return this.config.val_pawn;
+        return VAL_PAWN;
     }
   }
 
   private evalForTurn(board: EngineBoard, turn: ColorIdx): number {
-    const raw = evaluateNnue(board);
+    const raw = Math.trunc(
+      (evaluateNnue(board) * (this.config.nnue_weight ?? 100)) / 100
+    );
     return turn === 0 ? raw : -raw;
   }
 
@@ -1188,32 +1203,32 @@ export class PikafishNnueEngine {
 
       let score: number;
       if (ttMove && ttMove.fromSq === fromSq && ttMove.toSq === toSq) {
-        score = this.config.score_hash_move;
+        score = SCORE_HASH_MOVE;
       } else if (target !== null) {
         const victimVal = this.getPieceValue(target.pieceType);
         const attackerVal = this.getPieceValue(board.grid[fromSq]!.pieceType);
-        score = this.config.score_capture_base + victimVal * 10 - attackerVal;
+        score = SCORE_CAPTURE_BASE + victimVal * 10 - attackerVal;
       } else if (
         killers[0] &&
         killers[0].fromSq === fromSq &&
         killers[0].toSq === toSq
       ) {
-        score = this.config.score_killer_move;
+        score = SCORE_KILLER_MOVE;
       } else if (
         killers[1] &&
         killers[1].fromSq === fromSq &&
         killers[1].toSq === toSq
       ) {
-        score = this.config.score_killer_move - 10_000;
+        score = SCORE_KILLER_MOVE - 10_000;
       } else if (
         countermove &&
         countermove.fromSq === fromSq &&
         countermove.toSq === toSq
       ) {
-        score = this.config.score_killer_move - 20_000;
+        score = SCORE_KILLER_MOVE - 20_000;
       } else {
         score = Math.min(
-          this.config.score_history_max,
+          SCORE_HISTORY_MAX,
           this.historyTable[fromSq * 90 + toSq]!
         );
       }
@@ -1662,7 +1677,7 @@ export class PikafishNnueEngine {
         let r = this.lmrTable[dIdx * 64 + mIdx]!;
         if (!isPv) r += 1;
         if (!improving) r += 1;
-        if (mv.score >= this.config.score_killer_move - 20_000) r -= 1;
+        if (mv.score >= SCORE_KILLER_MOVE - 20_000) r -= 1;
         const histAdj = Math.max(
           -2,
           Math.min(
