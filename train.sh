@@ -25,7 +25,7 @@ show_help() {
   echo "Các tùy chọn chính:"
   echo "  --epochs <N>         : Số thế hệ huấn luyện mỗi giai đoạn (Mặc định: 5)"
   echo "  --dataset <FILE>     : Tệp kỳ phổ mẫu (Mặc định: cotuong_trainer/data/sample_master_games.txt)"
-  echo "  --lr <RATE>          : Tốc độ học (Mặc định: 0.01)"
+  echo "  --lr <RATE>          : Tốc độ học (Mặc định: 0.05)"
   echo "  --engine <PATH>      : Đường dẫn binary Engine sư phụ (Mặc định: tự tìm trong engines/)"
   echo "  --proto <ucci|uci>   : Giao thức engine ngoài (Mặc định: ucci)"
   echo "  --depth <N>          : Độ sâu phân tích của engine ngoài (Mặc định: 10)"
@@ -45,7 +45,7 @@ fi
 # Thiết lập cấu hình mặc định
 EPOCHS=5
 DATASET="cotuong_trainer/data/sample_master_games.txt"
-LR="0.01"
+LR="0.05"
 OUTPUT="cotuong_core/assets/default.nnue"
 FLOAT_MODEL="checkpoints/model_latest.f32"
 ENGINE_PATH=""
