@@ -92,6 +92,7 @@ mod tests {
 pub enum SearchLimit {
     Depth(u8),
     Time(u64), // milliseconds
+    DepthOrTime { depth: u8, time_ms: u64 },
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]

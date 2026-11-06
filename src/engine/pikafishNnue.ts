@@ -1788,8 +1788,8 @@ export class PikafishNnueEngine {
   ): SearchResult | null {
     this.nodesSearched = 0;
     this.startTime = performance.now();
-    this.timeLimitMs = maxDepth ? null : timeLimitMs;
-    const softLimit = maxDepth ? null : timeLimitMs * 0.6;
+    this.timeLimitMs = timeLimitMs > 0 ? timeLimitMs : null;
+    const softLimit = this.timeLimitMs !== null ? timeLimitMs * 0.6 : null;
     const targetDepth = maxDepth ?? 64;
     const opp: ColorIdx = turn === 0 ? 1 : 0;
 
@@ -1893,11 +1893,13 @@ export class PikafishNnueEngine {
         if (timedOut) break;
 
         if (iterBestScore <= alphaOrig) {
+          if (alphaOrig <= -INF_SCORE) break;
           alpha = Math.max(-INF_SCORE, alphaOrig - delta);
           delta += Math.trunc(delta / 2);
           continue;
         }
         if (iterBestScore >= betaOrig) {
+          if (betaOrig >= INF_SCORE) break;
           beta = Math.min(INF_SCORE, betaOrig + delta);
           delta += Math.trunc(delta / 2);
           continue;

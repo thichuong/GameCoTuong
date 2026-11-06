@@ -35,7 +35,10 @@ impl SimpleEvaluator {
 impl Evaluator for SimpleEvaluator {
     #[inline]
     fn evaluate(&self, board: &Board) -> i32 {
-        let nnue_weights = self.weights.as_deref().unwrap_or_else(NnueWeights::get);
+        let nnue_weights = match &self.weights {
+            Some(w) => w.as_ref(),
+            None => NnueWeights::get(),
+        };
         evaluate_nnue_with_weights(board, nnue_weights)
     }
 }

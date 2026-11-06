@@ -356,10 +356,10 @@ impl WasmEngine {
         time_limit_ms: u64,
         max_depth: Option<u8>,
     ) -> Result<JsValue, JsValue> {
-        let limit = if let Some(depth) = max_depth {
-            SearchLimit::Depth(depth)
-        } else {
-            SearchLimit::Time(time_limit_ms)
+        let limit = match (max_depth, time_limit_ms) {
+            (Some(depth), t) if t > 0 => SearchLimit::DepthOrTime { depth, time_ms: t },
+            (Some(depth), _) => SearchLimit::Depth(depth),
+            (None, t) => SearchLimit::Time(t),
         };
 
         let result = self.engine.search(&game_state.inner, limit, &[]);

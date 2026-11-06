@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 const MATE_THRESHOLD: i32 = 15_000;
 const INF_SCORE: i32 = 500_000;
+pub const MAX_PLY: u8 = 96;
 
 pub struct AlphaBetaEngine {
     config: Arc<EngineConfig>,
@@ -223,7 +224,10 @@ impl AlphaBetaEngine {
         turn: Color,
         ply: u8,
     ) -> Option<Option<i32>> {
-        if depth >= self.config.probcut_depth && beta.abs() < MATE_THRESHOLD {
+        if depth >= self.config.probcut_depth
+            && beta.abs() < MATE_THRESHOLD
+            && ply.saturating_add(1) < MAX_PLY
+        {
             let margin = self.config.probcut_margin;
             let reduction = self.config.probcut_reduction;
 
@@ -235,7 +239,7 @@ impl AlphaBetaEngine {
                     -probcut_beta + 1,
                     depth - reduction,
                     turn.opposite(),
-                    ply + 1,
+                    ply.saturating_add(1),
                     None,
                 ) {
                     if -score >= probcut_beta {
@@ -263,6 +267,7 @@ impl AlphaBetaEngine {
             && eval >= beta
             && beta.abs() < MATE_THRESHOLD
             && board.has_major_pieces(turn)
+            && ply.saturating_add(1) < MAX_PLY
         {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let eval_bonus = ((eval - beta) / 180).clamp(0, 3) as u8;
@@ -279,7 +284,7 @@ impl AlphaBetaEngine {
                 -beta + 1,
                 depth.saturating_sub(r),
                 turn.opposite(),
-                ply + 1,
+                ply.saturating_add(1),
                 None,
             );
 
@@ -315,6 +320,7 @@ impl AlphaBetaEngine {
         if depth >= self.config.singular_extension_min_depth
             && excluded_move.is_none()
             && best_move_tt.is_some()
+            && ply.saturating_add(1) < MAX_PLY
         {
             if let Some(entry) = tt_entry {
                 if entry.depth >= depth.saturating_sub(3)
@@ -431,7 +437,15 @@ impl AlphaBetaEngine {
         let full_depth = depth.saturating_sub(1).saturating_add(extension);
         if legal_moves_count == 1 {
             return self
-                .alpha_beta(board, -beta, -alpha, full_depth, turn.opposite(), ply + 1, None)
+                .alpha_beta(
+                    board,
+                    -beta,
+                    -alpha,
+                    full_depth,
+                    turn.opposite(),
+                    ply.saturating_add(1),
+                    None,
+                )
                 .map(|v| -v);
         }
 
@@ -442,7 +456,7 @@ impl AlphaBetaEngine {
             -alpha,
             reduced_depth,
             turn.opposite(),
-            ply + 1,
+            ply.saturating_add(1),
             None,
         );
 
@@ -455,7 +469,7 @@ impl AlphaBetaEngine {
                     -alpha,
                     full_depth,
                     turn.opposite(),
-                    ply + 1,
+                    ply.saturating_add(1),
                     None,
                 );
             }
@@ -468,7 +482,7 @@ impl AlphaBetaEngine {
                         -alpha,
                         full_depth,
                         turn.opposite(),
-                        ply + 1,
+                        ply.saturating_add(1),
                         None,
                     );
                 }
@@ -489,6 +503,10 @@ impl AlphaBetaEngine {
         ply: u8,
         excluded_move: Option<Move>,
     ) -> Option<i32> {
+        if ply >= MAX_PLY {
+            return Some(self.eval_for_turn(board, turn));
+        }
+
         self.nodes_searched += 1;
 
         if self.check_time() {
@@ -547,7 +565,7 @@ impl AlphaBetaEngine {
         }
 
         if depth == 0 {
-            let score = self.quiescence(board, alpha, beta, turn);
+            let score = self.quiescence(board, alpha, beta, turn, ply);
             self.history_stack.pop();
             return Some(score);
         }
@@ -577,7 +595,7 @@ impl AlphaBetaEngine {
             if depth <= 2 && alpha.abs() < MATE_THRESHOLD {
                 let razor_margin = 210 * i32::from(depth);
                 if eval + razor_margin <= alpha {
-                    let qscore = self.quiescence(board, alpha, beta, turn);
+                    let qscore = self.quiescence(board, alpha, beta, turn, ply);
                     if qscore <= alpha {
                         self.history_stack.pop();
                         return Some(qscore);
@@ -728,7 +746,7 @@ impl AlphaBetaEngine {
             if !MoveGenerator::new().has_legal_moves(board, turn.opposite()) {
                 self.history_stack.pop();
                 board.undo_move(&mv, captured, turn);
-                return Some(self.calculate_mate_score(ply + 1));
+                return Some(self.calculate_mate_score(ply.saturating_add(1)));
             }
 
             let rep_count = self
@@ -789,7 +807,18 @@ impl AlphaBetaEngine {
             }
 
             let is_tt_move = best_move_tt == Some(mv);
-            let extension = u8::from(in_check) + if is_tt_move { singular_ext } else { 0 };
+            let extension = if in_check {
+                1
+            } else if is_tt_move {
+                singular_ext
+            } else {
+                0
+            };
+            let extension = if ply.saturating_add(4) >= MAX_PLY {
+                0
+            } else {
+                extension
+            };
 
             let Some(score) = self.search_pvs_child(
                 board,
@@ -845,7 +874,18 @@ impl AlphaBetaEngine {
         Some(best_score)
     }
 
-    fn quiescence(&mut self, board: &mut Board, mut alpha: i32, beta: i32, turn: Color) -> i32 {
+    fn quiescence(
+        &mut self,
+        board: &mut Board,
+        mut alpha: i32,
+        beta: i32,
+        turn: Color,
+        ply: u8,
+    ) -> i32 {
+        if ply >= MAX_PLY {
+            return self.eval_for_turn(board, turn);
+        }
+
         self.nodes_searched += 1;
 
         let hash = board.zobrist_hash;
@@ -890,7 +930,8 @@ impl AlphaBetaEngine {
                 continue;
             }
 
-            let score = -self.quiescence(board, -beta, -alpha, turn.opposite());
+            let score =
+                -self.quiescence(board, -beta, -alpha, turn.opposite(), ply.saturating_add(1));
 
             board.undo_move(&mv, captured, turn);
 
@@ -914,7 +955,8 @@ impl AlphaBetaEngine {
         }
     }
 
-    const fn get_piece_value(&self, pt: PieceType) -> i32 {
+    #[inline]
+    fn get_piece_value(&self, pt: PieceType) -> i32 {
         match pt {
             PieceType::General => self.config.val_king,
             PieceType::Chariot => self.config.val_rook,
@@ -943,6 +985,8 @@ impl Searcher for AlphaBetaEngine {
             SearchLimit::Depth(d) => (d.min(63), None),
             #[allow(clippy::cast_precision_loss)]
             SearchLimit::Time(t) => (64, Some(t as f64)),
+            #[allow(clippy::cast_precision_loss)]
+            SearchLimit::DepthOrTime { depth, time_ms } => (depth.min(63), Some(time_ms as f64)),
         };
         self.time_limit = time_limit;
         let soft_limit = time_limit.map(|t| t * 0.6);
@@ -1001,8 +1045,7 @@ impl Searcher for AlphaBetaEngine {
                 let tt_move = best_move.or_else(|| self.tt.get_move(hash));
 
                 let movegen = EngineMoveGen::new(&self.config, &self.history_table);
-                let mut moves =
-                    movegen.generate_moves(board, turn, tt_move, &self.killer_moves, d);
+                let mut moves = movegen.generate_moves(board, turn, tt_move, &self.killer_moves, d);
 
                 if !excluded_moves.is_empty() {
                     moves.retain(|m| {
@@ -1051,6 +1094,10 @@ impl Searcher for AlphaBetaEngine {
                     if !non_repetition_moves.is_empty() {
                         moves.retain(|mv| non_repetition_moves.contains(mv));
                     }
+                }
+
+                if moves.is_empty() {
+                    break;
                 }
 
                 if self.check_time() {
@@ -1123,11 +1170,17 @@ impl Searcher for AlphaBetaEngine {
                 }
 
                 if best_score_this_iteration <= alpha_orig {
+                    if alpha_orig <= -INF_SCORE {
+                        break;
+                    }
                     alpha = (alpha_orig.saturating_sub(delta)).max(-INF_SCORE);
                     delta = delta.saturating_add(delta / 2);
                     continue;
                 }
                 if best_score_this_iteration >= beta_orig {
+                    if beta_orig >= INF_SCORE {
+                        break;
+                    }
                     beta = (beta_orig.saturating_add(delta)).min(INF_SCORE);
                     delta = delta.saturating_add(delta / 2);
                     continue;

@@ -182,11 +182,11 @@ impl FloatNnue {
                         }
 
                         // Distributed positional channels (neurons 24..192)
-                        for idx in 24..L1_OUTPUT_SIZE {
+                        for (idx, cell) in row.iter_mut().enumerate().skip(24) {
                             let h = ((feat.wrapping_mul(2_654_435_761)) ^ (idx.wrapping_mul(97)))
                                 & 0xFF;
                             let signed = (h as f32 - 128.0) / 128.0;
-                            row[idx] = signed * 0.04;
+                            *cell = signed * 0.04;
                         }
                     }
                 }
@@ -237,11 +237,11 @@ impl FloatNnue {
                         }
 
                         // Distributed positional channels (neurons 24..192)
-                        for idx in 24..L1_OUTPUT_SIZE {
+                        for (idx, cell) in row.iter_mut().enumerate().skip(24) {
                             let h = ((feat.wrapping_mul(2_654_435_761)) ^ (idx.wrapping_mul(131)))
                                 & 0xFF;
                             let signed = (h as f32 - 128.0) / 128.0;
-                            row[idx] = signed * 0.04;
+                            *cell = signed * 0.04;
                         }
                     }
                 }
@@ -421,12 +421,7 @@ impl FloatNnue {
 
         let total_eval = (psqt_red - psqt_black) + nn_sum;
         (
-            total_eval,
-            l1_clamped,
-            l2_input,
-            l2_output,
-            l3_output,
-            bucket,
+            total_eval, l1_clamped, l2_input, l2_output, l3_output, bucket,
         )
     }
 
@@ -612,7 +607,9 @@ impl FloatNnue {
                 }
             }
         }
-        let Ok(w2) = w2_vec.into_boxed_slice().try_into() else {
+        let Ok(w2): Result<Box<[[i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]>, _> =
+            w2_vec.into_boxed_slice().try_into()
+        else {
             unreachable!()
         };
         let w2_col = NnueWeights::transpose_w2(&w2);
@@ -634,7 +631,9 @@ impl FloatNnue {
                 }
             }
         }
-        let Ok(w3) = w3_vec.into_boxed_slice().try_into() else {
+        let Ok(w3): Result<Box<[[i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]>, _> =
+            w3_vec.into_boxed_slice().try_into()
+        else {
             unreachable!()
         };
         let w3_col = NnueWeights::transpose_w3(&w3);
@@ -790,10 +789,8 @@ fn play_selfplay_game(
     depth: u8,
     weights: Arc<NnueWeights>,
 ) -> Vec<PositionSample> {
-    let mut board = Board::new();
-    let mut turn = Color::Red;
+    let mut game_state = cotuong_core::logic::game::GameState::new();
     let mut samples = Vec::new();
-    let generator = MoveGenerator::new();
 
     let config = Arc::new(EngineConfig {
         eval_mode: 1,
@@ -805,25 +802,30 @@ fn play_selfplay_game(
     let mut rng = rand::thread_rng();
 
     for ply in 0..120 {
-        if !generator.has_legal_moves(&board, turn) {
+        if game_state.status != cotuong_core::logic::game::GameStatus::Playing {
             break;
         }
 
-        let (red_feats, black_feats) = extract_features(&board);
+        let (red_feats, black_feats) = extract_features(&game_state.board);
 
         let best_move = if ply < 6 {
-            let Some(m) = generate_random_legal_move(&board, turn, &mut rng) else {
+            let Some(m) = generate_random_legal_move(&game_state.board, game_state.turn, &mut rng)
+            else {
                 break;
             };
             m
         } else {
-            let mut dummy_state = cotuong_core::logic::game::GameState::new();
-            dummy_state.board = board.clone();
-            dummy_state.turn = turn;
-            let search_res = engine.search(&dummy_state, SearchLimit::Depth(depth), &[]);
+            let search_res = engine.search(
+                &game_state,
+                SearchLimit::DepthOrTime {
+                    depth,
+                    time_ms: 2500,
+                },
+                &[],
+            );
             match search_res {
                 Some((mv, stats)) => {
-                    let eval = match turn {
+                    let eval = match game_state.turn {
                         Color::Red => stats.depth as f32 * 10.0,
                         Color::Black => -(stats.depth as f32 * 10.0),
                     };
@@ -834,18 +836,22 @@ fn play_selfplay_game(
             }
         };
 
-        board.apply_move(&best_move, turn);
-        turn = turn.opposite();
+        if let (Some(from), Some(to)) = (
+            BoardCoordinate::new(best_move.from_row as usize, best_move.from_col as usize),
+            BoardCoordinate::new(best_move.to_row as usize, best_move.to_col as usize),
+        ) {
+            if game_state.make_move(from, to).is_err() {
+                break;
+            }
+        } else {
+            break;
+        }
     }
 
-    let result = if is_in_check(&board, Color::Black)
-        && !generator.has_legal_moves(&board, Color::Black)
-    {
-        1.0
-    } else if is_in_check(&board, Color::Red) && !generator.has_legal_moves(&board, Color::Red) {
-        0.0
-    } else {
-        0.5
+    let result = match game_state.status {
+        cotuong_core::logic::game::GameStatus::Checkmate(Color::Red) => 1.0,
+        cotuong_core::logic::game::GameStatus::Checkmate(Color::Black) => 0.0,
+        _ => 0.5,
     };
 
     samples
@@ -867,9 +873,7 @@ fn play_tournament_game(
     champ_weights: Arc<NnueWeights>,
     depth: u8,
 ) -> f32 {
-    let mut board = Board::new();
-    let mut turn = Color::Red;
-    let generator = MoveGenerator::new();
+    let mut game_state = cotuong_core::logic::game::GameState::new();
 
     let config_cand = Arc::new(EngineConfig {
         eval_mode: 2,
@@ -895,41 +899,68 @@ fn play_tournament_game(
     let mut rng = rand::thread_rng();
 
     for _ in 0..4 {
-        if let Some(m) = generate_random_legal_move(&board, turn, &mut rng) {
-            board.apply_move(&m, turn);
-            turn = turn.opposite();
+        if let Some(m) = generate_random_legal_move(&game_state.board, game_state.turn, &mut rng) {
+            if let (Some(from), Some(to)) = (
+                BoardCoordinate::new(m.from_row as usize, m.from_col as usize),
+                BoardCoordinate::new(m.to_row as usize, m.to_col as usize),
+            ) {
+                if game_state.make_move(from, to).is_err() {
+                    break;
+                }
+            } else {
+                break;
+            }
         } else {
             break;
         }
     }
 
     for _ in 4..120 {
-        if !generator.has_legal_moves(&board, turn) {
+        if game_state.status != cotuong_core::logic::game::GameStatus::Playing {
             break;
         }
 
-        let mut dummy_state = cotuong_core::logic::game::GameState::new();
-        dummy_state.board = board.clone();
-        dummy_state.turn = turn;
-
-        let search_res = match turn {
-            Color::Red => red_engine.search(&dummy_state, SearchLimit::Depth(depth), &[]),
-            Color::Black => black_engine.search(&dummy_state, SearchLimit::Depth(depth), &[]),
+        let search_res = match game_state.turn {
+            Color::Red => red_engine.search(
+                &game_state,
+                SearchLimit::DepthOrTime {
+                    depth,
+                    time_ms: 2500,
+                },
+                &[],
+            ),
+            Color::Black => black_engine.search(
+                &game_state,
+                SearchLimit::DepthOrTime {
+                    depth,
+                    time_ms: 2500,
+                },
+                &[],
+            ),
         };
 
         match search_res {
             Some((mv, _)) => {
-                board.apply_move(&mv, turn);
-                turn = turn.opposite();
+                if let (Some(from), Some(to)) = (
+                    BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize),
+                    BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize),
+                ) {
+                    if game_state.make_move(from, to).is_err() {
+                        break;
+                    }
+                } else {
+                    break;
+                }
             }
             None => break,
         }
     }
 
-    let red_wins =
-        is_in_check(&board, Color::Black) && !generator.has_legal_moves(&board, Color::Black);
-    let black_wins =
-        is_in_check(&board, Color::Red) && !generator.has_legal_moves(&board, Color::Red);
+    let (red_wins, black_wins) = match game_state.status {
+        cotuong_core::logic::game::GameStatus::Checkmate(Color::Red) => (true, false),
+        cotuong_core::logic::game::GameStatus::Checkmate(Color::Black) => (false, true),
+        _ => (false, false),
+    };
 
     if candidate_is_red {
         if red_wins {
@@ -1193,7 +1224,6 @@ fn run_sparring_match(
         eval_mode: 2,
         ..Default::default()
     });
-    let generator = MoveGenerator::new();
 
     let mut wins = 0;
     let mut draws = 0;
@@ -1201,8 +1231,7 @@ fn run_sparring_match(
 
     for game_idx in 1..=num_games {
         let cand_is_red = game_idx % 2 == 1;
-        let mut board = Board::new();
-        let mut turn = Color::Red;
+        let mut game_state = cotuong_core::logic::game::GameState::new();
         let mut cand_engine =
             AlphaBetaEngine::with_weights(config_cand.clone(), cand_weights.clone());
 
@@ -1212,20 +1241,25 @@ fn run_sparring_match(
         );
 
         for _ply in 0..100 {
-            if !generator.has_legal_moves(&board, turn) {
+            if game_state.status != cotuong_core::logic::game::GameStatus::Playing {
                 break;
             }
 
+            let turn = game_state.turn;
             let best_move =
                 if (turn == Color::Red && cand_is_red) || (turn == Color::Black && !cand_is_red) {
-                    let mut dummy_state = cotuong_core::logic::game::GameState::new();
-                    dummy_state.board = board.clone();
-                    dummy_state.turn = turn;
                     cand_engine
-                        .search(&dummy_state, SearchLimit::Depth(depth), &[])
+                        .search(
+                            &game_state,
+                            SearchLimit::DepthOrTime {
+                                depth,
+                                time_ms: 2000,
+                            },
+                            &[],
+                        )
                         .map(|(mv, _)| mv)
                 } else {
-                    let fen = board.to_fen_string(turn);
+                    let fen = game_state.board.to_fen_string(turn);
                     client
                         .get_best_move(&fen, &[], depth, Duration::from_millis(2000))
                         .ok()
@@ -1234,17 +1268,26 @@ fn run_sparring_match(
 
             match best_move {
                 Some(mv) => {
-                    board.apply_move(&mv, turn);
-                    turn = turn.opposite();
+                    if let (Some(from), Some(to)) = (
+                        BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize),
+                        BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize),
+                    ) {
+                        if game_state.make_move(from, to).is_err() {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
                 }
                 None => break,
             }
         }
 
-        let red_wins =
-            is_in_check(&board, Color::Black) && !generator.has_legal_moves(&board, Color::Black);
-        let black_wins =
-            is_in_check(&board, Color::Red) && !generator.has_legal_moves(&board, Color::Red);
+        let (red_wins, black_wins) = match game_state.status {
+            cotuong_core::logic::game::GameStatus::Checkmate(Color::Red) => (true, false),
+            cotuong_core::logic::game::GameStatus::Checkmate(Color::Black) => (false, true),
+            _ => (false, false),
+        };
 
         if cand_is_red {
             if red_wins {
@@ -1423,6 +1466,12 @@ fn run_selfplay_training(
 }
 
 fn main() {
+    // Configure Rayon thread pool with 8MB stack size to prevent stack overflow in deep tree searches
+    rayon::ThreadPoolBuilder::new()
+        .stack_size(8 * 1024 * 1024)
+        .build_global()
+        .ok();
+
     let args: Vec<String> = env::args().collect();
 
     let mode = args

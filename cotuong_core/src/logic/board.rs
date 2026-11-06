@@ -667,8 +667,7 @@ impl Board {
                 self.nnue_acc
                     .add_piece_red(piece, from.index(), k_red, weights);
                 if let Some(cap) = captured {
-                    self.nnue_acc
-                        .add_piece_red(cap, to.index(), k_red, weights);
+                    self.nnue_acc.add_piece_red(cap, to.index(), k_red, weights);
                 }
             }
         } else {

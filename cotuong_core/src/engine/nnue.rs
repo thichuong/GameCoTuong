@@ -465,13 +465,7 @@ impl NnueAccumulator {
     }
 
     #[inline]
-    pub fn add_piece_red(
-        &mut self,
-        piece: Piece,
-        sq: usize,
-        k_red: usize,
-        weights: &NnueWeights,
-    ) {
+    pub fn add_piece_red(&mut self, piece: Piece, sq: usize, k_red: usize, weights: &NnueWeights) {
         if let Some(red_feat) =
             halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
         {
