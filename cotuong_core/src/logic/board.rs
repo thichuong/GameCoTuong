@@ -1,7 +1,6 @@
 use crate::engine::nnue::{NnueAccumulator, NnueWeights};
 use crate::engine::zobrist::ZobristKeys;
 use crate::engine::Move;
-use crate::logic::eval_constants::{get_piece_value, get_pst_value};
 use serde::{Deserialize, Serialize};
 
 pub type Bitboard = u128;
@@ -94,10 +93,6 @@ pub struct Board {
     pub occupied_cols: [u16; 9],  // 10 bits used
 
     pub zobrist_hash: u64,
-    pub red_material: i32,
-    pub black_material: i32,
-    pub red_pst: i32,
-    pub black_pst: i32,
     #[serde(skip)]
     pub nnue_acc: NnueAccumulator,
 }
@@ -216,7 +211,6 @@ impl Board {
             let keys = ZobristKeys::get();
             board.zobrist_hash ^= keys.side_key;
         }
-        board.calculate_initial_score();
         board.refresh_nnue();
 
         Ok((board, turn))
@@ -239,15 +233,10 @@ impl Board {
             occupied_rows: [0; 10],
             occupied_cols: [0; 9],
             zobrist_hash: 0,
-            red_material: 0,
-            black_material: 0,
-            red_pst: 0,
-            black_pst: 0,
             nnue_acc: NnueAccumulator::default(),
         };
         board.setup_initial_position();
         board.zobrist_hash = board.calculate_initial_hash();
-        board.calculate_initial_score();
         board.refresh_nnue();
         board
     }
@@ -356,10 +345,6 @@ impl Board {
         self.occupied_rows = [0; 10];
         self.occupied_cols = [0; 9];
         self.zobrist_hash = 0;
-        self.red_material = 0;
-        self.black_material = 0;
-        self.red_pst = 0;
-        self.black_pst = 0;
         self.refresh_nnue();
     }
 
@@ -444,31 +429,6 @@ impl Board {
         hash
     }
 
-    pub fn calculate_initial_score(&mut self) {
-        self.red_material = 0;
-        self.black_material = 0;
-        self.red_pst = 0;
-        self.black_pst = 0;
-
-        for r in 0..10 {
-            for c in 0..9 {
-                let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
-                if let Some(piece) = self.get_piece(pos) {
-                    let val = get_piece_value(piece.piece_type);
-                    let pst = get_pst_value(piece.piece_type, piece.color, r, c);
-
-                    if piece.color == Color::Red {
-                        self.red_material += val;
-                        self.red_pst += pst;
-                    } else {
-                        self.black_material += val;
-                        self.black_pst += pst;
-                    }
-                }
-            }
-        }
-    }
-
     pub fn apply_null_move(&mut self) {
         let keys = ZobristKeys::get();
         self.zobrist_hash ^= keys.side_key;
@@ -500,29 +460,11 @@ impl Board {
         self.raw_remove_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
 
-        let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
-        if piece.color == Color::Red {
-            self.red_pst -= pst_from;
-        } else {
-            self.black_pst -= pst_from;
-        }
-
         // 2. Remove captured piece (if any)
         let captured = self.get_piece(to);
         if let Some(cap) = captured {
             self.raw_remove_piece(to, cap.piece_type, cap.color);
             self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
-
-            let cap_val = get_piece_value(cap.piece_type);
-            let cap_pst = get_pst_value(cap.piece_type, cap.color, to_row, to_col);
-
-            if cap.color == Color::Red {
-                self.red_material -= cap_val;
-                self.red_pst -= cap_pst;
-            } else {
-                self.black_material -= cap_val;
-                self.black_pst -= cap_pst;
-            }
         }
 
         // 3. Place piece at destination
@@ -567,13 +509,6 @@ impl Board {
                 .add_piece(piece, to.index(), k_red, k_black, weights);
         }
 
-        let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
-        if piece.color == Color::Red {
-            self.red_pst += pst_to;
-        } else {
-            self.black_pst += pst_to;
-        }
-
         // 5. Switch turn hash
         self.zobrist_hash ^= keys.side_key;
     }
@@ -609,39 +544,14 @@ impl Board {
         self.raw_remove_piece(to, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, to_row, to_col);
 
-        let pst_to = get_pst_value(piece.piece_type, piece.color, to_row, to_col);
-        if piece.color == Color::Red {
-            self.red_pst -= pst_to;
-        } else {
-            self.black_pst -= pst_to;
-        }
-
         // Place back at source
         self.raw_add_piece(from, piece.piece_type, piece.color);
         self.zobrist_hash ^= keys.get_piece_key(piece.piece_type, piece.color, from_row, from_col);
-
-        let pst_from = get_pst_value(piece.piece_type, piece.color, from_row, from_col);
-        if piece.color == Color::Red {
-            self.red_pst += pst_from;
-        } else {
-            self.black_pst += pst_from;
-        }
 
         // 2. Restore captured piece (if any)
         if let Some(cap) = captured {
             self.raw_add_piece(to, cap.piece_type, cap.color);
             self.zobrist_hash ^= keys.get_piece_key(cap.piece_type, cap.color, to_row, to_col);
-
-            let cap_val = get_piece_value(cap.piece_type);
-            let cap_pst = get_pst_value(cap.piece_type, cap.color, to_row, to_col);
-
-            if cap.color == Color::Red {
-                self.red_material += cap_val;
-                self.red_pst += cap_pst;
-            } else {
-                self.black_material += cap_val;
-                self.black_pst += cap_pst;
-            }
         }
 
         // 1. Update NNUE accumulator accurately
