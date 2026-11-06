@@ -52,9 +52,14 @@ export class WasmGameState {
      */
     get_history(): any;
     /**
-     * Return legal destination coordinates `[[to_row, to_col], ...]` for a piece
+     * Return legal destination coordinates `[[to_row, to_col], ...]` for a piece,
+     * strictly excluding illegal moves and three-fold repetition traps.
      */
     get_legal_moves(row: number, col: number): any;
+    /**
+     * Return all strictly legal moves as flat array `[from_row, from_col, to_row, to_col, ...]`.
+     */
+    get_strictly_legal_moves_flat(): any;
     /**
      * Number of moves played so far
      */
@@ -63,6 +68,10 @@ export class WasmGameState {
      * Whether current side to move is in check
      */
     is_in_check(): boolean;
+    /**
+     * Check if a move is strictly legal, including three-fold repetition check.
+     */
+    is_move_legal(from_row: number, from_col: number, to_row: number, to_col: number): boolean;
     /**
      * Execute a move from (from_row, from_col) to (to_row, to_col)
      */
@@ -109,8 +118,10 @@ export interface InitOutput {
     readonly wasmgamestate_get_book_move: (a: number) => [number, number, number];
     readonly wasmgamestate_get_history: (a: number) => [number, number, number];
     readonly wasmgamestate_get_legal_moves: (a: number, b: number, c: number) => [number, number, number];
+    readonly wasmgamestate_get_strictly_legal_moves_flat: (a: number) => [number, number, number];
     readonly wasmgamestate_history_len: (a: number) => number;
     readonly wasmgamestate_is_in_check: (a: number) => number;
+    readonly wasmgamestate_is_move_legal: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly wasmgamestate_make_move: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly wasmgamestate_new: () => number;
     readonly wasmgamestate_status: (a: number) => [number, number, number];

@@ -6,7 +6,6 @@ use crate::engine::search::AlphaBetaEngine;
 use crate::engine::{SearchLimit, Searcher};
 use crate::logic::board::{Board, BoardCoordinate, Color, Piece, PieceType};
 use crate::logic::game::{GameState, GameStatus, MoveRecord};
-use crate::logic::generator::MoveGenerator;
 use crate::logic::opening;
 use crate::logic::rules::is_in_check;
 use serde::{Deserialize, Serialize};
@@ -201,15 +200,15 @@ impl WasmGameState {
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
     }
 
-    /// Return legal destination coordinates `[[to_row, to_col], ...]` for a piece
+    /// Return legal destination coordinates `[[to_row, to_col], ...]` for a piece,
+    /// strictly excluding illegal moves and three-fold repetition traps.
     pub fn get_legal_moves(&self, row: usize, col: usize) -> Result<JsValue, JsValue> {
         let Some(coord) = BoardCoordinate::new(row, col) else {
             return serde_wasm_bindgen::to_value(&Vec::<[usize; 2]>::new())
                 .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")));
         };
 
-        let generator = MoveGenerator::new();
-        let legal_moves = generator.generate_moves(&self.inner.board, self.inner.turn);
+        let legal_moves = self.inner.get_strictly_legal_moves();
         let valid_dests: Vec<[usize; 2]> = legal_moves
             .into_iter()
             .filter(|m| {
@@ -219,6 +218,37 @@ impl WasmGameState {
             .collect();
 
         serde_wasm_bindgen::to_value(&valid_dests)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
+    }
+
+    /// Check if a move is strictly legal, including three-fold repetition check.
+    pub fn is_move_legal(
+        &self,
+        from_row: usize,
+        from_col: usize,
+        to_row: usize,
+        to_col: usize,
+    ) -> bool {
+        let (Some(from), Some(to)) = (
+            BoardCoordinate::new(from_row, from_col),
+            BoardCoordinate::new(to_row, to_col),
+        ) else {
+            return false;
+        };
+        self.inner.is_move_legal(from, to)
+    }
+
+    /// Return all strictly legal moves as flat array `[from_row, from_col, to_row, to_col, ...]`.
+    pub fn get_strictly_legal_moves_flat(&self) -> Result<JsValue, JsValue> {
+        let moves = self.inner.get_strictly_legal_moves();
+        let mut flat = Vec::with_capacity(moves.len() * 4);
+        for m in moves {
+            flat.push(usize::from(m.from_row));
+            flat.push(usize::from(m.from_col));
+            flat.push(usize::from(m.to_row));
+            flat.push(usize::from(m.to_col));
+        }
+        serde_wasm_bindgen::to_value(&flat)
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
     }
 

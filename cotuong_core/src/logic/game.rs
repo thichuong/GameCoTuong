@@ -323,6 +323,87 @@ impl GameState {
             false
         }
     }
+
+    /// Check whether a move from `from` to `to` is completely legal,
+    /// enforcing all piece movement rules, king-safety, and three-fold repetition.
+    #[must_use]
+    pub fn is_move_legal(&self, from: BoardCoordinate, to: BoardCoordinate) -> bool {
+        let piece = match self.board.get_piece(from) {
+            Some(p) => p,
+            None => return false,
+        };
+        if piece.color != self.turn {
+            return false;
+        }
+
+        if is_valid_move(&self.board, from, to, self.turn).is_err() {
+            return false;
+        }
+
+        let mut next_board = self.board.clone();
+        let mv = Move {
+            from_row: from.row as u8,
+            from_col: from.col as u8,
+            to_row: to.row as u8,
+            to_col: to.col as u8,
+            score: 0,
+        };
+        next_board.apply_move(&mv, self.turn);
+
+        // 3-Fold Repetition Check
+        let initial_hash = Board::new().zobrist_hash;
+        let mut count = self
+            .history
+            .iter()
+            .filter(|r| r.hash == next_board.zobrist_hash)
+            .count();
+
+        if next_board.zobrist_hash == initial_hash {
+            count += 1;
+        }
+
+        if count >= 2 && self.has_more_than_one_valid_move(self.turn) {
+            return false;
+        }
+
+        true
+    }
+
+    /// Return all strictly legal moves for the current player,
+    /// excluding moves that would cause a forbidden three-fold repetition.
+    #[must_use]
+    pub fn get_strictly_legal_moves(&self) -> Vec<Move> {
+        let generator = MoveGenerator::new();
+        let candidate_moves = generator.generate_moves(&self.board, self.turn);
+
+        if candidate_moves.len() <= 1 {
+            return candidate_moves;
+        }
+
+        let initial_hash = Board::new().zobrist_hash;
+        let mut strictly_legal = Vec::with_capacity(candidate_moves.len());
+
+        for mv in candidate_moves {
+            let mut next_board = self.board.clone();
+            next_board.apply_move(&mv, self.turn);
+
+            let mut count = self
+                .history
+                .iter()
+                .filter(|r| r.hash == next_board.zobrist_hash)
+                .count();
+
+            if next_board.zobrist_hash == initial_hash {
+                count += 1;
+            }
+
+            if count < 2 || !self.has_more_than_one_valid_move(self.turn) {
+                strictly_legal.push(mv);
+            }
+        }
+
+        strictly_legal
+    }
 }
 
 #[cfg(test)]

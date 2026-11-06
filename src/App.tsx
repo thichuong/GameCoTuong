@@ -8,6 +8,7 @@ import type {
   GameMode,
   GameStatus,
   HistoryRecord,
+  MoveCoords,
   PieceColor,
   SearchStats,
   Square,
@@ -191,6 +192,36 @@ export const App: React.FC = () => {
           }
         } catch (err) {
           console.error('Error applying AI move:', err);
+          // Safety recovery: if AI chosen move failed, attempt to play the first strictly legal move
+          try {
+            const fallbackMoves = state.get_strictly_legal_moves_flat() as number[];
+            if (fallbackMoves.length >= 4) {
+              const fbMove: MoveCoords = {
+                from_row: fallbackMoves[0]!,
+                from_col: fallbackMoves[1]!,
+                to_row: fallbackMoves[2]!,
+                to_col: fallbackMoves[3]!,
+              };
+              const fbRes = state.make_move(
+                fbMove.from_row,
+                fbMove.from_col,
+                fbMove.to_row,
+                fbMove.to_col
+              ) as { success: boolean; captured: unknown; in_check: boolean };
+              state.annotate_last_move('🤖 Nước đi hợp lệ thay thế');
+              setLastMove(fbMove);
+              syncGameState();
+              if (fbRes.in_check) {
+                soundManager.play('check');
+              } else if (fbRes.captured) {
+                soundManager.play('capture');
+              } else {
+                soundManager.play('move');
+              }
+            }
+          } catch (recoveryErr) {
+            console.error('Error applying recovery AI move:', recoveryErr);
+          }
         } finally {
           setIsThinking(false);
           worker.removeEventListener('message', handleWorkerMessage);

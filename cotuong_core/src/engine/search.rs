@@ -1194,6 +1194,33 @@ impl Searcher for AlphaBetaEngine {
             }
         }
 
+        let strictly_legal_moves = game_state.get_strictly_legal_moves();
+        if let Some(mv) = best_move {
+            let (Some(from), Some(to)) = (
+                BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize),
+                BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize),
+            ) else {
+                best_move = strictly_legal_moves.first().copied();
+                return best_move.map(|valid_mv| {
+                    (
+                        valid_mv,
+                        SearchStats {
+                            depth: final_depth,
+                            nodes: self.nodes_searched,
+                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            time_ms: (Self::now() - self.start_time) as u64,
+                        },
+                    )
+                });
+            };
+
+            if !game_state.is_move_legal(from, to) {
+                best_move = strictly_legal_moves.first().copied();
+            }
+        } else {
+            best_move = strictly_legal_moves.first().copied();
+        }
+
         let elapsed = Self::now() - self.start_time;
         best_move.map(|mv| {
             (

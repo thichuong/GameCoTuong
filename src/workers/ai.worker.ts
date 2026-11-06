@@ -1,25 +1,19 @@
-import init, { WasmGameState } from '../wasm/cotuong_core.js';
+import init, { WasmEngine, WasmGameState } from '../wasm/cotuong_core.js';
 import wasmUrl from '../wasm/cotuong_core_bg.wasm?url';
-import { PikafishNnueEngine } from '../engine/pikafishNnue.js';
-import type { EngineConfig, SearchResult } from '../types/game.js';
+import type { SearchResult } from '../types/game.js';
 
 let isWasmInitialized = false;
-let engine: PikafishNnueEngine | null = null;
+let engine: WasmEngine | null = null;
 let currentConfigJson: string | null = null;
 
-async function ensureInitialized(
-  configJson?: string
-): Promise<PikafishNnueEngine> {
+async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
   if (!isWasmInitialized) {
     await init(wasmUrl);
     isWasmInitialized = true;
   }
 
   if (!engine || (configJson && configJson !== currentConfigJson)) {
-    const parsedConfig = configJson
-      ? (JSON.parse(configJson) as EngineConfig)
-      : null;
-    engine = new PikafishNnueEngine(parsedConfig);
+    engine = new WasmEngine(configJson ?? null);
     currentConfigJson = configJson ?? null;
   }
 
@@ -36,15 +30,41 @@ self.onmessage = async (e: MessageEvent) => {
         ? WasmGameState.from_json(stateJson)
         : WasmGameState.from_fen(fen);
 
-      const boardFen = state.to_fen();
-      state.free();
+      // Execute search natively via Rust WebAssembly engine
+      // Full game state history is preserved for three-fold repetition detection
+      const rawResult = eng.search(
+        state,
+        BigInt(timeLimitMs),
+        maxDepth ?? undefined
+      ) as SearchResult | null;
 
-      // Execute Pure NNUE v3 + Pikafish/Fairy-Stockfish search
-      const result: SearchResult | null = eng.searchFen(
-        boardFen,
-        Number(timeLimitMs),
-        maxDepth ?? null
-      );
+      const result = rawResult ?? null;
+
+      // Safety guard: ensure returned move is strictly legal and never causes ThreeFoldRepetition
+      if (
+        result &&
+        !state.is_move_legal(
+          result.move.from_row,
+          result.move.from_col,
+          result.move.to_row,
+          result.move.to_col
+        )
+      ) {
+        console.warn(
+          'AI search candidate move was not strictly legal, picking fallback legal move.'
+        );
+        const flatMoves = state.get_strictly_legal_moves_flat() as number[];
+        if (flatMoves.length >= 4) {
+          result.move = {
+            from_row: flatMoves[0]!,
+            from_col: flatMoves[1]!,
+            to_row: flatMoves[2]!,
+            to_col: flatMoves[3]!,
+          };
+        }
+      }
+
+      state.free();
 
       if (result) {
         self.postMessage({ type: 'SEARCH_SUCCESS', result });
@@ -57,5 +77,3 @@ self.onmessage = async (e: MessageEvent) => {
     }
   }
 };
-
-

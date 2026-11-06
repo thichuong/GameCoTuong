@@ -150,13 +150,25 @@ export class WasmGameState {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * Return legal destination coordinates `[[to_row, to_col], ...]` for a piece
+     * Return legal destination coordinates `[[to_row, to_col], ...]` for a piece,
+     * strictly excluding illegal moves and three-fold repetition traps.
      * @param {number} row
      * @param {number} col
      * @returns {any}
      */
     get_legal_moves(row, col) {
         const ret = wasm.wasmgamestate_get_legal_moves(this.__wbg_ptr, row, col);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Return all strictly legal moves as flat array `[from_row, from_col, to_row, to_col, ...]`.
+     * @returns {any}
+     */
+    get_strictly_legal_moves_flat() {
+        const ret = wasm.wasmgamestate_get_strictly_legal_moves_flat(this.__wbg_ptr);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -176,6 +188,18 @@ export class WasmGameState {
      */
     is_in_check() {
         const ret = wasm.wasmgamestate_is_in_check(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Check if a move is strictly legal, including three-fold repetition check.
+     * @param {number} from_row
+     * @param {number} from_col
+     * @param {number} to_row
+     * @param {number} to_col
+     * @returns {boolean}
+     */
+    is_move_legal(from_row, from_col, to_row, to_col) {
+        const ret = wasm.wasmgamestate_is_move_legal(this.__wbg_ptr, from_row, from_col, to_row, to_col);
         return ret !== 0;
     }
     /**
