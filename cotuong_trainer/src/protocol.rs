@@ -173,6 +173,27 @@ impl ExternalEngineClient {
         }
     }
 
+    /// Notifies the engine of a new game and resets transposition tables / buffer queues.
+    pub fn new_game(&mut self) -> Result<(), String> {
+        while self.rx.try_recv().is_ok() {}
+
+        match self.protocol {
+            EngineProtocol::Uci => {
+                let _ = self.send_line("ucinewgame");
+                let _ = self.send_line("isready");
+                let _ = self.wait_for_token("readyok", Duration::from_secs(3));
+            }
+            EngineProtocol::Ucci => {
+                let _ = self.send_line("newgame");
+                let _ = self.send_line("isready");
+                let _ = self.wait_for_token("readyok", Duration::from_secs(3));
+            }
+        }
+
+        while self.rx.try_recv().is_ok() {}
+        Ok(())
+    }
+
     /// Evaluates a board position specified by FEN up to the given search depth.
     /// Returns (centipawn_score_from_side_to_move_perspective, Option<best_move>).
     pub fn evaluate_fen(
@@ -181,6 +202,9 @@ impl ExternalEngineClient {
         depth: u8,
         timeout: Duration,
     ) -> Result<(f32, Option<Move>), String> {
+        // Drain any stale messages left in the channel before sending the new command
+        while self.rx.try_recv().is_ok() {}
+
         self.send_line(&format!("position fen {fen}"))?;
         self.send_line(&format!("go depth {depth}"))?;
 
@@ -192,6 +216,23 @@ impl ExternalEngineClient {
             let elapsed = start.elapsed();
             if elapsed > timeout {
                 let _ = self.send_line("stop");
+                let stop_start = Instant::now();
+                while stop_start.elapsed() < Duration::from_millis(1000) {
+                    if let Ok(line) = self.rx.recv_timeout(Duration::from_millis(100)) {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("bestmove") {
+                            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                            if parts.len() >= 2 && parts[1] != "nobestmove" && parts[1] != "(none)"
+                            {
+                                best_move = Move::from_uci(parts[1]).ok();
+                            }
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                while self.rx.try_recv().is_ok() {}
                 break;
             }
             let remaining = timeout - elapsed;
@@ -235,6 +276,144 @@ impl ExternalEngineClient {
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     let _ = self.send_line("stop");
+                    let stop_start = Instant::now();
+                    while stop_start.elapsed() < Duration::from_millis(1000) {
+                        if let Ok(line) = self.rx.recv_timeout(Duration::from_millis(100)) {
+                            let trimmed = line.trim();
+                            if trimmed.starts_with("bestmove") {
+                                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                                if parts.len() >= 2
+                                    && parts[1] != "nobestmove"
+                                    && parts[1] != "(none)"
+                                {
+                                    best_move = Move::from_uci(parts[1]).ok();
+                                }
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    while self.rx.try_recv().is_ok() {}
+                    break;
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    break;
+                }
+            }
+        }
+
+        Ok((last_eval_cp, best_move))
+    }
+
+    /// Evaluates a board position reached via move history from startpos.
+    /// Providing full move history ensures engines track repetition rules accurately.
+    pub fn evaluate_game_position(
+        &mut self,
+        moves: &[Move],
+        depth: u8,
+        timeout: Duration,
+    ) -> Result<(f32, Option<Move>), String> {
+        // Drain any stale messages left in the channel before sending the new command
+        while self.rx.try_recv().is_ok() {}
+
+        let cmd = if moves.is_empty() {
+            "position startpos".to_string()
+        } else {
+            let moves_str: String = moves.iter().map(Move::to_uci).collect::<Vec<_>>().join(" ");
+            format!("position startpos moves {moves_str}")
+        };
+
+        self.send_line(&cmd)?;
+        self.send_line(&format!("go depth {depth}"))?;
+
+        let start = Instant::now();
+        let mut last_eval_cp = 0.0f32;
+        let mut best_move: Option<Move> = None;
+
+        loop {
+            let elapsed = start.elapsed();
+            if elapsed > timeout {
+                let _ = self.send_line("stop");
+                let stop_start = Instant::now();
+                while stop_start.elapsed() < Duration::from_millis(1000) {
+                    if let Ok(line) = self.rx.recv_timeout(Duration::from_millis(100)) {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("bestmove") {
+                            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                            if parts.len() >= 2 && parts[1] != "nobestmove" && parts[1] != "(none)"
+                            {
+                                best_move = Move::from_uci(parts[1]).ok();
+                            }
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                while self.rx.try_recv().is_ok() {}
+                break;
+            }
+            let remaining = timeout - elapsed;
+
+            match self.rx.recv_timeout(remaining) {
+                Ok(line) => {
+                    let trimmed = line.trim();
+
+                    if trimmed.starts_with("info") {
+                        if let Some(mate_idx) = trimmed.find("score mate ") {
+                            let sub = &trimmed[mate_idx + 11..];
+                            if let Some(val_str) = sub.split_whitespace().next() {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    last_eval_cp = if val > 0.0 { 10000.0 } else { -10000.0 };
+                                }
+                            }
+                        } else if let Some(cp_idx) = trimmed.find("score cp ") {
+                            let sub = &trimmed[cp_idx + 9..];
+                            if let Some(val_str) = sub.split_whitespace().next() {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    last_eval_cp = val;
+                                }
+                            }
+                        } else if let Some(score_idx) = trimmed.find("score ") {
+                            let sub = &trimmed[score_idx + 6..];
+                            if let Some(val_str) = sub.split_whitespace().next() {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    last_eval_cp = val;
+                                }
+                            }
+                        }
+                    }
+
+                    if trimmed.starts_with("bestmove") {
+                        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                        if parts.len() >= 2 && parts[1] != "nobestmove" && parts[1] != "(none)" {
+                            best_move = Move::from_uci(parts[1]).ok();
+                        }
+                        break;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    let _ = self.send_line("stop");
+                    let stop_start = Instant::now();
+                    while stop_start.elapsed() < Duration::from_millis(1000) {
+                        if let Ok(line) = self.rx.recv_timeout(Duration::from_millis(100)) {
+                            let trimmed = line.trim();
+                            if trimmed.starts_with("bestmove") {
+                                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                                if parts.len() >= 2
+                                    && parts[1] != "nobestmove"
+                                    && parts[1] != "(none)"
+                                {
+                                    best_move = Move::from_uci(parts[1]).ok();
+                                }
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    while self.rx.try_recv().is_ok() {}
                     break;
                 }
                 Err(RecvTimeoutError::Disconnected) => {

@@ -1730,6 +1730,14 @@ fn run_engine_versus_datagen(
         vec!["h2f2", "b9c7", "b0c2", "h9g7"], // Cross Palace Cannon
         vec!["h2e2", "b9c7", "b0c2", "h9i7"], // Single Horse
         vec!["c3c4", "c6c5", "h2e2", "b9c7"], // Pawn 3.1 Opening
+        vec!["h2d2", "b9c7", "b0c2", "h9g7"], // Left Palace Cannon
+        vec!["b2b6", "b9c7", "b0c2", "h9g7"], // Chariot Patrol Rank
+        vec!["h2g2", "h7e7", "b0c2", "b9c7"], // Over-river Cannon
+        vec!["g3g4", "b9c7", "b0c2", "h9g7"], // Pawn 7.1 vs Screen Horse
+        vec!["b0a2", "b9c7", "a0b0", "h9g7"], // Edge Horse Opening
+        vec!["h2e2", "b7b0", "b0c2", "b9c7"], // Central Cannon vs Corner Cannon
+        vec!["c3c4", "b9c7", "h2e2", "h7e7"], // Pawn 3.1 vs Same Direction Cannon
+        vec!["g0e2", "h7e7", "b0c2", "b9c7"], // Elephant Opening vs Central Cannon
     ];
 
     let mut rng = rand::thread_rng();
@@ -1740,6 +1748,10 @@ fn run_engine_versus_datagen(
         let mut game_state = cotuong_core::logic::game::GameState::new();
         let mut move_history: Vec<Move> = Vec::new();
         let mut position_records: Vec<(String, f32)> = Vec::new();
+
+        // Reset transposition table and buffers before each new match
+        let _ = client1.new_game();
+        let _ = client2.new_game();
 
         println!(
             "\n▶ [Ván {}/{}] {} (ĐỎ) vs {} (ĐEN)",
@@ -1798,7 +1810,11 @@ fn run_engine_versus_datagen(
             };
 
             let fen = game_state.board.to_fen_string(turn);
-            let eval_result = active_client.evaluate_fen(&fen, depth, Duration::from_millis(15000));
+            let eval_result = active_client.evaluate_game_position(
+                &move_history,
+                depth,
+                Duration::from_millis(15000),
+            );
 
             match eval_result {
                 Ok((eval_cp, Some(best_mv))) => {
@@ -1813,11 +1829,47 @@ fn run_engine_versus_datagen(
                         BoardCoordinate::new(best_mv.from_row as usize, best_mv.from_col as usize),
                         BoardCoordinate::new(best_mv.to_row as usize, best_mv.to_col as usize),
                     ) {
-                        if game_state.make_move(from, to).is_err() {
-                            break;
+                        match game_state.make_move(from, to) {
+                            Ok(()) => {
+                                move_history.push(best_mv);
+                                ply_count += 1;
+                            }
+                            Err(cotuong_core::logic::rules::MoveError::ThreeFoldRepetition) => {
+                                println!(
+                                    "   ⚖️ Thế cờ lặp lại 3 lần (Three-Fold Repetition) -> Hòa ván đấu tại nước {}.",
+                                    ply_count
+                                );
+                                game_state.status =
+                                    cotuong_core::logic::game::GameStatus::Stalemate;
+                                break;
+                            }
+                            Err(err) => {
+                                let legals = game_state.get_strictly_legal_moves();
+                                if let Some(&alt_mv) = legals.first() {
+                                    if let (Some(from_alt), Some(to_alt)) = (
+                                        BoardCoordinate::new(
+                                            alt_mv.from_row as usize,
+                                            alt_mv.from_col as usize,
+                                        ),
+                                        BoardCoordinate::new(
+                                            alt_mv.to_row as usize,
+                                            alt_mv.to_col as usize,
+                                        ),
+                                    ) {
+                                        if game_state.make_move(from_alt, to_alt).is_ok() {
+                                            move_history.push(alt_mv);
+                                            ply_count += 1;
+                                            continue;
+                                        }
+                                    }
+                                }
+                                println!(
+                                    "   ⚠️ Nước đi {} bị từ chối ({err:?}), dừng ván cờ.",
+                                    best_mv.to_uci()
+                                );
+                                break;
+                            }
                         }
-                        move_history.push(best_mv);
-                        ply_count += 1;
                     } else {
                         break;
                     }
