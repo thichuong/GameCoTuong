@@ -1798,7 +1798,7 @@ fn run_engine_versus_datagen(
             };
 
             let fen = game_state.board.to_fen_string(turn);
-            let eval_result = active_client.evaluate_fen(&fen, depth, Duration::from_millis(3000));
+            let eval_result = active_client.evaluate_fen(&fen, depth, Duration::from_millis(15000));
 
             match eval_result {
                 Ok((eval_cp, Some(best_mv))) => {
@@ -1807,9 +1807,7 @@ fn run_engine_versus_datagen(
                     } else {
                         eval_cp
                     };
-                    if ply_count.is_multiple_of(2) {
-                        position_records.push((fen, eval_red));
-                    }
+                    position_records.push((fen, eval_red));
 
                     if let (Some(from), Some(to)) = (
                         BoardCoordinate::new(best_mv.from_row as usize, best_mv.from_col as usize),
@@ -2109,7 +2107,7 @@ fn main() {
         .position(|a| a == "--engine-depth" || a == "--depth")
         .and_then(|idx| args.get(idx + 1))
         .and_then(|s| s.parse::<u8>().ok())
-        .unwrap_or(10);
+        .unwrap_or(15);
 
     let epochs = args
         .iter()
