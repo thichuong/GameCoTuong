@@ -64,6 +64,14 @@ export const App: React.FC = () => {
   const [blackConfig, setBlackConfig] = useState<EngineConfig>(DEFAULT_ENGINE_CONFIG);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
+  const redConfigRef = useRef(redConfig);
+  redConfigRef.current = redConfig;
+  const blackConfigRef = useRef(blackConfig);
+  blackConfigRef.current = blackConfig;
+  const difficultyRef = useRef(difficulty);
+  difficultyRef.current = difficulty;
+  const isAiProcessingRef = useRef(false);
+
   // AI Web Worker
   const workerRef = useRef<Worker | null>(null);
 
@@ -106,6 +114,7 @@ export const App: React.FC = () => {
 
   // AI Search Trigger
   const triggerAiMove = useCallback(() => {
+    if (isAiProcessingRef.current) return;
     const state = gameStateRef.current;
     const worker = workerRef.current;
     if (!state || !worker) return;
@@ -113,6 +122,7 @@ export const App: React.FC = () => {
     const currentStatus = state.status() as GameStatus;
     if (currentStatus.status !== 'Playing') return;
 
+    isAiProcessingRef.current = true;
     setIsThinking(true);
 
     // 1. Check opening book move first
@@ -150,6 +160,7 @@ export const App: React.FC = () => {
         } catch (e) {
           console.error('Failed to apply book move:', e);
         } finally {
+          isAiProcessingRef.current = false;
           setIsThinking(false);
         }
       }, 250);
@@ -158,8 +169,8 @@ export const App: React.FC = () => {
 
     // 2. Offload to Web Worker
     const currentTurn = state.turn() as PieceColor;
-    const config = currentTurn === 'red' ? redConfig : blackConfig;
-    const timeLimitMs = DIFFICULTY_TIMES[difficulty];
+    const config = currentTurn === 'red' ? redConfigRef.current : blackConfigRef.current;
+    const timeLimitMs = DIFFICULTY_TIMES[difficultyRef.current];
 
     const handleWorkerMessage = (e: MessageEvent) => {
       if (e.data.type === 'SEARCH_SUCCESS') {
@@ -223,10 +234,12 @@ export const App: React.FC = () => {
             console.error('Error applying recovery AI move:', recoveryErr);
           }
         } finally {
+          isAiProcessingRef.current = false;
           setIsThinking(false);
           worker.removeEventListener('message', handleWorkerMessage);
         }
       } else if (e.data.type === 'NO_MOVE' || e.data.type === 'SEARCH_ERROR') {
+        isAiProcessingRef.current = false;
         setIsThinking(false);
         worker.removeEventListener('message', handleWorkerMessage);
       }
@@ -240,7 +253,7 @@ export const App: React.FC = () => {
       timeLimitMs,
       configJson: JSON.stringify(config),
     });
-  }, [difficulty, redConfig, blackConfig, syncGameState]);
+  }, [syncGameState]);
 
   // Handle Game Loop (Check whether AI should play)
   useEffect(() => {

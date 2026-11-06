@@ -59,19 +59,15 @@ export interface SearchResult {
 }
 
 export interface EngineConfig {
-  pruning_method: number;
-  pruning_multiplier: number;
   mate_score: number;
-  eval_mode: number;
+  tt_size_mb: number;
   nnue_weight: number;
   [key: string]: number;
 }
 
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
-  pruning_method: 1,
-  pruning_multiplier: 1.0,
-  mate_score: 30000,
-  eval_mode: 2,
+  mate_score: 300000,
+  tt_size_mb: 256,
   nnue_weight: 100,
 };
 
