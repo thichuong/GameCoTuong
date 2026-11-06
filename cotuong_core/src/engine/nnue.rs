@@ -3,6 +3,8 @@ use std::sync::OnceLock;
 
 pub const NNUE_MAGIC: &[u8; 4] = b"XNNU";
 pub const NNUE_VERSION: u32 = 3;
+pub const INT8_NNUE_MAGIC: &[u8; 8] = b"COTINT8_";
+pub const FLOAT_NNUE_MAGIC: &[u8; 8] = b"COTF32_1";
 
 pub const L1_INPUT_SIZE: usize = 10_530; // 9 king palace squares * 13 piece types * 90 board squares
 pub const L1_OUTPUT_SIZE: usize = 192;
@@ -22,6 +24,28 @@ pub const FILE_SIZE: usize = 4
     + (L3_INPUT_SIZE * L3_OUTPUT_SIZE)
     + (L3_OUTPUT_SIZE * 4)
     + (L3_OUTPUT_SIZE * 2)
+    + 4;
+
+pub const INT8_FILE_SIZE: usize = 8
+    + (L1_INPUT_SIZE * L1_OUTPUT_SIZE)
+    + (L1_OUTPUT_SIZE * 2)
+    + (L1_INPUT_SIZE * PSQT_BUCKETS)
+    + (L2_INPUT_SIZE * L2_OUTPUT_SIZE)
+    + (L2_OUTPUT_SIZE * 4)
+    + (L3_INPUT_SIZE * L3_OUTPUT_SIZE)
+    + (L3_OUTPUT_SIZE * 4)
+    + (L3_OUTPUT_SIZE * 2)
+    + 4;
+
+pub const FLOAT_FILE_SIZE: usize = 8
+    + (L1_INPUT_SIZE * L1_OUTPUT_SIZE * 4)
+    + (L1_OUTPUT_SIZE * 4)
+    + (L1_INPUT_SIZE * PSQT_BUCKETS * 4)
+    + (L2_INPUT_SIZE * L2_OUTPUT_SIZE * 4)
+    + (L2_OUTPUT_SIZE * 4)
+    + (L3_INPUT_SIZE * L3_OUTPUT_SIZE * 4)
+    + (L3_OUTPUT_SIZE * 4)
+    + (L3_OUTPUT_SIZE * 4)
     + 4;
 
 const EMBEDDED_WEIGHTS: &[u8] = include_bytes!("../../assets/default.nnue");
@@ -164,6 +188,382 @@ impl NnueWeights {
     }
 
     pub fn load_from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.starts_with(INT8_NNUE_MAGIC) {
+            Self::load_int8(bytes)
+        } else if bytes.starts_with(FLOAT_NNUE_MAGIC) {
+            Self::load_float(bytes)
+        } else {
+            Self::load_int16(bytes)
+        }
+    }
+
+    fn load_int8(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() != INT8_FILE_SIZE {
+            return Err(format!(
+                "Invalid Int8 NNUE file size: expected {}, got {}",
+                INT8_FILE_SIZE,
+                bytes.len()
+            ));
+        }
+
+        let mut offset = 8;
+        let mut w1_vec = vec![[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE];
+        for row in &mut w1_vec {
+            for val in row {
+                let b = bytes
+                    .get(offset)
+                    .ok_or_else(|| "Unexpected EOF while reading Int8 W1".to_string())?;
+                #[allow(clippy::cast_possible_wrap)]
+                {
+                    *val = (*b as i8 as i16) * 2;
+                }
+                offset += 1;
+            }
+        }
+        let w1: Box<[[i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]> = w1_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W1 array".to_string())?;
+
+        let mut b1 = [0i16; L1_OUTPUT_SIZE];
+        for val in &mut b1 {
+            let slice = bytes
+                .get(offset..offset + 2)
+                .ok_or_else(|| "Unexpected EOF while reading B1".to_string())?;
+            *val = i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
+            offset += 2;
+        }
+
+        let mut w_psqt_vec = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE];
+        for row in &mut w_psqt_vec {
+            for val in row {
+                let b = bytes
+                    .get(offset)
+                    .ok_or_else(|| "Unexpected EOF while reading Int8 W_PSQT".to_string())?;
+                #[allow(clippy::cast_possible_wrap)]
+                {
+                    *val = *b as i8 as i16;
+                }
+                offset += 1;
+            }
+        }
+        let w_psqt: Box<[[i16; PSQT_BUCKETS]; L1_INPUT_SIZE]> = w_psqt_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W_PSQT array".to_string())?;
+
+        let mut w2_vec = vec![[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
+        for row in &mut w2_vec {
+            for val in row {
+                let b = bytes
+                    .get(offset)
+                    .ok_or_else(|| "Unexpected EOF while reading W2".to_string())?;
+                #[allow(clippy::cast_possible_wrap)]
+                {
+                    *val = *b as i8;
+                }
+                offset += 1;
+            }
+        }
+        let w2: Box<[[i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]> =
+            w2_vec
+                .into_boxed_slice()
+                .try_into()
+                .map_err(|_| "Failed to allocate boxed W2 array".to_string())?;
+        let w2_col = Self::transpose_w2(&w2);
+
+        let mut b2 = [0i32; L2_OUTPUT_SIZE];
+        for val in &mut b2 {
+            let slice = bytes
+                .get(offset..offset + 4)
+                .ok_or_else(|| "Unexpected EOF while reading B2".to_string())?;
+            *val = i32::from_le_bytes([
+                *slice.first().unwrap_or(&0),
+                *slice.get(1).unwrap_or(&0),
+                *slice.get(2).unwrap_or(&0),
+                *slice.get(3).unwrap_or(&0),
+            ]);
+            offset += 4;
+        }
+
+        let mut w3_vec = vec![[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
+        for row in &mut w3_vec {
+            for val in row {
+                let b = bytes
+                    .get(offset)
+                    .ok_or_else(|| "Unexpected EOF while reading W3".to_string())?;
+                #[allow(clippy::cast_possible_wrap)]
+                {
+                    *val = *b as i8;
+                }
+                offset += 1;
+            }
+        }
+        let w3: Box<[[i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]> =
+            w3_vec
+                .into_boxed_slice()
+                .try_into()
+                .map_err(|_| "Failed to allocate boxed W3 array".to_string())?;
+        let w3_col = Self::transpose_w3(&w3);
+
+        let mut b3 = [0i32; L3_OUTPUT_SIZE];
+        for val in &mut b3 {
+            let slice = bytes
+                .get(offset..offset + 4)
+                .ok_or_else(|| "Unexpected EOF while reading B3".to_string())?;
+            *val = i32::from_le_bytes([
+                *slice.first().unwrap_or(&0),
+                *slice.get(1).unwrap_or(&0),
+                *slice.get(2).unwrap_or(&0),
+                *slice.get(3).unwrap_or(&0),
+            ]);
+            offset += 4;
+        }
+
+        let mut w4 = [0i16; L3_OUTPUT_SIZE];
+        for val in &mut w4 {
+            let slice = bytes
+                .get(offset..offset + 2)
+                .ok_or_else(|| "Unexpected EOF while reading W4".to_string())?;
+            *val = i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
+            offset += 2;
+        }
+
+        let slice = bytes
+            .get(offset..offset + 4)
+            .ok_or_else(|| "Unexpected EOF while reading B4".to_string())?;
+        let b4 = i32::from_le_bytes([
+            *slice.first().unwrap_or(&0),
+            *slice.get(1).unwrap_or(&0),
+            *slice.get(2).unwrap_or(&0),
+            *slice.get(3).unwrap_or(&0),
+        ]);
+
+        Ok(Self {
+            w1,
+            b1,
+            w_psqt,
+            w2,
+            w2_col,
+            b2,
+            w3,
+            w3_col,
+            b3,
+            w4,
+            b4,
+        })
+    }
+
+    fn load_float(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() != FLOAT_FILE_SIZE {
+            return Err(format!(
+                "Invalid Float NNUE file size: expected {}, got {}",
+                FLOAT_FILE_SIZE,
+                bytes.len()
+            ));
+        }
+
+        let mut offset = 8;
+        let mut w1_vec = vec![[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE];
+        for row in &mut w1_vec {
+            for val in row {
+                let slice = bytes
+                    .get(offset..offset + 4)
+                    .ok_or_else(|| "Unexpected EOF while reading Float W1".to_string())?;
+                let f = f32::from_le_bytes([
+                    *slice.first().unwrap_or(&0),
+                    *slice.get(1).unwrap_or(&0),
+                    *slice.get(2).unwrap_or(&0),
+                    *slice.get(3).unwrap_or(&0),
+                ]);
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *val = (f * 256.0).clamp(-32767.0, 32767.0) as i16;
+                }
+                offset += 4;
+            }
+        }
+        let w1: Box<[[i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]> = w1_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W1 array".to_string())?;
+
+        let mut b1 = [0i16; L1_OUTPUT_SIZE];
+        for val in &mut b1 {
+            let slice = bytes
+                .get(offset..offset + 4)
+                .ok_or_else(|| "Unexpected EOF while reading Float B1".to_string())?;
+            let f = f32::from_le_bytes([
+                *slice.first().unwrap_or(&0),
+                *slice.get(1).unwrap_or(&0),
+                *slice.get(2).unwrap_or(&0),
+                *slice.get(3).unwrap_or(&0),
+            ]);
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                *val = (f * 256.0).clamp(-32767.0, 32767.0) as i16;
+            }
+            offset += 4;
+        }
+
+        let mut w_psqt_vec = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE];
+        for row in &mut w_psqt_vec {
+            for val in row {
+                let slice = bytes
+                    .get(offset..offset + 4)
+                    .ok_or_else(|| "Unexpected EOF while reading Float W_PSQT".to_string())?;
+                let f = f32::from_le_bytes([
+                    *slice.first().unwrap_or(&0),
+                    *slice.get(1).unwrap_or(&0),
+                    *slice.get(2).unwrap_or(&0),
+                    *slice.get(3).unwrap_or(&0),
+                ]);
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *val = (f * 16.0).clamp(-32767.0, 32767.0) as i16;
+                }
+                offset += 4;
+            }
+        }
+        let w_psqt: Box<[[i16; PSQT_BUCKETS]; L1_INPUT_SIZE]> = w_psqt_vec
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| "Failed to allocate boxed W_PSQT array".to_string())?;
+
+        let mut w2_vec = vec![[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
+        for row in &mut w2_vec {
+            for val in row {
+                let slice = bytes
+                    .get(offset..offset + 4)
+                    .ok_or_else(|| "Unexpected EOF while reading Float W2".to_string())?;
+                let f = f32::from_le_bytes([
+                    *slice.first().unwrap_or(&0),
+                    *slice.get(1).unwrap_or(&0),
+                    *slice.get(2).unwrap_or(&0),
+                    *slice.get(3).unwrap_or(&0),
+                ]);
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *val = (f * 64.0).clamp(-127.0, 127.0) as i8;
+                }
+                offset += 4;
+            }
+        }
+        let w2: Box<[[i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]> =
+            w2_vec
+                .into_boxed_slice()
+                .try_into()
+                .map_err(|_| "Failed to allocate boxed W2 array".to_string())?;
+        let w2_col = Self::transpose_w2(&w2);
+
+        let mut b2 = [0i32; L2_OUTPUT_SIZE];
+        for val in &mut b2 {
+            let slice = bytes
+                .get(offset..offset + 4)
+                .ok_or_else(|| "Unexpected EOF while reading Float B2".to_string())?;
+            let f = f32::from_le_bytes([
+                *slice.first().unwrap_or(&0),
+                *slice.get(1).unwrap_or(&0),
+                *slice.get(2).unwrap_or(&0),
+                *slice.get(3).unwrap_or(&0),
+            ]);
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                *val = (f * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+            }
+            offset += 4;
+        }
+
+        let mut w3_vec = vec![[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
+        for row in &mut w3_vec {
+            for val in row {
+                let slice = bytes
+                    .get(offset..offset + 4)
+                    .ok_or_else(|| "Unexpected EOF while reading Float W3".to_string())?;
+                let f = f32::from_le_bytes([
+                    *slice.first().unwrap_or(&0),
+                    *slice.get(1).unwrap_or(&0),
+                    *slice.get(2).unwrap_or(&0),
+                    *slice.get(3).unwrap_or(&0),
+                ]);
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *val = (f * 64.0).clamp(-127.0, 127.0) as i8;
+                }
+                offset += 4;
+            }
+        }
+        let w3: Box<[[i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]> =
+            w3_vec
+                .into_boxed_slice()
+                .try_into()
+                .map_err(|_| "Failed to allocate boxed W3 array".to_string())?;
+        let w3_col = Self::transpose_w3(&w3);
+
+        let mut b3 = [0i32; L3_OUTPUT_SIZE];
+        for val in &mut b3 {
+            let slice = bytes
+                .get(offset..offset + 4)
+                .ok_or_else(|| "Unexpected EOF while reading Float B3".to_string())?;
+            let f = f32::from_le_bytes([
+                *slice.first().unwrap_or(&0),
+                *slice.get(1).unwrap_or(&0),
+                *slice.get(2).unwrap_or(&0),
+                *slice.get(3).unwrap_or(&0),
+            ]);
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                *val = (f * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+            }
+            offset += 4;
+        }
+
+        let mut w4 = [0i16; L3_OUTPUT_SIZE];
+        for val in &mut w4 {
+            let slice = bytes
+                .get(offset..offset + 4)
+                .ok_or_else(|| "Unexpected EOF while reading Float W4".to_string())?;
+            let f = f32::from_le_bytes([
+                *slice.first().unwrap_or(&0),
+                *slice.get(1).unwrap_or(&0),
+                *slice.get(2).unwrap_or(&0),
+                *slice.get(3).unwrap_or(&0),
+            ]);
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                *val = (f * 16.0).clamp(-32767.0, 32767.0) as i16;
+            }
+            offset += 4;
+        }
+
+        let slice = bytes
+            .get(offset..offset + 4)
+            .ok_or_else(|| "Unexpected EOF while reading Float B4".to_string())?;
+        let f_b4 = f32::from_le_bytes([
+            *slice.first().unwrap_or(&0),
+            *slice.get(1).unwrap_or(&0),
+            *slice.get(2).unwrap_or(&0),
+            *slice.get(3).unwrap_or(&0),
+        ]);
+        #[allow(clippy::cast_possible_truncation)]
+        let b4 = (f_b4 * 16.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+
+        Ok(Self {
+            w1,
+            b1,
+            w_psqt,
+            w2,
+            w2_col,
+            b2,
+            w3,
+            w3_col,
+            b3,
+            w4,
+            b4,
+        })
+    }
+
+    fn load_int16(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != FILE_SIZE {
             return Err(format!(
                 "Invalid NNUE file size: expected {}, got {}",
@@ -745,6 +1145,34 @@ mod tests {
         assert_eq!(weights.b2.len(), L2_OUTPUT_SIZE);
         assert_eq!(weights.b3.len(), L3_OUTPUT_SIZE);
         assert_eq!(weights.w4.len(), L3_OUTPUT_SIZE);
+    }
+
+    #[test]
+    fn test_load_all_three_model_variants() {
+        if let Ok(bytes) = std::fs::read("assets/model_f32.bin") {
+            let loaded_f32 = NnueWeights::load_from_bytes(&bytes);
+            assert!(
+                loaded_f32.is_ok(),
+                "Failed to load model_f32.bin: {:?}",
+                loaded_f32.err()
+            );
+        }
+        if let Ok(bytes) = std::fs::read("assets/model_int16.nnue") {
+            let loaded_i16 = NnueWeights::load_from_bytes(&bytes);
+            assert!(
+                loaded_i16.is_ok(),
+                "Failed to load model_int16.nnue: {:?}",
+                loaded_i16.err()
+            );
+        }
+        if let Ok(bytes) = std::fs::read("assets/model_int8.nnue") {
+            let loaded_i8 = NnueWeights::load_from_bytes(&bytes);
+            assert!(
+                loaded_i8.is_ok(),
+                "Failed to load model_int8.nnue: {:?}",
+                loaded_i8.err()
+            );
+        }
     }
 
     #[test]

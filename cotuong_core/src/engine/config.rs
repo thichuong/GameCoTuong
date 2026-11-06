@@ -11,6 +11,9 @@ pub struct EngineConfig {
 
     // NNUE weight / scale percentage (50..=150)
     pub nnue_weight: i32,
+
+    // Model type / precision architecture: "f32" (unquantized), "int16" (default), "int8" (compact)
+    pub model_type: String,
 }
 
 impl Default for EngineConfig {
@@ -19,6 +22,7 @@ impl Default for EngineConfig {
             mate_score: 300_000,
             tt_size_mb: 256,
             nnue_weight: 100,
+            model_type: "int16".to_string(),
         }
     }
 }

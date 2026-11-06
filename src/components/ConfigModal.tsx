@@ -12,8 +12,11 @@ import {
   Flame,
   BrainCircuit,
   FileCode2,
+  Layers,
+  Sparkles,
+  Zap,
 } from 'lucide-react';
-import type { EngineConfig } from '../types/game.js';
+import type { EngineConfig, ModelType } from '../types/game.js';
 import { DEFAULT_ENGINE_CONFIG } from '../types/game.js';
 import { exportConfigJson } from '../utils/export.js';
 
@@ -90,7 +93,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
   const currentConfig = activeTab === 'red' ? redConfig : blackConfig;
   const setConfig = activeTab === 'red' ? setRedConfig : setBlackConfig;
 
-  const updateParam = (key: keyof EngineConfig, value: number) => {
+  const updateParam = <K extends keyof EngineConfig>(
+    key: K,
+    value: EngineConfig[K],
+  ) => {
     setConfig((prev) => ({
       ...prev,
       [key]: value,
@@ -130,6 +136,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         }
 
         // Validate and extract only engine config fields recognized by cotuong_core
+        const validModelTypes: ModelType[] = ['f32', 'int16', 'int8'];
+        const parsedModelType =
+          typeof rawParsed.model_type === 'string' &&
+          validModelTypes.includes(rawParsed.model_type as ModelType)
+            ? (rawParsed.model_type as ModelType)
+            : currentConfig.model_type || 'int16';
+
         const cleaned: EngineConfig = {
           mate_score:
             typeof rawParsed.mate_score === 'number'
@@ -143,6 +156,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             typeof rawParsed.nnue_weight === 'number'
               ? Math.max(50, Math.min(150, Math.round(rawParsed.nnue_weight)))
               : currentConfig.nnue_weight,
+          model_type: parsedModelType,
         };
 
         setConfig(cleaned);
@@ -166,6 +180,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     mate_score: currentConfig.mate_score,
     tt_size_mb: currentConfig.tt_size_mb,
     nnue_weight: currentConfig.nnue_weight,
+    model_type: currentConfig.model_type || 'int16',
   };
 
   return (
@@ -521,6 +536,126 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                     {w}% {w === 100 && '(Chuẩn)'}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* 4. Model Architecture & Quantization Precision */}
+            <div className="bg-[#221D19] p-4 rounded-xl border border-stone-800/90 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-stone-200">
+                        Định Dạng Trọng Số & Lượng Tử Hóa (3 Loại Model)
+                      </span>
+                      <code className="text-[11px] font-mono text-cyan-300 bg-stone-900 px-1.5 py-0.5 rounded border border-stone-700/60">
+                        model_type: "f32" | "int16" | "int8"
+                      </code>
+                    </div>
+                    <p className="text-[11px] text-stone-400 mt-0.5">
+                      Lựa chọn biến thể trọng số trong <span className="font-mono text-stone-300">cotuong_core/assets</span> để điều phối giữa độ tinh tế và hiệu năng bộ nhớ.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                {/* 1. Không lượng tử (Float32) */}
+                <button
+                  type="button"
+                  onClick={() => updateParam('model_type', 'f32')}
+                  className={`text-left p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                    currentConfig.model_type === 'f32'
+                      ? 'bg-cyan-950/40 border-cyan-500/80 shadow-md ring-1 ring-cyan-500/50'
+                      : 'bg-[#1A1613] border-stone-800 hover:border-stone-700 hover:bg-[#201B17]'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        <span className="text-xs font-bold text-stone-200">
+                          Không Lượng Tử
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                        Float 32
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-400 mt-1.5 leading-relaxed">
+                      Độ chính xác cao tuyệt đối, giữ nguyên vẹn tín hiệu huấn luyện.
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-stone-800/80 flex items-center justify-between text-[10px] font-mono text-stone-400">
+                    <span>model_f32.bin</span>
+                    <span className="text-cyan-300 font-bold">~8.1 MB</span>
+                  </div>
+                </button>
+
+                {/* 2. Lượng tử hóa Int16 (Chuẩn) */}
+                <button
+                  type="button"
+                  onClick={() => updateParam('model_type', 'int16')}
+                  className={`text-left p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                    (currentConfig.model_type === 'int16' || !currentConfig.model_type)
+                      ? 'bg-amber-950/40 border-amber-500/80 shadow-md ring-1 ring-amber-500/50'
+                      : 'bg-[#1A1613] border-stone-800 hover:border-stone-700 hover:bg-[#201B17]'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Cpu className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-xs font-bold text-stone-200">
+                          Int16 (Chuẩn SIMD)
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500 text-stone-950 font-bold">
+                        Mặc định
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-400 mt-1.5 leading-relaxed">
+                      Tối ưu chuẩn SIMD 16-bit, cân bằng hoàn hảo giữa tốc độ và độ chuẩn xác.
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-stone-800/80 flex items-center justify-between text-[10px] font-mono text-stone-400">
+                    <span>model_int16.nnue</span>
+                    <span className="text-amber-300 font-bold">~4.0 MB</span>
+                  </div>
+                </button>
+
+                {/* 3. Lượng tử hóa Int8 (Siêu Nén) */}
+                <button
+                  type="button"
+                  onClick={() => updateParam('model_type', 'int8')}
+                  className={`text-left p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                    currentConfig.model_type === 'int8'
+                      ? 'bg-emerald-950/40 border-emerald-500/80 shadow-md ring-1 ring-emerald-500/50'
+                      : 'bg-[#1A1613] border-stone-800 hover:border-stone-700 hover:bg-[#201B17]'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-xs font-bold text-stone-200">
+                          Int8 (Siêu Nén)
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                        Tiết kiệm RAM
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-400 mt-1.5 leading-relaxed">
+                      Nén cực đại, giảm 50% kích thước, tối ưu hóa cho thiết bị di động.
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-stone-800/80 flex items-center justify-between text-[10px] font-mono text-stone-400">
+                    <span>model_int8.nnue</span>
+                    <span className="text-emerald-300 font-bold">~2.0 MB</span>
+                  </div>
+                </button>
               </div>
             </div>
           </section>

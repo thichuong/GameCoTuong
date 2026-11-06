@@ -1,7 +1,8 @@
 use cotuong_core::engine::config::EngineConfig;
 use cotuong_core::engine::nnue::{
-    NnueWeights, FILE_SIZE, L1_INPUT_SIZE, L1_OUTPUT_SIZE, L2_INPUT_SIZE, L2_OUTPUT_SIZE,
-    L3_INPUT_SIZE, L3_OUTPUT_SIZE, NNUE_MAGIC, NNUE_VERSION, PSQT_BUCKETS,
+    NnueWeights, FILE_SIZE, INT8_FILE_SIZE, INT8_NNUE_MAGIC, L1_INPUT_SIZE, L1_OUTPUT_SIZE,
+    L2_INPUT_SIZE, L2_OUTPUT_SIZE, L3_INPUT_SIZE, L3_OUTPUT_SIZE, NNUE_MAGIC, NNUE_VERSION,
+    PSQT_BUCKETS,
 };
 use cotuong_core::engine::search::AlphaBetaEngine;
 use cotuong_core::engine::{Move, SearchLimit, Searcher};
@@ -721,6 +722,90 @@ impl FloatNnue {
         }
 
         // W2: scale f32 to i8
+        for row in self.w2.iter() {
+            for &val in row.iter() {
+                #[allow(clippy::cast_possible_truncation)]
+                let q = (val * 64.0).clamp(-127.0, 127.0) as i8;
+                #[allow(clippy::cast_sign_loss)]
+                bytes.push(q as u8);
+            }
+        }
+
+        // B2: scale f32 to i32
+        for &val in self.b2.iter() {
+            #[allow(clippy::cast_possible_truncation)]
+            let q = (val * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+            bytes.extend_from_slice(&q.to_le_bytes());
+        }
+
+        // W3: scale f32 to i8
+        for row in self.w3.iter() {
+            for &val in row.iter() {
+                #[allow(clippy::cast_possible_truncation)]
+                let q = (val * 64.0).clamp(-127.0, 127.0) as i8;
+                #[allow(clippy::cast_sign_loss)]
+                bytes.push(q as u8);
+            }
+        }
+
+        // B3: scale f32 to i32
+        for &val in self.b3.iter() {
+            #[allow(clippy::cast_possible_truncation)]
+            let q = (val * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+            bytes.extend_from_slice(&q.to_le_bytes());
+        }
+
+        // W4: scale f32 to i16
+        for &val in self.w4.iter() {
+            #[allow(clippy::cast_possible_truncation)]
+            let q = (val * 16.0).clamp(-32767.0, 32767.0) as i16;
+            bytes.extend_from_slice(&q.to_le_bytes());
+        }
+
+        // B4: scale f32 to i32
+        #[allow(clippy::cast_possible_truncation)]
+        let q_b4 = (self.b4 * 16.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+        bytes.extend_from_slice(&q_b4.to_le_bytes());
+
+        file.write_all(&bytes)?;
+        Ok(())
+    }
+
+    /// Exports model weights into an optimized compact Int8 format.
+    pub fn export_int8(&self, path: &str) -> std::io::Result<()> {
+        let mut file = File::create(path)?;
+        let mut bytes = Vec::with_capacity(INT8_FILE_SIZE);
+
+        bytes.extend_from_slice(INT8_NNUE_MAGIC);
+
+        // W1: scale f32 to i8 (x128.0)
+        for row in self.w1.iter() {
+            for &val in row.iter() {
+                #[allow(clippy::cast_possible_truncation)]
+                let q = (val * 128.0).clamp(-127.0, 127.0) as i8;
+                #[allow(clippy::cast_sign_loss)]
+                bytes.push(q as u8);
+            }
+        }
+
+        // B1: scale f32 to i16 (x256.0)
+        for &val in self.b1.iter() {
+            #[allow(clippy::cast_possible_truncation)]
+            let q = (val * 256.0).clamp(-32767.0, 32767.0) as i16;
+            bytes.extend_from_slice(&q.to_le_bytes());
+        }
+
+        // W_PSQT: scale f32 to i8 (x16.0)
+        for row in self.w_psqt.iter() {
+            for &val in row.iter() {
+                #[allow(clippy::cast_possible_truncation)]
+                let q = (val * 16.0).clamp(-127.0, 127.0) as i8;
+                #[allow(clippy::cast_sign_loss)]
+                bytes.push(q as u8);
+            }
+        }
+
+        // W2: scale f32 to i8 (x64.0)
         for row in self.w2.iter() {
             for &val in row.iter() {
                 #[allow(clippy::cast_possible_truncation)]
@@ -2081,11 +2166,13 @@ fn run_selfplay_training(
     println!("================================================================================");
 }
 
-/// Quantizes a full-precision float model into an int16/int8 NNUE binary file.
+/// Quantizes a full-precision float model into 3 asset variants:
+/// 1. Unquantized Float32 (`model_f32.bin`)
+/// 2. Quantized Int16 (`model_int16.nnue` and `default.nnue`)
+/// 3. Quantized Int8 (`model_int8.nnue`)
 fn run_quantize_mode(input_path: &str, output_path: &str) {
-    println!("\n▶ Bắt đầu lượng tử hóa mô hình Float NNUE (f32) -> Quantized NNUE (i16/i8)...");
+    println!("\n▶ Bắt đầu xuất 3 loại mô hình (Float32, Int16, Int8)...");
     println!("  • File nguồn (Float NNUE)    : {input_path}");
-    println!("  • File đích (Quantized NNUE) : {output_path}");
 
     let model = match FloatNnue::load_from_file(input_path) {
         Ok(m) => m,
@@ -2095,20 +2182,64 @@ fn run_quantize_mode(input_path: &str, output_path: &str) {
         }
     };
 
-    if let Some(parent) = std::path::Path::new(output_path).parent() {
-        let _ = std::fs::create_dir_all(parent);
+    let target_dir = std::path::Path::new(output_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("cotuong_core/assets"));
+    let _ = std::fs::create_dir_all(target_dir);
+
+    let f32_path = target_dir.join("model_f32.bin");
+    let i16_path = target_dir.join("model_int16.nnue");
+    let i8_path = target_dir.join("model_int8.nnue");
+
+    let f32_str = f32_path
+        .to_str()
+        .unwrap_or("cotuong_core/assets/model_f32.bin");
+    let i16_str = i16_path
+        .to_str()
+        .unwrap_or("cotuong_core/assets/model_int16.nnue");
+    let i8_str = i8_path
+        .to_str()
+        .unwrap_or("cotuong_core/assets/model_int8.nnue");
+
+    // 1. Không lượng tử (Float 32-bit)
+    if let Err(e) = model.save_float(f32_str) {
+        eprintln!("❌ Lỗi xuất mô hình không lượng tử Float32: {e}");
+    } else {
+        #[allow(clippy::cast_precision_loss)]
+        let size_mb = std::fs::metadata(&f32_path)
+            .map(|m| m.len() as f64 / 1_048_576.0)
+            .unwrap_or(0.0);
+        println!("  1️⃣  Không lượng tử (Float 32-bit) : {f32_str} ({size_mb:.2} MB)");
     }
 
-    if let Err(e) = model.export_quantized(output_path) {
-        eprintln!("❌ Lỗi xuất trọng số lượng tử hóa: {e}");
+    // 2. Lượng tử hóa Int16 (SIMD chuẩn)
+    if let Err(e) = model.export_quantized(i16_str) {
+        eprintln!("❌ Lỗi xuất mô hình lượng tử hóa Int16: {e}");
     } else {
-        println!("✅ Đã lượng tử hóa và lưu thành công sang: {output_path}");
-        if let Ok(metadata) = std::fs::metadata(output_path) {
-            #[allow(clippy::cast_precision_loss)]
-            let size_kb = metadata.len() as f64 / 1024.0;
-            println!("  • Dung lượng file lượng tử hóa : {size_kb:.1} KB");
-        }
+        #[allow(clippy::cast_precision_loss)]
+        let size_mb = std::fs::metadata(&i16_path)
+            .map(|m| m.len() as f64 / 1_048_576.0)
+            .unwrap_or(0.0);
+        println!("  2️⃣  Lượng tử hóa Int16 (SIMD)      : {i16_str} ({size_mb:.2} MB)");
+        // Đồng thời cập nhật output_path mặc định (default.nnue) để WASM engine nhúng sẵn
+        let _ = model.export_quantized(output_path);
     }
+
+    // 3. Lượng tử hóa Int8 (Siêu nén)
+    if let Err(e) = model.export_int8(i8_str) {
+        eprintln!("❌ Lỗi xuất mô hình lượng tử hóa Int8: {e}");
+    } else {
+        #[allow(clippy::cast_precision_loss)]
+        let size_mb = std::fs::metadata(&i8_path)
+            .map(|m| m.len() as f64 / 1_048_576.0)
+            .unwrap_or(0.0);
+        println!("  3️⃣  Lượng tử hóa Int8 (Siêu Nén)    : {i8_str} ({size_mb:.2} MB)");
+    }
+
+    println!(
+        "✅ Đã xuất thành công trọn bộ 3 loại mô hình vào: {}",
+        target_dir.display()
+    );
 }
 
 fn main() {
