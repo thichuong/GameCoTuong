@@ -4,90 +4,45 @@ use crate::logic::board::{Board, BoardCoordinate, Color, PieceType};
 use crate::logic::eval_constants::get_piece_value;
 use crate::logic::lookup::AttackTables;
 
-pub const SCORE_HASH_MOVE: i32 = 200_000;
-pub const SCORE_CAPTURE_BASE: i32 = 200_000;
-pub const SCORE_KILLER_MOVE: i32 = 120_000;
-pub const SCORE_HISTORY_MAX: i32 = 80_000;
+pub const SCORE_HASH_MOVE: i32 = 1_000_000;
+pub const SCORE_CAPTURE_BASE: i32 = 100_000;
 
 pub struct MoveGenContext<'a> {
     pub board: &'a Board,
     pub turn: Color,
     pub moves: &'a mut MoveList,
     pub best_move: Option<Move>,
-    pub killers: &'a [Option<Move>; 2],
-    pub countermove: Option<Move>,
     pub only_captures: bool,
     pub enemy_bb: u128,
 }
 
-pub struct EngineMoveGen<'a> {
-    history_table: &'a [[i32; 90]],
-}
+#[derive(Default, Clone, Copy)]
+pub struct EngineMoveGen;
 
-impl<'a> EngineMoveGen<'a> {
+impl EngineMoveGen {
     #[must_use]
-    pub const fn new(history_table: &'a [[i32; 90]]) -> Self {
-        Self { history_table }
+    pub const fn new() -> Self {
+        Self
     }
 
-    pub fn generate_moves(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        best_move: Option<Move>,
-        killer_moves: &[[Option<Move>; 2]; 64],
-        depth: u8,
-    ) -> MoveList {
-        self.generate_moves_internal(board, turn, best_move, killer_moves, None, depth, false)
+    #[inline]
+    pub fn generate_moves(&self, board: &Board, turn: Color, best_move: Option<Move>) -> MoveList {
+        self.generate_moves_internal(board, turn, best_move, false)
     }
 
-    pub fn generate_moves_with_counter(
-        &self,
-        board: &Board,
-        turn: Color,
-        best_move: Option<Move>,
-        killer_moves: &[[Option<Move>; 2]; 64],
-        countermove: Option<Move>,
-        depth: u8,
-    ) -> MoveList {
-        self.generate_moves_internal(
-            board,
-            turn,
-            best_move,
-            killer_moves,
-            countermove,
-            depth,
-            false,
-        )
+    #[inline]
+    pub fn generate_captures(&self, board: &Board, turn: Color) -> MoveList {
+        self.generate_moves_internal(board, turn, None, true)
     }
 
-    pub fn generate_captures(
-        &self,
-        board: &mut Board,
-        turn: Color,
-        killer_moves: &[[Option<Move>; 2]; 64],
-    ) -> MoveList {
-        self.generate_moves_internal(board, turn, None, killer_moves, None, 0, true)
-    }
-
-    #[allow(clippy::too_many_arguments)]
     fn generate_moves_internal(
         &self,
         board: &Board,
         turn: Color,
         best_move: Option<Move>,
-        killer_moves: &[[Option<Move>; 2]; 64],
-        countermove: Option<Move>,
-        depth: u8,
         only_captures: bool,
     ) -> MoveList {
         let mut moves = MoveList::new();
-        let killers = if (depth as usize) < killer_moves.len() {
-            killer_moves.get(depth as usize).unwrap_or(&[None; 2])
-        } else {
-            &[None; 2]
-        };
-
         let enemy_bb = board.get_color_bb(turn.opposite());
 
         let mut ctx = MoveGenContext {
@@ -95,8 +50,6 @@ impl<'a> EngineMoveGen<'a> {
             turn,
             moves: &mut moves,
             best_move,
-            killers,
-            countermove,
             only_captures,
             enemy_bb,
         };
@@ -174,37 +127,10 @@ impl<'a> EngineMoveGen<'a> {
                 .board
                 .get_piece(unsafe { BoardCoordinate::new_unchecked(r, c) })
                 .map_or(0, |p| get_piece_value(p.piece_type));
+            // MVV-LVA: Most Valuable Victim - Least Valuable Attacker
             SCORE_CAPTURE_BASE + victim_val * 10 - attacker_val
-        } else if ctx.killers.first().copied().flatten().is_some_and(|km| {
-            km.from_row as usize == r
-                && km.from_col as usize == c
-                && km.to_row as usize == tr
-                && km.to_col as usize == tc
-        }) {
-            SCORE_KILLER_MOVE
-        } else if ctx.killers.get(1).copied().flatten().is_some_and(|km| {
-            km.from_row as usize == r
-                && km.from_col as usize == c
-                && km.to_row as usize == tr
-                && km.to_col as usize == tc
-        }) {
-            SCORE_KILLER_MOVE.saturating_sub(10_000)
-        } else if ctx.countermove.is_some_and(|cm| {
-            cm.from_row as usize == r
-                && cm.from_col as usize == c
-                && cm.to_row as usize == tr
-                && cm.to_col as usize == tc
-        }) {
-            SCORE_KILLER_MOVE.saturating_sub(20_000)
         } else {
-            let from_idx = r * 9 + c;
-            let to_idx = tr * 9 + tc;
-            let hist = *self
-                .history_table
-                .get(from_idx)
-                .and_then(|row| row.get(to_idx))
-                .unwrap_or(&0);
-            hist.min(SCORE_HISTORY_MAX)
+            0
         };
 
         #[allow(clippy::cast_possible_truncation)]

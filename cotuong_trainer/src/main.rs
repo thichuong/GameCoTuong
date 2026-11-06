@@ -1103,7 +1103,6 @@ fn play_selfplay_game(
     let mut samples = Vec::new();
 
     let config = Arc::new(EngineConfig {
-        eval_mode: 1,
         nnue_weight: 75,
         ..Default::default()
     });
@@ -1185,14 +1184,8 @@ fn play_tournament_game(
 ) -> f32 {
     let mut game_state = cotuong_core::logic::game::GameState::new();
 
-    let config_cand = Arc::new(EngineConfig {
-        eval_mode: 2,
-        ..Default::default()
-    });
-    let config_champ = Arc::new(EngineConfig {
-        eval_mode: 2,
-        ..Default::default()
-    });
+    let config_cand = Arc::new(EngineConfig::default());
+    let config_champ = Arc::new(EngineConfig::default());
 
     let (mut red_engine, mut black_engine) = if candidate_is_red {
         (
@@ -1536,10 +1529,7 @@ fn run_sparring_match(
 
     let candidate_model = FloatNnue::load_or_init(resume_path, Some(output_path), false);
     let cand_weights = Arc::new(candidate_model.to_quantized_weights());
-    let config_cand = Arc::new(EngineConfig {
-        eval_mode: 2,
-        ..Default::default()
-    });
+    let config_cand = Arc::new(EngineConfig::default());
 
     let mut wins = 0;
     let mut draws = 0;
