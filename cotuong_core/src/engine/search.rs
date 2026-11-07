@@ -17,6 +17,8 @@ pub struct AlphaBetaEngine {
     evaluator: SimpleEvaluator,
     tt: TranspositionTable,
     history_stack: Vec<u64>,
+    game_history_len: usize,
+    in_check_stack: [bool; 96],
     killer_moves: [[Option<Move>; 2]; 64],
     history_table: Box<[[i32; 90]; 90]>,
     nodes_searched: u32,
@@ -38,7 +40,9 @@ impl AlphaBetaEngine {
         Self {
             evaluator: SimpleEvaluator::new(config.clone()),
             tt: TranspositionTable::new(tt_size),
-            history_stack: Vec::with_capacity(64),
+            history_stack: Vec::with_capacity(128),
+            game_history_len: 0,
+            in_check_stack: [false; 96],
             killer_moves: [[None; 2]; 64],
             history_table: Box::new([[0; 90]; 90]),
             nodes_searched: 0,
@@ -147,9 +151,77 @@ impl AlphaBetaEngine {
         false
     }
 
+    /// Checks for repetitions along the current search branch and within game history.
+    /// In Xiangqi:
+    /// - Perpetual Check (Trường Chiếu): If one player gives continuous checks in the repetition cycle,
+    ///   that checking player is penalized with an immediate LOSS (-MATE_SCORE + ply).
+    ///   If opponent gave continuous checks, it's evaluated as a WIN (+MATE_SCORE - ply).
+    /// - Standard cycle / draw repetition: Evaluated as 0 (Draw).
     #[inline]
-    fn is_repetition(&self, hash: u64) -> bool {
-        self.history_stack.iter().filter(|&&h| h == hash).count() >= 2
+    fn check_repetition(&self, hash: u64, ply: u8) -> Option<i32> {
+        if ply == 0 {
+            return None;
+        }
+
+        let curr_idx = self.history_stack.len();
+        let search_path_start = self.game_history_len;
+
+        // 1. Check repetition within current search path (from ply - 1 back to root ply 0)
+        if curr_idx > search_path_start {
+            for idx in (search_path_start..curr_idx).rev() {
+                if self.history_stack[idx] == hash {
+                    let ancestor_ply = (idx - search_path_start) as u8;
+
+                    let mut checker_is_current_player = true;
+                    let mut checker_is_opponent = true;
+
+                    // Moves made by current player resulted in states at ancestor_ply + 1, ancestor_ply + 3, ...
+                    let mut p = ancestor_ply + 1;
+                    while p <= ply {
+                        if !self.in_check_stack[(p as usize).min(95)] {
+                            checker_is_current_player = false;
+                        }
+                        p += 2;
+                    }
+
+                    // Moves made by opponent resulted in states at ancestor_ply + 2, ancestor_ply + 4, ...
+                    let mut q = ancestor_ply + 2;
+                    while q <= ply {
+                        if !self.in_check_stack[(q as usize).min(95)] {
+                            checker_is_opponent = false;
+                        }
+                        q += 2;
+                    }
+
+                    if checker_is_current_player {
+                        // Current player committed Perpetual Check -> ILLEGAL / LOSS in Xiangqi
+                        return Some(-self.calculate_mate_score(ply));
+                    }
+                    if checker_is_opponent {
+                        // Opponent committed Perpetual Check -> Current player WINS
+                        return Some(self.calculate_mate_score(ply));
+                    }
+
+                    // Normal repetition cycle -> Draw (0)
+                    return Some(0);
+                }
+            }
+        }
+
+        // 2. Check repetition against past game history
+        if search_path_start > 0 {
+            let hist_count = self.history_stack[..search_path_start]
+                .iter()
+                .filter(|&&h| h == hash)
+                .count();
+
+            // If already occurred 2 or more times in actual game history, 3rd time is draw
+            if hist_count >= 2 {
+                return Some(0);
+            }
+        }
+
+        None
     }
 
     #[inline]
@@ -256,6 +328,7 @@ impl AlphaBetaEngine {
         }
 
         let in_check = is_in_check(board, turn);
+        self.in_check_stack[(ply as usize).min(95)] = in_check;
         if !in_check {
             let stand_pat = self.eval_for_turn(board, turn);
             if stand_pat >= beta {
@@ -351,8 +424,8 @@ impl AlphaBetaEngine {
         }
 
         let hash = board.zobrist_hash;
-        if self.is_repetition(hash) {
-            return Some(0);
+        if let Some(rep_score) = self.check_repetition(hash, ply) {
+            return Some(rep_score);
         }
 
         self.history_stack.push(hash);
@@ -392,6 +465,7 @@ impl AlphaBetaEngine {
         }
 
         let in_check = is_in_check(board, turn);
+        self.in_check_stack[(ply as usize).min(95)] = in_check;
 
         // 3. Non-PV Pruning: Reverse Futility Pruning (RFP) & Null Move Pruning (NMP)
         if !is_pv && !in_check {
@@ -437,7 +511,6 @@ impl AlphaBetaEngine {
         let mut best_move_this_node = None;
         let mut tt_flag = TTFlag::UpperBound;
         let mut legal_moves_count = 0usize;
-        let mut has_repetition_move = false;
 
         let full_depth = depth.saturating_sub(1) + if in_check { 1 } else { 0 };
 
@@ -449,17 +522,6 @@ impl AlphaBetaEngine {
             // Fast legal validation: self-check and flying general
             if is_in_check(board, turn) || is_flying_general(board) {
                 board.undo_move_board_only(mv, piece, captured);
-                continue;
-            }
-
-            let rep_count = self
-                .history_stack
-                .iter()
-                .filter(|&&h| h == board.zobrist_hash)
-                .count();
-            if rep_count >= 2 {
-                board.undo_move_board_only(mv, piece, captured);
-                has_repetition_move = true;
                 continue;
             }
 
@@ -570,9 +632,6 @@ impl AlphaBetaEngine {
 
         if legal_moves_count == 0 {
             self.history_stack.pop();
-            if !in_check && has_repetition_move {
-                return Some(0);
-            }
             return Some(-self.calculate_mate_score(ply));
         }
 
@@ -614,12 +673,42 @@ impl Searcher for AlphaBetaEngine {
         let turn = game_state.turn;
 
         self.history_stack.clear();
-        let initial_hash = Board::new().zobrist_hash;
-        if !game_state.history.is_empty() {
-            self.history_stack.push(initial_hash);
-        }
+        self.history_stack.push(game_state.initial_hash);
         for record in &game_state.history {
             self.history_stack.push(record.hash);
+        }
+        self.game_history_len = self.history_stack.len();
+        self.in_check_stack = [false; 96];
+
+        // 1. Pre-filter strictly legal, non-repetition moves at Root ("bước đầu")
+        let mut root_moves = game_state.get_strictly_legal_moves();
+        if !excluded_moves.is_empty() {
+            root_moves.retain(|m| {
+                !excluded_moves.iter().any(|ex| {
+                    m.from_row == ex.from_row
+                        && m.from_col == ex.from_col
+                        && m.to_row == ex.to_row
+                        && m.to_col == ex.to_col
+                })
+            });
+        }
+
+        if root_moves.is_empty() {
+            return None;
+        }
+
+        if root_moves.len() == 1 {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let elapsed_ms = (Self::now() - self.start_time).max(0.0) as u64;
+            return Some((
+                root_moves[0],
+                SearchStats {
+                    depth: 1,
+                    nodes: 1,
+                    time_ms: elapsed_ms,
+                    score: 0,
+                },
+            ));
         }
 
         let mut best_move = None;
@@ -663,51 +752,15 @@ impl Searcher for AlphaBetaEngine {
                     Some(&*self.history_table),
                 );
 
-                if !excluded_moves.is_empty() {
-                    moves.retain(|m| {
-                        !excluded_moves.iter().any(|ex| {
-                            m.from_row == ex.from_row
-                                && m.from_col == ex.from_col
-                                && m.to_row == ex.to_row
-                                && m.to_col == ex.to_col
-                        })
-                    });
-                }
-
+                // Filter candidate moves to only strictly legal, non-repetition root moves
                 moves.retain(|mv| {
-                    if let Some((piece, captured, _, _)) = board.apply_move_board_only(mv) {
-                        let legal = !is_in_check(board, turn) && !is_flying_general(board);
-                        board.undo_move_board_only(mv, piece, captured);
-                        legal
-                    } else {
-                        false
-                    }
+                    root_moves.iter().any(|rm| {
+                        rm.from_row == mv.from_row
+                            && rm.from_col == mv.from_col
+                            && rm.to_row == mv.to_row
+                            && rm.to_col == mv.to_col
+                    })
                 });
-
-                if moves.len() > 1 {
-                    let non_repetition_moves: Vec<Move> = moves
-                        .iter()
-                        .filter(|mv| {
-                            if let Some((piece, captured, _, _)) = board.apply_move_board_only(mv) {
-                                let next_hash = board.zobrist_hash;
-                                let rep_count = self
-                                    .history_stack
-                                    .iter()
-                                    .filter(|&&h| h == next_hash)
-                                    .count();
-                                board.undo_move_board_only(mv, piece, captured);
-                                rep_count < 2
-                            } else {
-                                false
-                            }
-                        })
-                        .copied()
-                        .collect();
-
-                    if !non_repetition_moves.is_empty() {
-                        moves.retain(|mv| non_repetition_moves.contains(mv));
-                    }
-                }
 
                 if moves.is_empty() {
                     break;

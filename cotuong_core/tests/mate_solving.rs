@@ -7,12 +7,14 @@ use std::sync::Arc;
 
 fn game_from_fen(fen: &str) -> GameState {
     let (board, turn) = Board::from_fen(fen).expect("Invalid FEN");
+    let initial_hash = board.zobrist_hash;
     GameState {
         board,
         turn,
         status: GameStatus::Playing,
         last_move: None,
         history: Vec::new(),
+        initial_hash,
     }
 }
 

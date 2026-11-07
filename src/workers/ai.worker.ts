@@ -21,12 +21,14 @@ async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
 }
 
 self.onmessage = async (e: MessageEvent) => {
-  const { type, fen, timeLimitMs, maxDepth, configJson } = e.data;
+  const { type, stateJson, fen, timeLimitMs, maxDepth, configJson } = e.data;
 
   if (type === 'SEARCH') {
     try {
       const eng = await ensureInitialized(configJson);
-      const state = WasmGameState.from_fen(fen);
+      const state = stateJson
+        ? WasmGameState.from_json(stateJson)
+        : WasmGameState.from_fen(fen);
 
       // Execute search natively via Rust WebAssembly engine
       // Full game state history is preserved for three-fold repetition detection

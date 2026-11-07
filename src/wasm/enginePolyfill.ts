@@ -661,8 +661,35 @@ export class PolyfillGameState {
     return squares;
   }
 
+  count_move_back_and_forth(from_row: number, from_col: number, to_row: number, to_col: number): number {
+    const playerMoves = this.moveHistory.filter(r => r.piece.color === this.currentTurn);
+    let count = 0;
+    let i = playerMoves.length;
+    while (i >= 2) {
+      const last = playerMoves[i - 1]!;
+      const prev = playerMoves[i - 2]!;
+      if (
+        last.from_row === to_row &&
+        last.from_col === to_col &&
+        last.to_row === from_row &&
+        last.to_col === from_col &&
+        prev.from_row === from_row &&
+        prev.from_col === from_col &&
+        prev.to_row === to_row &&
+        prev.to_col === to_col
+      ) {
+        count++;
+        i -= 2;
+      } else {
+        break;
+      }
+    }
+    return count;
+  }
+
   get_legal_moves(row: number, col: number): [number, number][] {
-    return getLegalMovesForSquare(this.grid, this.currentTurn, row, col);
+    const moves = getLegalMovesForSquare(this.grid, this.currentTurn, row, col);
+    return moves.filter(([tr, tc]) => this.count_move_back_and_forth(row, col, tr, tc) < 3);
   }
 
   is_move_legal(from_row: number, from_col: number, to_row: number, to_col: number): boolean {

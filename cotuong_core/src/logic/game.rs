@@ -1,7 +1,7 @@
 use crate::engine::Move;
 use crate::logic::board::{Board, BoardCoordinate, Color};
 use crate::logic::generator::MoveGenerator;
-use crate::logic::rules::{is_valid_move, MoveError};
+use crate::logic::rules::{is_in_check, is_valid_move, MoveError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +21,12 @@ pub struct MoveRecord {
     pub color: Color,
     pub note: Option<String>, // For AI stats or other info
     pub hash: u64,
+    #[serde(default)]
+    pub is_check: bool,
+}
+
+fn default_initial_hash() -> u64 {
+    Board::new().zobrist_hash
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +36,8 @@ pub struct GameState {
     pub status: GameStatus,
     pub last_move: Option<(BoardCoordinate, BoardCoordinate)>,
     pub history: Vec<MoveRecord>,
+    #[serde(default = "default_initial_hash")]
+    pub initial_hash: u64,
 }
 
 impl Default for GameState {
@@ -41,12 +49,15 @@ impl Default for GameState {
 impl GameState {
     #[must_use]
     pub fn new() -> Self {
+        let board = Board::new();
+        let initial_hash = board.zobrist_hash;
         Self {
-            board: Board::new(),
+            board,
             turn: Color::Red,
             status: GameStatus::Playing,
             last_move: None,
             history: Vec::new(),
+            initial_hash,
         }
     }
 
@@ -81,28 +92,13 @@ impl GameState {
 
         next_board.apply_move(&mv, self.turn);
 
-        // 3-Fold Repetition Check
-        let initial_hash = Board::new().zobrist_hash;
-        let mut count = 0;
+        let is_check = is_in_check(&next_board, self.turn.opposite());
+        let back_forth_count = self.count_move_back_and_forth(from, to);
+        let rep_violation = self.is_repetition_violation(next_board.zobrist_hash, is_check)
+            || back_forth_count >= 3;
 
-        // Check history
-        count += self
-            .history
-            .iter()
-            .filter(|r| r.hash == next_board.zobrist_hash)
-            .count();
-
-        // Check initial state
-        if next_board.zobrist_hash == initial_hash {
-            count += 1;
-        }
-
-        // If we already have 2 occurrences (so this would be the 3rd), forbid it.
-        if count >= 2 {
-            // Exception: If this is the ONLY legal move, allow it.
-            if self.has_more_than_one_valid_move(self.turn) {
-                return Err(MoveError::ThreeFoldRepetition);
-            }
+        if rep_violation && self.has_more_than_one_valid_move(self.turn) {
+            return Err(MoveError::ThreeFoldRepetition);
         }
 
         self.board = next_board;
@@ -114,6 +110,7 @@ impl GameState {
             color: self.turn,
             note: None,
             hash: self.board.zobrist_hash,
+            is_check,
         });
 
         self.turn = self.turn.opposite();
@@ -324,8 +321,78 @@ impl GameState {
         }
     }
 
+    /// Count how many times the current player has consecutively repeated this exact move back and forth.
+    /// In Xiangqi: a player is allowed to repeat a move at most 3 times.
+    /// If it has already been executed 3 times, attempting it a 4th time is forbidden.
+    #[must_use]
+    pub fn count_move_back_and_forth(&self, from: BoardCoordinate, to: BoardCoordinate) -> usize {
+        let player_moves: Vec<&MoveRecord> = self
+            .history
+            .iter()
+            .filter(|r| r.color == self.turn)
+            .collect();
+
+        let mut count = 0;
+        let mut i = player_moves.len();
+
+        while i >= 2 {
+            let last = player_moves[i - 1];
+            let prev = player_moves[i - 2];
+            if last.from == to && last.to == from && prev.from == from && prev.to == to {
+                count += 1;
+                i -= 2;
+            } else {
+                break;
+            }
+        }
+
+        count
+    }
+
+    /// Check whether a resulting board hash and check status violates repetition rules.
+    /// In Xiangqi:
+    /// - Cho phép lặp lại tối đa 3 lần: thế cờ được xuất hiện tối đa 3 lần. Nếu đã xuất hiện 3 lần, lần thứ 4 bị cấm.
+    /// - Trường Chiếu (Perpetual Check): nếu liên tục chiếu lặp lại quá 3 lần, bị cấm.
+    #[must_use]
+    pub fn is_repetition_violation(&self, next_hash: u64, is_check: bool) -> bool {
+        let mut history_count = 0;
+        let mut history_matches = Vec::new();
+
+        for (idx, r) in self.history.iter().enumerate() {
+            if r.hash == next_hash {
+                history_count += 1;
+                history_matches.push(idx);
+            }
+        }
+
+        let initial_count = if next_hash == self.initial_hash { 1 } else { 0 };
+        let total_count = history_count + initial_count;
+
+        // 1. Cho lặp lại tối đa 3 lần: thế cờ được xuất hiện tối đa 3 lần, lần thứ 4 bị cấm
+        if total_count >= 4 {
+            return true;
+        }
+
+        // 2. Perpetual Check (Trường Chiếu): nếu liên tục chiếu lặp lại từ 3 lần trở lên
+        if is_check && total_count >= 3 && !history_matches.is_empty() {
+            if let Some(&last_idx) = history_matches.last() {
+                if let Some(slice) = self.history.get(last_idx..) {
+                    let all_checks = slice
+                        .iter()
+                        .filter(|r| r.color == self.turn)
+                        .all(|r| r.is_check);
+                    if all_checks {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// Check whether a move from `from` to `to` is completely legal,
-    /// enforcing all piece movement rules, king-safety, and three-fold repetition.
+    /// enforcing all piece movement rules, king-safety, and repetition rules.
     #[must_use]
     pub fn is_move_legal(&self, from: BoardCoordinate, to: BoardCoordinate) -> bool {
         let piece = match self.board.get_piece(from) {
@@ -350,19 +417,12 @@ impl GameState {
         };
         next_board.apply_move(&mv, self.turn);
 
-        // 3-Fold Repetition Check
-        let initial_hash = Board::new().zobrist_hash;
-        let mut count = self
-            .history
-            .iter()
-            .filter(|r| r.hash == next_board.zobrist_hash)
-            .count();
+        let is_check = is_in_check(&next_board, self.turn.opposite());
+        let back_forth_count = self.count_move_back_and_forth(from, to);
+        let rep_violation = self.is_repetition_violation(next_board.zobrist_hash, is_check)
+            || back_forth_count >= 3;
 
-        if next_board.zobrist_hash == initial_hash {
-            count += 1;
-        }
-
-        if count >= 2 && self.has_more_than_one_valid_move(self.turn) {
+        if rep_violation && self.has_more_than_one_valid_move(self.turn) {
             return false;
         }
 
@@ -370,7 +430,7 @@ impl GameState {
     }
 
     /// Return all strictly legal moves for the current player,
-    /// excluding moves that would cause a forbidden three-fold repetition.
+    /// excluding moves that would cause a forbidden repetition or perpetual check.
     #[must_use]
     pub fn get_strictly_legal_moves(&self) -> Vec<Move> {
         let generator = MoveGenerator::new();
@@ -380,24 +440,25 @@ impl GameState {
             return candidate_moves;
         }
 
-        let initial_hash = Board::new().zobrist_hash;
         let mut strictly_legal = Vec::with_capacity(candidate_moves.len());
 
         for mv in candidate_moves {
+            let from = BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize);
+            let to = BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize);
+
             let mut next_board = self.board.clone();
             next_board.apply_move(&mv, self.turn);
 
-            let mut count = self
-                .history
-                .iter()
-                .filter(|r| r.hash == next_board.zobrist_hash)
-                .count();
+            let is_check = is_in_check(&next_board, self.turn.opposite());
+            let back_forth_count = match (from, to) {
+                (Some(f), Some(t)) => self.count_move_back_and_forth(f, t),
+                _ => 0,
+            };
 
-            if next_board.zobrist_hash == initial_hash {
-                count += 1;
-            }
+            let rep_violation = self.is_repetition_violation(next_board.zobrist_hash, is_check)
+                || back_forth_count >= 3;
 
-            if count < 2 || !self.has_more_than_one_valid_move(self.turn) {
+            if !rep_violation || !self.has_more_than_one_valid_move(self.turn) {
                 strictly_legal.push(mv);
             }
         }

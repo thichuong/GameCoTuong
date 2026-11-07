@@ -130,6 +130,7 @@ impl WasmGameState {
         let (board, turn) =
             Board::from_fen(fen).map_err(|e| JsValue::from_str(&format!("Invalid FEN: {e}")))?;
         let mut state = GameState::new();
+        state.initial_hash = board.zobrist_hash;
         state.board = board;
         state.turn = turn;
         Ok(Self { inner: state })
