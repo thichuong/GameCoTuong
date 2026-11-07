@@ -284,3 +284,62 @@ fn test_perpetual_check_forbidden_for_player_and_engine() {
         "Engine search must not choose perpetual check move (filtered at root)"
     );
 }
+
+#[test]
+fn test_repetition_allowed_when_clean_moves_less_than_two() {
+    use crate::logic::board::{Board, Color, PieceType};
+
+    let mut board = Board::new();
+    board.clear();
+    let m = |r, c| BoardCoordinate::new(r, c).unwrap();
+
+    // Red: General at (0, 3), Soldier at (0, 4)
+    board.add_piece(m(0, 3), PieceType::General, Color::Red);
+    board.add_piece(m(0, 4), PieceType::Soldier, Color::Red);
+
+    // Black: General at (9, 5), Chariot at (8, 8)
+    board.add_piece(m(9, 5), PieceType::General, Color::Black);
+    board.add_piece(m(8, 8), PieceType::Chariot, Color::Black);
+
+    board.zobrist_hash = board.calculate_initial_hash();
+    let initial_hash = board.zobrist_hash;
+
+    let mut game = GameState {
+        board,
+        turn: Color::Red,
+        initial_hash,
+        ..Default::default()
+    };
+
+    // Red candidate moves initially:
+    // 1. General (0, 3) -> (1, 3)
+    // 2. Soldier (0, 4) -> (1, 4)
+    // Perform 3 cycles of Red King (0, 3) <-> (1, 3):
+    for _ in 0..3 {
+        assert!(game.make_move(m(0, 3), m(1, 3)).is_ok());
+        assert!(game.make_move(m(8, 8), m(7, 8)).is_ok());
+        assert!(game.make_move(m(1, 3), m(0, 3)).is_ok());
+        assert!(game.make_move(m(7, 8), m(8, 8)).is_ok());
+    }
+
+    // Now Red King (0, 3) -> (1, 3) has been executed 3 times.
+    // The only remaining clean move is Soldier (0, 4) -> (1, 4).
+    // Because clean moves count is 1 (< 2), the repetitive move MUST BE ALLOWED!
+    assert!(
+        game.is_move_legal(m(0, 3), m(1, 3)),
+        "Repetitive move must be allowed when clean legal moves count is < 2"
+    );
+
+    let strictly_legal = game.get_strictly_legal_moves();
+    assert!(
+        strictly_legal
+            .iter()
+            .any(|mv| mv.from_row == 0 && mv.from_col == 3 && mv.to_row == 1 && mv.to_col == 3),
+        "Repetitive move must be included in strictly legal moves when clean moves count is < 2"
+    );
+
+    assert!(
+        game.make_move(m(0, 3), m(1, 3)).is_ok(),
+        "make_move must succeed for repetitive move when clean moves count is < 2"
+    );
+}

@@ -72,6 +72,10 @@ impl GameState {
 
         is_valid_move(&self.board, from, to, self.turn)?;
 
+        if !self.is_move_legal(from, to) {
+            return Err(MoveError::ThreeFoldRepetition);
+        }
+
         // Execute move
         let mut next_board = self.board.clone();
 
@@ -93,13 +97,6 @@ impl GameState {
         next_board.apply_move(&mv, self.turn);
 
         let is_check = is_in_check(&next_board, self.turn.opposite());
-        let back_forth_count = self.count_move_back_and_forth(from, to);
-        let rep_violation = self.is_repetition_violation(next_board.zobrist_hash, is_check)
-            || back_forth_count >= 3;
-
-        if rep_violation && self.has_more_than_one_valid_move(self.turn) {
-            return Err(MoveError::ThreeFoldRepetition);
-        }
 
         self.board = next_board;
         self.history.push(MoveRecord {
@@ -122,173 +119,10 @@ impl GameState {
     }
 
     fn update_status(&mut self) {
-        let current_turn = self.turn;
-
-        // Check if current player has any valid moves
-        let has_moves = self.has_any_valid_move(current_turn);
-
-        if !has_moves {
-            // In Chinese Chess (and this variant), if you have no moves, you lose.
-            // This applies whether you are in check or not (Stalemate is a loss).
-            self.status = GameStatus::Checkmate(current_turn.opposite());
+        // Stalemate is a loss in Chinese Chess. If no strictly legal moves remain, the player loses.
+        if self.get_strictly_legal_moves().is_empty() {
+            self.status = GameStatus::Checkmate(self.turn.opposite());
         }
-    }
-
-    fn has_any_valid_move(&self, color: Color) -> bool {
-        let generator = MoveGenerator::new();
-        generator.has_legal_moves(&self.board, color)
-    }
-
-    fn has_more_than_one_valid_move(&self, color: Color) -> bool {
-        let mut count = 0;
-        let bb = self.board.get_color_bb(color);
-
-        for sq in crate::logic::board::BitboardIterator::new(bb) {
-            let (r, c) = Board::index_to_coord(sq);
-            let pos = unsafe { BoardCoordinate::new_unchecked(r, c) };
-            if let Some(piece) = self.board.get_piece(pos) {
-                count += self.count_valid_moves_capped(pos, piece.piece_type, color, 2 - count);
-                if count > 1 {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn count_valid_moves_capped(
-        &self,
-        from: BoardCoordinate,
-        piece_type: crate::logic::board::PieceType,
-        color: Color,
-        cap: i32,
-    ) -> i32 {
-        use crate::logic::board::PieceType;
-        if cap <= 0 {
-            return 0;
-        }
-
-        match piece_type {
-            PieceType::General => {
-                self.count_offsets_capped(from, color, &[(0, 1), (0, -1), (1, 0), (-1, 0)], cap)
-            }
-            PieceType::Advisor => {
-                self.count_offsets_capped(from, color, &[(1, 1), (1, -1), (-1, 1), (-1, -1)], cap)
-            }
-            PieceType::Elephant => {
-                self.count_offsets_capped(from, color, &[(2, 2), (2, -2), (-2, 2), (-2, -2)], cap)
-            }
-            PieceType::Horse => self.count_offsets_capped(
-                from,
-                color,
-                &[
-                    (2, 1),
-                    (2, -1),
-                    (-2, 1),
-                    (-2, -1),
-                    (1, 2),
-                    (1, -2),
-                    (-1, 2),
-                    (-1, -2),
-                ],
-                cap,
-            ),
-            PieceType::Chariot => {
-                self.count_linear_capped(from, color, &[(0, 1), (0, -1), (1, 0), (-1, 0)], cap)
-            }
-            PieceType::Cannon => self.count_linear_cannon_capped(
-                from,
-                color,
-                &[(0, 1), (0, -1), (1, 0), (-1, 0)],
-                cap,
-            ),
-            PieceType::Soldier => {
-                let forward = match color {
-                    Color::Red => 1,
-                    Color::Black => -1,
-                };
-                self.count_offsets_capped(from, color, &[(forward, 0), (0, 1), (0, -1)], cap)
-            }
-        }
-    }
-
-    fn count_offsets_capped(
-        &self,
-        from: BoardCoordinate,
-        color: Color,
-        offsets: &[(isize, isize)],
-        cap: i32,
-    ) -> i32 {
-        let mut count = 0;
-        for &(dr, dc) in offsets {
-            let r = from.row as isize + dr;
-            let c = from.col as isize + dc;
-            if (0..10).contains(&r) && (0..9).contains(&c) {
-                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
-                if is_valid_move(&self.board, from, to, color).is_ok() {
-                    count += 1;
-                    if count >= cap {
-                        return count;
-                    }
-                }
-            }
-        }
-        count
-    }
-
-    fn count_linear_capped(
-        &self,
-        from: BoardCoordinate,
-        color: Color,
-        dirs: &[(isize, isize)],
-        cap: i32,
-    ) -> i32 {
-        let mut count = 0;
-        for &(dr, dc) in dirs {
-            let mut r = from.row as isize + dr;
-            let mut c = from.col as isize + dc;
-            while (0..10).contains(&r) && (0..9).contains(&c) {
-                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
-                if is_valid_move(&self.board, from, to, color).is_ok() {
-                    count += 1;
-                    if count >= cap {
-                        return count;
-                    }
-                }
-                if self.board.get_piece(to).is_some() {
-                    break;
-                }
-                r += dr;
-                c += dc;
-            }
-        }
-        count
-    }
-
-    fn count_linear_cannon_capped(
-        &self,
-        from: BoardCoordinate,
-        color: Color,
-        dirs: &[(isize, isize)],
-        cap: i32,
-    ) -> i32 {
-        let mut count = 0;
-        for &(dr, dc) in dirs {
-            let mut r = from.row as isize + dr;
-            let mut c = from.col as isize + dc;
-            while (0..10).contains(&r) && (0..9).contains(&c) {
-                let to = unsafe { BoardCoordinate::new_unchecked(r as usize, c as usize) };
-                if is_valid_move(&self.board, from, to, color).is_ok() {
-                    count += 1;
-                    if count >= cap {
-                        return count;
-                    }
-                }
-                r += dr;
-                c += dc;
-            }
-        }
-        count
     }
 
     pub fn undo_move(&mut self) -> bool {
@@ -403,44 +237,27 @@ impl GameState {
             return false;
         }
 
-        if is_valid_move(&self.board, from, to, self.turn).is_err() {
-            return false;
-        }
-
-        let mut next_board = self.board.clone();
-        let mv = Move {
-            from_row: from.row as u8,
-            from_col: from.col as u8,
-            to_row: to.row as u8,
-            to_col: to.col as u8,
-            score: 0,
-        };
-        next_board.apply_move(&mv, self.turn);
-
-        let is_check = is_in_check(&next_board, self.turn.opposite());
-        let back_forth_count = self.count_move_back_and_forth(from, to);
-        let rep_violation = self.is_repetition_violation(next_board.zobrist_hash, is_check)
-            || back_forth_count >= 3;
-
-        if rep_violation && self.has_more_than_one_valid_move(self.turn) {
-            return false;
-        }
-
-        true
+        let strictly_legal = self.get_strictly_legal_moves();
+        strictly_legal.iter().any(|m| {
+            m.from_row as usize == from.row
+                && m.from_col as usize == from.col
+                && m.to_row as usize == to.row
+                && m.to_col as usize == to.col
+        })
     }
 
     /// Return all strictly legal moves for the current player,
     /// excluding moves that would cause a forbidden repetition or perpetual check.
+    ///
+    /// If the number of strictly legal (clean) moves is less than 2 (i.e. 0 or 1),
+    /// the moves otherwise forbidden due to repetition are allowed back into the legal set.
     #[must_use]
     pub fn get_strictly_legal_moves(&self) -> Vec<Move> {
         let generator = MoveGenerator::new();
         let candidate_moves = generator.generate_moves(&self.board, self.turn);
 
-        if candidate_moves.len() <= 1 {
-            return candidate_moves;
-        }
-
-        let mut strictly_legal = Vec::with_capacity(candidate_moves.len());
+        let mut clean_moves = Vec::with_capacity(candidate_moves.len());
+        let mut rep_moves = Vec::with_capacity(candidate_moves.len());
 
         for mv in candidate_moves {
             let from = BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize);
@@ -458,12 +275,18 @@ impl GameState {
             let rep_violation = self.is_repetition_violation(next_board.zobrist_hash, is_check)
                 || back_forth_count >= 3;
 
-            if !rep_violation || !self.has_more_than_one_valid_move(self.turn) {
-                strictly_legal.push(mv);
+            if rep_violation {
+                rep_moves.push(mv);
+            } else {
+                clean_moves.push(mv);
             }
         }
 
-        strictly_legal
+        if clean_moves.len() < 2 {
+            clean_moves.extend(rep_moves);
+        }
+
+        clean_moves
     }
 }
 

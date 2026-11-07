@@ -687,9 +687,30 @@ export class PolyfillGameState {
     return count;
   }
 
+  get_strictly_legal_moves(): { fromR: number; fromC: number; toR: number; toC: number }[] {
+    const candidateMoves = getAllStrictlyLegalMoves(this.grid, this.currentTurn);
+    const cleanMoves: { fromR: number; fromC: number; toR: number; toC: number }[] = [];
+    const repMoves: { fromR: number; fromC: number; toR: number; toC: number }[] = [];
+
+    for (const m of candidateMoves) {
+      if (this.count_move_back_and_forth(m.fromR, m.fromC, m.toR, m.toC) >= 3) {
+        repMoves.push(m);
+      } else {
+        cleanMoves.push(m);
+      }
+    }
+
+    if (cleanMoves.length < 2) {
+      return [...cleanMoves, ...repMoves];
+    }
+    return cleanMoves;
+  }
+
   get_legal_moves(row: number, col: number): [number, number][] {
-    const moves = getLegalMovesForSquare(this.grid, this.currentTurn, row, col);
-    return moves.filter(([tr, tc]) => this.count_move_back_and_forth(row, col, tr, tc) < 3);
+    const strictly = this.get_strictly_legal_moves();
+    return strictly
+      .filter((m) => m.fromR === row && m.fromC === col)
+      .map((m) => [m.toR, m.toC]);
   }
 
   is_move_legal(from_row: number, from_col: number, to_row: number, to_col: number): boolean {
@@ -698,7 +719,7 @@ export class PolyfillGameState {
   }
 
   get_strictly_legal_moves_flat(): number[] {
-    const moves = getAllStrictlyLegalMoves(this.grid, this.currentTurn);
+    const moves = this.get_strictly_legal_moves();
     const flat: number[] = [];
     for (const m of moves) {
       flat.push(m.fromR, m.fromC, m.toR, m.toC);
