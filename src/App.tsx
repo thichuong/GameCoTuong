@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Trophy, Handshake, AlertTriangle, RotateCcw } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Trophy, Handshake, AlertTriangle, RotateCcw, LayoutGrid, Columns, Rows } from 'lucide-react';
 import init, { WasmGameState } from './wasm/cotuong_core.js';
 import wasmUrl from './wasm/cotuong_core_bg.wasm?url';
 import type {
@@ -19,6 +19,13 @@ import { ControlsArea } from './components/ControlsArea.js';
 import { LogPanel } from './components/LogPanel.js';
 import { ThinkingIndicator } from './components/ThinkingIndicator.js';
 import { ConfigModal } from './components/ConfigModal.js';
+import { CapturedPiecesTray } from './components/CapturedPiecesTray.js';
+import {
+  extractCapturedPieces,
+  determineLayoutOrientation,
+  calculateOptimalBoardSize,
+  type LayoutOrientation,
+} from './utils/capturedPieces.js';
 import { soundManager } from './utils/sound.js';
 import { exportCsv } from './utils/export.js';
 import './App.css';
@@ -71,6 +78,43 @@ export const App: React.FC = () => {
   const difficultyRef = useRef(difficulty);
   difficultyRef.current = difficulty;
   const isAiProcessingRef = useRef(false);
+
+  // Responsive Layout Mode & Window Dimensions
+  const [layoutOverride, setLayoutOverride] = useState<'auto' | 'sides' | 'stacked'>('auto');
+  const [windowDims, setWindowDims] = useState(() => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1200,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  }));
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowDims({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Compute layout orientation based on aspect ratio or user override
+  const autoOrientation = useMemo(
+    () => determineLayoutOrientation(windowDims.width, windowDims.height),
+    [windowDims.width, windowDims.height]
+  );
+  const layoutOrientation: LayoutOrientation =
+    layoutOverride === 'auto' ? autoOrientation : layoutOverride;
+
+  const boardSize = useMemo(
+    () => calculateOptimalBoardSize(windowDims.width, windowDims.height, layoutOrientation),
+    [windowDims.width, windowDims.height, layoutOrientation]
+  );
+
+  // Extract captured pieces summary
+  const capturedSummary = useMemo(
+    () => extractCapturedPieces(history),
+    [history]
+  );
 
   // AI Web Worker
   const workerRef = useRef<Worker | null>(null);
@@ -385,10 +429,46 @@ export const App: React.FC = () => {
     syncGameState();
   };
 
+  const topSide: PieceColor = playerSide === 'red' ? 'black' : 'red';
+  const bottomSide: PieceColor = playerSide === 'red' ? 'red' : 'black';
+
+  const getSideData = (s: PieceColor) => {
+    if (s === 'red') {
+      return {
+        side: 'red' as PieceColor,
+        isTurn: turn === 'red' && status.status === 'Playing',
+        isThinking: isThinking && turn === 'red',
+        capturedPieces: capturedSummary.groupedBlackCaptured,
+        totalCapturedValue: capturedSummary.blackCapturedValue,
+        materialAdvantage: capturedSummary.advantageForRed,
+      };
+    } else {
+      return {
+        side: 'black' as PieceColor,
+        isTurn: turn === 'black' && status.status === 'Playing',
+        isThinking: isThinking && turn === 'black',
+        capturedPieces: capturedSummary.groupedRedCaptured,
+        totalCapturedValue: capturedSummary.redCapturedValue,
+        materialAdvantage: -capturedSummary.advantageForRed,
+      };
+    }
+  };
+
+  const topData = getSideData(topSide);
+  const bottomData = getSideData(bottomSide);
+
   return (
-    <div className="min-h-screen bg-[#14110F] text-[#F5EFE6] flex flex-col justify-between py-4 sm:py-5">
+    <div className="min-h-screen bg-[#14110F] text-[#F5EFE6] flex flex-col justify-between py-3 sm:py-5">
       {/* Top Bar */}
-      <header className="w-full max-w-[760px] mx-auto px-3 sm:px-6 flex items-center justify-between gap-4 pb-3 mb-3 border-b border-stone-800/80">
+      <header
+        style={{
+          maxWidth:
+            layoutOrientation === 'sides'
+              ? `${Math.max(900, boardSize + 390)}px`
+              : `${Math.max(340, boardSize + 24)}px`,
+        }}
+        className="w-full mx-auto px-3 sm:px-6 flex items-center justify-between gap-3 sm:gap-4 pb-3 mb-2 sm:mb-3 border-b border-stone-800/80 transition-[max-width] duration-150"
+      >
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-gradient-to-br from-red-700 to-red-950 border border-amber-400/50 flex items-center justify-center font-display-serif font-bold text-lg text-amber-100 shadow-md shrink-0">
             帥
@@ -403,16 +483,59 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Active Turn & Check Status Indicator */}
-        <div className="flex items-center gap-3">
+        {/* Layout Switcher & Active Turn & Check Status Indicator */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Quick Layout Mode Switcher */}
+          <div className="hidden sm:flex items-center bg-[#1E1915] border border-stone-800 rounded-xl p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setLayoutOverride('auto')}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer ${
+                layoutOverride === 'auto'
+                  ? 'bg-amber-500/25 text-amber-200 font-semibold'
+                  : 'text-stone-400 hover:text-stone-200'
+              }`}
+              title="Tự động theo tỉ lệ màn hình"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="text-[11px]">Tự động</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLayoutOverride('sides')}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer ${
+                layoutOverride === 'sides'
+                  ? 'bg-amber-500/25 text-amber-200 font-semibold'
+                  : 'text-stone-400 hover:text-stone-200'
+              }`}
+              title="Hai bên (Trái - Phải)"
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span className="text-[11px]">Hai bên</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLayoutOverride('stacked')}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer ${
+                layoutOverride === 'stacked'
+                  ? 'bg-amber-500/25 text-amber-200 font-semibold'
+                  : 'text-stone-400 hover:text-stone-200'
+              }`}
+              title="Trên - Dưới"
+            >
+              <Rows className="w-3.5 h-3.5" />
+              <span className="text-[11px]">Trên dưới</span>
+            </button>
+          </div>
+
           {isInCheck && status.status === 'Playing' && (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Chiếu tướng!</span>
+              <span className="hidden xs:inline">Chiếu tướng!</span>
             </div>
           )}
 
-          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#1E1915] border border-stone-800">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#1E1915] border border-stone-800">
             <span
               className={`w-5 h-5 rounded-full flex items-center justify-center font-display-serif text-xs font-bold ${
                 turn === 'red'
@@ -423,7 +546,7 @@ export const App: React.FC = () => {
               {turn === 'red' ? '帥' : '將'}
             </span>
             <div className="text-xs">
-              <span className="text-stone-400">Lượt đi: </span>
+              <span className="text-stone-400 hidden xs:inline">Lượt đi: </span>
               <span
                 className={
                   turn === 'red'
@@ -439,8 +562,16 @@ export const App: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col items-center justify-center gap-4 w-full mx-auto">
-        <div className="w-full px-3 sm:px-6">
+      <main className="flex-1 flex flex-col items-center justify-center gap-3 sm:gap-4 w-full mx-auto">
+        <div
+          style={{
+            maxWidth:
+              layoutOrientation === 'sides'
+                ? `${Math.max(900, boardSize + 390)}px`
+                : `${Math.max(340, boardSize + 24)}px`,
+          }}
+          className="w-full px-3 sm:px-6 transition-[max-width] duration-150"
+        >
           <ControlsArea
             gameMode={gameMode}
             setGameMode={setGameMode}
@@ -461,68 +592,207 @@ export const App: React.FC = () => {
           />
         </div>
 
-        {/* Board Container with Overview Overlays */}
-        <div className="relative flex flex-col items-center justify-center my-1">
-          <BoardCanvas
-            board={board}
-            playerSide={playerSide}
-            selectedSquare={selectedSquare}
-            legalMoves={legalMoves}
-            lastMove={lastMove}
-            onSquareClick={handleSquareClick}
-            disabled={isThinking || status.status !== 'Playing'}
+        {/* Board & Captured Pieces Container: Responsive Sides or Stacked Layout */}
+        {layoutOrientation === 'sides' ? (
+          /* Landscape mode: Left tray | Board | Right tray */
+          <div
+            style={{ maxWidth: `${boardSize + 390}px` }}
+            className="w-full px-2 sm:px-4 flex flex-row items-center justify-center gap-3 sm:gap-5 my-1 pb-1 sm:pb-2 transition-all"
           >
-            {/* AI Thinking Overview Overlay directly on the board */}
-            <ThinkingIndicator
-              isThinking={isThinking}
-              turn={turn}
-              difficulty={difficulty}
-              lastStats={lastStats}
-            />
+            {/* Left Tray: Opponent / Top Side */}
+            <div style={{ height: `${boardSize}px` }} className="flex">
+              <CapturedPiecesTray
+                side={topData.side}
+                isTurn={topData.isTurn}
+                isThinking={topData.isThinking}
+                capturedPieces={topData.capturedPieces}
+                totalCapturedValue={topData.totalCapturedValue}
+                materialAdvantage={topData.materialAdvantage}
+                gameMode={gameMode}
+                playerSide={playerSide}
+                difficulty={difficulty}
+                orientation="sides"
+              />
+            </div>
 
-            {/* End-of-Game Victory / Draw Overlay on the board */}
-            {status.status !== 'Playing' && (
-              <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs rounded-2xl animate-board-overlay">
-                <div className="w-full max-w-[320px] rounded-2xl bg-[#1A1512] border border-amber-500/40 shadow-2xl p-5 text-center">
-                  {status.status === 'Checkmate' ? (
-                    <>
-                      <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/35 flex items-center justify-center mx-auto mb-3 text-amber-400">
-                        <Trophy className="w-6 h-6" />
-                      </div>
-                      <h2 className="font-display-serif text-lg font-bold text-[#F5EFE6]">
-                        {status.winner === 'red' ? 'Bên Đỏ Chiến Thắng!' : 'Bên Đen Chiến Thắng!'}
-                      </h2>
-                      <p className="text-xs text-stone-400 mt-1">
-                        Chiếu bí (Checkmate) sau {history.length} nước đi
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-12 h-12 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center mx-auto mb-3 text-stone-300">
-                        <Handshake className="w-6 h-6" />
-                      </div>
-                      <h2 className="font-display-serif text-lg font-bold text-[#F5EFE6]">
-                        Ván Cờ Hòa!
-                      </h2>
-                      <p className="text-xs text-stone-400 mt-1">
-                        Hết nước đi hợp lệ (Stalemate)
-                      </p>
-                    </>
-                  )}
+            {/* Center Board */}
+            <div className="relative flex flex-col items-center justify-center shrink-0">
+              <BoardCanvas
+                board={board}
+                playerSide={playerSide}
+                selectedSquare={selectedSquare}
+                legalMoves={legalMoves}
+                lastMove={lastMove}
+                onSquareClick={handleSquareClick}
+                disabled={isThinking || status.status !== 'Playing'}
+                size={boardSize}
+              >
+                <ThinkingIndicator
+                  isThinking={isThinking}
+                  turn={turn}
+                  difficulty={difficulty}
+                  lastStats={lastStats}
+                />
+                {status.status !== 'Playing' && (
+                  <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs rounded-2xl animate-board-overlay">
+                    <div className="w-full max-w-[320px] rounded-2xl bg-[#1A1512] border border-amber-500/40 shadow-2xl p-5 text-center">
+                      {status.status === 'Checkmate' ? (
+                        <>
+                          <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/35 flex items-center justify-center mx-auto mb-3 text-amber-400">
+                            <Trophy className="w-6 h-6" />
+                          </div>
+                          <h2 className="font-display-serif text-lg font-bold text-[#F5EFE6]">
+                            {status.winner === 'red' ? 'Bên Đỏ Chiến Thắng!' : 'Bên Đen Chiến Thắng!'}
+                          </h2>
+                          <p className="text-xs text-stone-400 mt-1">
+                            Chiếu bí (Checkmate) sau {history.length} nước đi
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-12 h-12 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center mx-auto mb-3 text-stone-300">
+                            <Handshake className="w-6 h-6" />
+                          </div>
+                          <h2 className="font-display-serif text-lg font-bold text-[#F5EFE6]">
+                            Ván Cờ Hòa!
+                          </h2>
+                          <p className="text-xs text-stone-400 mt-1">
+                            Hết nước đi hợp lệ (Stalemate)
+                          </p>
+                        </>
+                      )}
 
-                  <button
-                    type="button"
-                    onClick={handleNewGame}
-                    className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] text-white transition-colors cursor-pointer shadow-md"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    <span>Chơi ván mới</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </BoardCanvas>
-        </div>
+                      <button
+                        type="button"
+                        onClick={handleNewGame}
+                        className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] text-white transition-colors cursor-pointer shadow-md"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Chơi ván mới</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </BoardCanvas>
+            </div>
+
+            {/* Right Tray: Player / Bottom Side */}
+            <div style={{ height: `${boardSize}px` }} className="flex">
+              <CapturedPiecesTray
+                side={bottomData.side}
+                isTurn={bottomData.isTurn}
+                isThinking={bottomData.isThinking}
+                capturedPieces={bottomData.capturedPieces}
+                totalCapturedValue={bottomData.totalCapturedValue}
+                materialAdvantage={bottomData.materialAdvantage}
+                gameMode={gameMode}
+                playerSide={playerSide}
+                difficulty={difficulty}
+                orientation="sides"
+              />
+            </div>
+          </div>
+        ) : (
+          /* Portrait mode: Top tray (Opponent) | Board | Bottom tray (Player) */
+          <div
+            style={{ maxWidth: `${boardSize + 24}px` }}
+            className="w-full px-2 sm:px-3 flex flex-col items-center justify-center gap-2 my-1 pb-2 sm:pb-3 transition-all"
+          >
+            {/* Top Tray: Opponent */}
+            <div style={{ width: `${boardSize}px`, maxWidth: '100%' }}>
+              <CapturedPiecesTray
+                side={topData.side}
+                isTurn={topData.isTurn}
+                isThinking={topData.isThinking}
+                capturedPieces={topData.capturedPieces}
+                totalCapturedValue={topData.totalCapturedValue}
+                materialAdvantage={topData.materialAdvantage}
+                gameMode={gameMode}
+                playerSide={playerSide}
+                difficulty={difficulty}
+                orientation="stacked"
+              />
+            </div>
+
+            {/* Center Board */}
+            <div className="relative flex flex-col items-center justify-center shrink-0">
+              <BoardCanvas
+                board={board}
+                playerSide={playerSide}
+                selectedSquare={selectedSquare}
+                legalMoves={legalMoves}
+                lastMove={lastMove}
+                onSquareClick={handleSquareClick}
+                disabled={isThinking || status.status !== 'Playing'}
+                size={boardSize}
+              >
+                <ThinkingIndicator
+                  isThinking={isThinking}
+                  turn={turn}
+                  difficulty={difficulty}
+                  lastStats={lastStats}
+                />
+
+                {status.status !== 'Playing' && (
+                  <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs rounded-2xl animate-board-overlay">
+                    <div className="w-full max-w-[320px] rounded-2xl bg-[#1A1512] border border-amber-500/40 shadow-2xl p-5 text-center">
+                      {status.status === 'Checkmate' ? (
+                        <>
+                          <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/35 flex items-center justify-center mx-auto mb-3 text-amber-400">
+                            <Trophy className="w-6 h-6" />
+                          </div>
+                          <h2 className="font-display-serif text-lg font-bold text-[#F5EFE6]">
+                            {status.winner === 'red' ? 'Bên Đỏ Chiến Thắng!' : 'Bên Đen Chiến Thắng!'}
+                          </h2>
+                          <p className="text-xs text-stone-400 mt-1">
+                            Chiếu bí (Checkmate) sau {history.length} nước đi
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-12 h-12 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center mx-auto mb-3 text-stone-300">
+                            <Handshake className="w-6 h-6" />
+                          </div>
+                          <h2 className="font-display-serif text-lg font-bold text-[#F5EFE6]">
+                            Ván Cờ Hòa!
+                          </h2>
+                          <p className="text-xs text-stone-400 mt-1">
+                            Hết nước đi hợp lệ (Stalemate)
+                          </p>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleNewGame}
+                        className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] text-white transition-colors cursor-pointer shadow-md"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Chơi ván mới</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </BoardCanvas>
+            </div>
+
+            {/* Bottom Tray: Player */}
+            <div style={{ width: `${boardSize}px`, maxWidth: '100%' }}>
+              <CapturedPiecesTray
+                side={bottomData.side}
+                isTurn={bottomData.isTurn}
+                isThinking={bottomData.isThinking}
+                capturedPieces={bottomData.capturedPieces}
+                totalCapturedValue={bottomData.totalCapturedValue}
+                materialAdvantage={bottomData.materialAdvantage}
+                gameMode={gameMode}
+                playerSide={playerSide}
+                difficulty={difficulty}
+                orientation="stacked"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Collapsible Move Log Dock at the bottom ("ẩn xuống, khi nào cần thì mở lên xem") */}
         <LogPanel

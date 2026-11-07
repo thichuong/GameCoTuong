@@ -51,7 +51,7 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
   canUndo,
 }) => {
   return (
-    <div className="w-full max-w-[760px] mx-auto rounded-2xl bg-[#1C1815] border border-stone-800/90 p-3.5 sm:p-4 shadow-xl flex flex-col gap-3">
+    <div className="w-full mx-auto rounded-2xl bg-[#1C1815] border border-stone-800/90 p-3.5 sm:p-4 shadow-xl flex flex-col gap-3">
       {/* Row 1: Game Setup Selectors */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-4">
         {/* Chế độ chơi */}

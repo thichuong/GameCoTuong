@@ -9,6 +9,7 @@ interface BoardCanvasProps {
   lastMove: { from_row: number; from_col: number; to_row: number; to_col: number } | null;
   onSquareClick: (row: number, col: number) => void;
   disabled?: boolean;
+  size?: number;
   children?: React.ReactNode;
 }
 
@@ -167,23 +168,27 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   lastMove,
   onSquareClick,
   disabled = false,
+  size,
   children,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [boardSize, setBoardSize] = useState<number>(() =>
+  const [internalSize, setInternalSize] = useState<number>(() =>
     typeof window !== 'undefined'
-      ? Math.max(200, Math.min(window.innerWidth, window.innerHeight))
+      ? Math.max(200, Math.min(window.innerWidth - 32, window.innerHeight - 200))
       : BOARD_SIZE
   );
 
   useEffect(() => {
+    if (size !== undefined) return;
     const updateSize = () => {
-      setBoardSize(Math.max(200, Math.min(window.innerWidth, window.innerHeight)));
+      setInternalSize(Math.max(200, Math.min(window.innerWidth - 32, window.innerHeight - 200)));
     };
     updateSize();
     window.addEventListener('resize', updateSize);
     return () => window.removeEventListener('resize', updateSize);
-  }, []);
+  }, [size]);
+
+  const effectiveSize = size ?? internalSize;
 
   const drawBoard = useCallback(() => {
     const canvas = canvasRef.current;
@@ -192,7 +197,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const pixelSize = Math.round(boardSize * dpr);
+    const pixelSize = Math.round(effectiveSize * dpr);
     if (canvas.width !== pixelSize || canvas.height !== pixelSize) {
       canvas.width = pixelSize;
       canvas.height = pixelSize;
@@ -364,7 +369,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     });
 
     ctx.restore();
-  }, [board, playerSide, selectedSquare, legalMoves, lastMove, boardSize]);
+  }, [board, playerSide, selectedSquare, legalMoves, lastMove, effectiveSize]);
 
   useEffect(() => {
     drawBoard();
@@ -391,8 +396,9 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   return (
     <div
       style={{
-        width: `${boardSize}px`,
-        height: `${boardSize}px`,
+        width: `${effectiveSize}px`,
+        height: `${effectiveSize}px`,
+        maxWidth: '100%',
       }}
       className="relative inline-flex items-center justify-center aspect-square rounded-2xl bg-gradient-to-b from-[#2B1D14] to-[#1D130D] border border-[#4A3222] shadow-[0_20px_50px_rgba(0,0,0,0.75)] box-border overflow-hidden shrink-0"
     >
@@ -400,8 +406,9 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
         ref={canvasRef}
         onClick={handleCanvasClick}
         style={{
-          width: `${boardSize}px`,
-          height: `${boardSize}px`,
+          width: `${effectiveSize}px`,
+          height: `${effectiveSize}px`,
+          maxWidth: '100%',
           aspectRatio: '1 / 1',
         }}
         className={`rounded-xl block w-full h-full aspect-square transition-opacity ${

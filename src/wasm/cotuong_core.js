@@ -1,4 +1,5 @@
 /* @ts-self-types="./cotuong_core.d.ts" */
+import { PolyfillGameState, PolyfillEngine } from './enginePolyfill';
 
 /**
  * WASM-compatible wrapper around AlphaBetaEngine
@@ -11,6 +12,9 @@ export class WasmEngine {
         return ptr;
     }
     free() {
+        if (this.__polyfill) {
+            return;
+        }
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmengine_free(ptr, 0);
     }
@@ -19,6 +23,9 @@ export class WasmEngine {
      * @param {string | null} [config_json]
      */
     constructor(config_json) {
+        if (!wasm || typeof wasm.wasmengine_new !== 'function') {
+            return new PolyfillEngine(config_json);
+        }
         var ptr0 = isLikeNone(config_json) ? 0 : passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         var len0 = WASM_VECTOR_LEN;
         const ret = wasm.wasmengine_new(ptr0, len0);
@@ -94,6 +101,9 @@ export class WasmGameState {
      * @returns {WasmGameState}
      */
     static from_fen(fen) {
+        if (!wasm || typeof wasm.wasmgamestate_from_fen !== 'function') {
+            return PolyfillGameState.from_fen(fen);
+        }
         const ptr0 = passStringToWasm0(fen, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.wasmgamestate_from_fen(ptr0, len0);
@@ -108,6 +118,9 @@ export class WasmGameState {
      * @returns {WasmGameState}
      */
     static from_json(json_str) {
+        if (!wasm || typeof wasm.wasmgamestate_from_json !== 'function') {
+            return PolyfillGameState.from_json(json_str);
+        }
         const ptr0 = passStringToWasm0(json_str, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.wasmgamestate_from_json(ptr0, len0);
@@ -221,6 +234,9 @@ export class WasmGameState {
      * Create a new game in the starting position
      */
     constructor() {
+        if (!wasm || typeof wasm.wasmgamestate_new !== 'function') {
+            return new PolyfillGameState();
+        }
         const ret = wasm.wasmgamestate_new();
         this.__wbg_ptr = ret;
         WasmGameStateFinalization.register(this, this.__wbg_ptr, this);
@@ -618,7 +634,9 @@ function __wbg_finalize_init(instance, module) {
     wasmModule = module;
     cachedDataViewMemory0 = null;
     cachedUint8ArrayMemory0 = null;
-    wasm.__wbindgen_start();
+    if (typeof wasm.__wbindgen_start === 'function') {
+        wasm.__wbindgen_start();
+    }
     return wasm;
 }
 
@@ -698,9 +716,13 @@ async function __wbg_init(module_or_path) {
         module_or_path = fetch(module_or_path);
     }
 
-    const { instance, module } = await __wbg_load(await module_or_path, imports);
-
-    return __wbg_finalize_init(instance, module);
+    try {
+        const { instance, module } = await __wbg_load(await module_or_path, imports);
+        return __wbg_finalize_init(instance, module);
+    } catch (e) {
+        wasm = null;
+        return null;
+    }
 }
 
 export { initSync, __wbg_init as default };
