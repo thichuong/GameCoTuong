@@ -2549,7 +2549,7 @@ fn main() {
         .position(|a| a == "--lr")
         .and_then(|idx| args.get(idx + 1))
         .and_then(|s| s.parse::<f32>().ok())
-        .unwrap_or(0.05);
+        .unwrap_or(0.01);
 
     let input_path = args
         .iter()
