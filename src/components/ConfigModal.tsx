@@ -15,6 +15,7 @@ import {
   Layers,
   Sparkles,
   Zap,
+  Link2,
 } from 'lucide-react';
 import type { EngineConfig, ModelType } from '../types/game.js';
 import { DEFAULT_ENGINE_CONFIG } from '../types/game.js';
@@ -58,11 +59,11 @@ const PRESETS: Preset[] = [
   },
   {
     name: 'Tiết Kiệm RAM',
-    desc: 'Bảng băm TT 64MB kết hợp model Int8 siêu nén cho thiết bị di động.',
+    desc: 'Bảng băm TT 64MB, tối ưu NNUE 90% kết hợp model Int8 siêu nén cho thiết bị di động.',
     config: {
       mate_score: 200000,
       tt_size_mb: 64,
-      nnue_weight: 100,
+      nnue_weight: 90,
       model_type: 'int8',
     },
   },
@@ -72,7 +73,7 @@ const PRESETS: Preset[] = [
     config: {
       mate_score: 500000,
       tt_size_mb: 512,
-      nnue_weight: 95,
+      nnue_weight: 110,
       model_type: 'int16',
     },
   },
@@ -87,6 +88,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
   setBlackConfig,
 }) => {
   const [activeTab, setActiveTab] = useState<'red' | 'black'>('red');
+  const [syncBothSides, setSyncBothSides] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -101,30 +103,59 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     key: K,
     value: EngineConfig[K],
   ) => {
-    setConfig((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+    if (syncBothSides) {
+      setRedConfig((prev) => ({
+        ...prev,
+        [key]: value,
+      }));
+      setBlackConfig((prev) => ({
+        ...prev,
+        [key]: value,
+      }));
+    } else {
+      setConfig((prev) => ({
+        ...prev,
+        [key]: value,
+      }));
+    }
   };
 
   const handleApplyPreset = (preset: Preset) => {
-    setConfig({ ...preset.config });
-    setFeedback({
-      type: 'success',
-      message: `Đã áp dụng cấu hình "${preset.name}" cho AI ${
-        activeTab === 'red' ? 'Đỏ' : 'Đen'
-      }.`,
-    });
+    if (syncBothSides) {
+      setRedConfig({ ...preset.config });
+      setBlackConfig({ ...preset.config });
+      setFeedback({
+        type: 'success',
+        message: `Đã áp dụng đồng bộ Preset "${preset.name}" cho cả 2 bên AI (Đỏ & Đen). Các tùy chỉnh bên dưới đã được cập nhật tương ứng!`,
+      });
+    } else {
+      setConfig({ ...preset.config });
+      setFeedback({
+        type: 'success',
+        message: `Đã áp dụng Preset "${preset.name}" cho AI ${
+          activeTab === 'red' ? 'Đỏ' : 'Đen'
+        }. Các tùy chỉnh bên dưới đã được cập nhật tương ứng!`,
+      });
+    }
   };
 
   const handleResetDefault = () => {
-    setConfig({ ...DEFAULT_ENGINE_CONFIG });
-    setFeedback({
-      type: 'success',
-      message: `Đã khôi phục cấu hình mặc định cotuong_core cho AI ${
-        activeTab === 'red' ? 'Đỏ' : 'Đen'
-      }.`,
-    });
+    if (syncBothSides) {
+      setRedConfig({ ...DEFAULT_ENGINE_CONFIG });
+      setBlackConfig({ ...DEFAULT_ENGINE_CONFIG });
+      setFeedback({
+        type: 'success',
+        message: 'Đã khôi phục cấu hình mặc định cotuong_core cho cả AI Đỏ và AI Đen.',
+      });
+    } else {
+      setConfig({ ...DEFAULT_ENGINE_CONFIG });
+      setFeedback({
+        type: 'success',
+        message: `Đã khôi phục cấu hình mặc định cotuong_core cho AI ${
+          activeTab === 'red' ? 'Đỏ' : 'Đen'
+        }.`,
+      });
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -284,6 +315,20 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             >
               <Download className="w-3.5 h-3.5 text-amber-400" />
               <span>Xuất JSON</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSyncBothSides(!syncBothSides)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                syncBothSides
+                  ? 'bg-amber-950/70 border-amber-500/60 text-amber-300'
+                  : 'bg-stone-800 hover:bg-stone-700 text-stone-400 border-stone-700'
+              }`}
+              title="Khi bật, việc chọn Preset hoặc thay đổi tham số sẽ tự động áp dụng cho cả AI Đỏ và AI Đen"
+            >
+              <Link2 className="w-3.5 h-3.5" />
+              <span>Đồng bộ 2 bên ({syncBothSides ? 'Bật' : 'Tắt'})</span>
             </button>
           </div>
 
@@ -529,7 +574,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
                 <span className="text-[10px] text-stone-400 mr-1">Mức nhanh:</span>
-                {[75, 90, 100, 110, 125].map((w) => (
+                {[75, 90, 100, 110, 120, 125].map((w) => (
                   <button
                     key={w}
                     type="button"
@@ -689,7 +734,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 sm:px-6 py-3.5 border-t border-stone-800 bg-[#161210] flex items-center justify-between">
           <div className="text-[11px] text-stone-400 hidden sm:block">
-            Cấu hình đang tác động tới: <strong className="text-amber-400">{activeTab === 'red' ? 'AI Đỏ' : 'AI Đen'}</strong>
+            Cấu hình đang tác động tới:{' '}
+            <strong className="text-amber-400">
+              {syncBothSides ? 'Cả hai bên AI (Đỏ & Đen)' : activeTab === 'red' ? 'AI Đỏ' : 'AI Đen'}
+            </strong>
           </div>
           <button
             type="button"
