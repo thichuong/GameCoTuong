@@ -119,7 +119,14 @@ export class WasmGameState {
      */
     static from_json(json_str) {
         if (!wasm || typeof wasm.wasmgamestate_from_json !== 'function') {
-            return PolyfillGameState.from_json(json_str);
+            if (typeof PolyfillGameState.from_json === 'function') {
+                return PolyfillGameState.from_json(json_str);
+            }
+            try {
+                const parsed = JSON.parse(json_str);
+                if (parsed && parsed.fen) return PolyfillGameState.from_fen(parsed.fen);
+            } catch {}
+            return new PolyfillGameState();
         }
         const ptr0 = passStringToWasm0(json_str, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;

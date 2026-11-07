@@ -79,3 +79,22 @@ test('PolyfillEngine search returns legal move', () => {
   assert.ok(searchResult!.move.to_row >= 0 && searchResult!.move.to_row <= 9);
   assert.ok(searchResult!.stats.nodes > 0);
 });
+
+test('PolyfillGameState from_fen parses custom position accurately', () => {
+  // Simple puzzle: Red King at (0,4), Red Chariot at (4,4), Black King at (9,4)
+  const fen = '4k4/9/9/9/9/4R4/9/9/9/4K4 w - - 0 1';
+  const game = PolyfillGameState.from_fen(fen);
+  assert.equal(game.turn(), 'red');
+  const board = game.get_board();
+  const rKing = board.find((s) => s.row === 0 && s.col === 4);
+  assert.equal(rKing?.piece?.type, 'General');
+  assert.equal(rKing?.piece?.color, 'red');
+
+  const bKing = board.find((s) => s.row === 9 && s.col === 4);
+  assert.equal(bKing?.piece?.type, 'General');
+  assert.equal(bKing?.piece?.color, 'black');
+
+  const rChariot = board.find((s) => s.row === 4 && s.col === 4);
+  assert.equal(rChariot?.piece?.type, 'Chariot');
+  assert.equal(rChariot?.piece?.color, 'red');
+});

@@ -507,28 +507,104 @@ export class PolyfillGameState {
     this.grid = createInitialBoard();
   }
 
-  static from_fen(_fen: string): PolyfillGameState {
+  static from_json(json_str: string): PolyfillGameState {
     const s = new PolyfillGameState();
-    // Parse simplified or standard FEN if provided
+    try {
+      const data = JSON.parse(json_str);
+      if (data && data.grid) {
+        s.grid = data.grid;
+        s.currentTurn = data.turn ?? 'red';
+        s.moveHistory = data.history ?? [];
+        s.undoStack = data.undoStack ?? [];
+      }
+    } catch (e) {
+      console.warn('PolyfillGameState from_json error:', e);
+    }
     return s;
   }
 
-  static from_json(jsonStr: string): PolyfillGameState {
+  static from_fen(fen: string): PolyfillGameState {
     const s = new PolyfillGameState();
     try {
-      const obj = JSON.parse(jsonStr);
-      if (obj.grid) s.grid = obj.grid;
-      if (obj.turn) s.currentTurn = obj.turn;
-      if (obj.history) s.moveHistory = obj.history;
-      if (obj.undoStack) s.undoStack = obj.undoStack;
+      const parts = fen.trim().split(/\s+/);
+      if (parts[0]) {
+        const rows = parts[0].split('/');
+        if (rows.length === 10) {
+          const newGrid: BoardGrid = Array.from({ length: 10 }, () => Array(9).fill(null));
+          const charMap: Record<string, PieceType> = {
+            k: 'General',
+            a: 'Advisor',
+            b: 'Elephant',
+            e: 'Elephant',
+            n: 'Horse',
+            h: 'Horse',
+            r: 'Chariot',
+            c: 'Cannon',
+            p: 'Soldier',
+            s: 'Soldier',
+          };
+
+          for (let rIdx = 0; rIdx < 10; rIdx++) {
+            const rowStr = rows[rIdx]!;
+            const r = 9 - rIdx;
+            let c = 0;
+            for (const ch of rowStr) {
+              const digit = Number.parseInt(ch, 10);
+              if (!Number.isNaN(digit)) {
+                c += digit;
+              } else {
+                const lower = ch.toLowerCase();
+                const pType = charMap[lower];
+                if (pType && c < 9) {
+                  const pColor: PieceColor = ch === ch.toUpperCase() ? 'red' : 'black';
+                  newGrid[r]![c] = { type: pType, color: pColor };
+                  c++;
+                }
+              }
+            }
+          }
+          s.grid = newGrid;
+          s.currentTurn = parts[1]?.toLowerCase() === 'b' ? 'black' : 'red';
+        }
+      }
     } catch (e) {
-      console.warn('PolyfillGameState from_json failed:', e);
+      console.warn('PolyfillGameState from_fen error:', e);
     }
     return s;
   }
 
   to_fen(): string {
-    return INITIAL_FEN;
+    const pieceCharMap: Record<PieceType, string> = {
+      General: 'k',
+      Advisor: 'a',
+      Elephant: 'b',
+      Horse: 'n',
+      Chariot: 'r',
+      Cannon: 'c',
+      Soldier: 'p',
+    };
+    const rows: string[] = [];
+    for (let r = 9; r >= 0; r--) {
+      let emptyCount = 0;
+      let rowStr = '';
+      for (let c = 0; c < 9; c++) {
+        const p = this.grid[r]![c];
+        if (!p) {
+          emptyCount++;
+        } else {
+          if (emptyCount > 0) {
+            rowStr += emptyCount.toString();
+            emptyCount = 0;
+          }
+          const ch = pieceCharMap[p.type] ?? 'p';
+          rowStr += p.color === 'red' ? ch.toUpperCase() : ch.toLowerCase();
+        }
+      }
+      if (emptyCount > 0) rowStr += emptyCount.toString();
+      rows.push(rowStr);
+    }
+    const t = this.currentTurn === 'red' ? 'w' : 'b';
+    return `${rows.join('/')} ${t} - - 0 1`;
   }
 
   to_json(): string {

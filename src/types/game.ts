@@ -20,7 +20,14 @@ export interface Square {
   piece: Piece | null;
 }
 
-export type GameMode = 'HumanVsComputer' | 'ComputerVsComputer' | 'HumanVsHuman';
+export type GameMode =
+  | 'HumanVsComputer'
+  | 'ComputerVsComputer'
+  | 'HumanVsHuman'
+  | 'Puzzle';
+
+export type PuzzleStage = 'setup' | 'playing';
+export type PuzzleSubMode = 'HumanVsComputer' | 'ComputerVsComputer' | 'HumanVsHuman';
 
 export type Difficulty = 1 | 2 | 3 | 4 | 5;
 

@@ -10,8 +10,10 @@ import {
   Gamepad2,
   Shield,
   Gauge,
+  Pencil,
+  Puzzle,
 } from 'lucide-react';
-import type { Difficulty, GameMode, PieceColor } from '../types/game.js';
+import type { Difficulty, GameMode, PieceColor, PuzzleStage, PuzzleSubMode } from '../types/game.js';
 
 interface ControlsAreaProps {
   gameMode: GameMode;
@@ -30,6 +32,10 @@ interface ControlsAreaProps {
   moveCount?: number;
   isThinking: boolean;
   canUndo: boolean;
+  puzzleStage?: PuzzleStage;
+  puzzleSubMode?: PuzzleSubMode;
+  onEditPuzzlePosition?: () => void;
+  onRestartPuzzle?: () => void;
 }
 
 export const ControlsArea: React.FC<ControlsAreaProps> = ({
@@ -49,7 +55,14 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
   moveCount = 0,
   isThinking,
   canUndo,
+  puzzleStage: _puzzleStage = 'playing',
+  puzzleSubMode = 'HumanVsComputer',
+  onEditPuzzlePosition,
+  onRestartPuzzle,
 }) => {
+  const isPuzzleMode = gameMode === 'Puzzle';
+  const effectiveSubMode = isPuzzleMode ? puzzleSubMode : gameMode;
+
   return (
     <div className="w-full mx-auto rounded-2xl bg-[#1C1815] border border-stone-800/90 p-3.5 sm:p-4 shadow-xl flex flex-col gap-3">
       {/* Row 1: Game Setup Selectors */}
@@ -60,7 +73,11 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
             htmlFor="game-mode-select"
             className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-400 whitespace-nowrap shrink-0"
           >
-            <Gamepad2 className="w-3.5 h-3.5 text-amber-400" />
+            {isPuzzleMode ? (
+              <Puzzle className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <Gamepad2 className="w-3.5 h-3.5 text-amber-400" />
+            )}
             <span>Chế độ</span>
           </label>
           <select
@@ -80,33 +97,45 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
             <option value="HumanVsComputer">Người đấu với Máy</option>
             <option value="ComputerVsComputer">Máy đấu với Máy</option>
             <option value="HumanVsHuman">Hai người chơi</option>
+            <option value="Puzzle">🧩 Giải cờ thế (Tự xếp quân)</option>
           </select>
         </div>
 
-        {/* Chọn bên */}
-        {gameMode === 'HumanVsComputer' && (
-          <div className="flex items-center gap-2 flex-1 min-w-[180px]">
-            <label
-              htmlFor="player-side-select"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-400 whitespace-nowrap shrink-0"
-            >
-              <Shield className="w-3.5 h-3.5 text-amber-400" />
-              <span>Cầm quân</span>
-            </label>
-            <select
-              id="player-side-select"
-              value={playerSide}
-              onChange={(e) => setPlayerSide(e.target.value as PieceColor)}
-              className="flex-1 bg-[#26201C] text-[#F5EFE6] text-xs sm:text-sm font-medium rounded-lg px-3 py-2 border border-stone-700/80 hover:border-amber-500/40 focus:border-amber-400 focus:outline-none transition-colors cursor-pointer"
-            >
-              <option value="red">Đỏ (Đi tiên)</option>
-              <option value="black">Đen (Đi hậu)</option>
-            </select>
+        {/* Puzzle Sub-mode badge or Side selector */}
+        {isPuzzleMode ? (
+          <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+            <span className="text-xs text-stone-400 shrink-0">Thể thức giải:</span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+              {puzzleSubMode === 'ComputerVsComputer' && '🤖 Máy vs Máy'}
+              {puzzleSubMode === 'HumanVsComputer' && `👤 vs 🤖 (Bạn cầm ${playerSide === 'red' ? 'Đỏ' : 'Đen'})`}
+              {puzzleSubMode === 'HumanVsHuman' && '👥 Người vs Người'}
+            </span>
           </div>
+        ) : (
+          gameMode === 'HumanVsComputer' && (
+            <div className="flex items-center gap-2 flex-1 min-w-[180px]">
+              <label
+                htmlFor="player-side-select"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-400 whitespace-nowrap shrink-0"
+              >
+                <Shield className="w-3.5 h-3.5 text-amber-400" />
+                <span>Cầm quân</span>
+              </label>
+              <select
+                id="player-side-select"
+                value={playerSide}
+                onChange={(e) => setPlayerSide(e.target.value as PieceColor)}
+                className="flex-1 bg-[#26201C] text-[#F5EFE6] text-xs sm:text-sm font-medium rounded-lg px-3 py-2 border border-stone-700/80 hover:border-amber-500/40 focus:border-amber-400 focus:outline-none transition-colors cursor-pointer"
+              >
+                <option value="red">Đỏ (Đi tiên)</option>
+                <option value="black">Đen (Đi hậu)</option>
+              </select>
+            </div>
+          )
         )}
 
         {/* Độ khó */}
-        {gameMode !== 'HumanVsHuman' && (
+        {effectiveSubMode !== 'HumanVsHuman' && (
           <div className="flex items-center gap-2 flex-1 min-w-[185px]">
             <label
               htmlFor="difficulty-select"
@@ -137,7 +166,8 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
       {/* Row 2: Action Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          {gameMode === 'ComputerVsComputer' && (
+          {/* If ComputerVsComputer (either standard or in Puzzle mode) */}
+          {(gameMode === 'ComputerVsComputer' || (isPuzzleMode && puzzleSubMode === 'ComputerVsComputer')) && (
             <button
               type="button"
               onClick={() => setIsPaused(!isPaused)}
@@ -161,15 +191,44 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={onNewGame}
-            disabled={isThinking}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] disabled:opacity-45 disabled:cursor-not-allowed text-white transition-all cursor-pointer whitespace-nowrap shrink-0 shadow-sm"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Ván mới</span>
-          </button>
+          {/* Puzzle Mode Specific Controls */}
+          {isPuzzleMode ? (
+            <>
+              {onEditPuzzlePosition && (
+                <button
+                  type="button"
+                  onClick={onEditPuzzlePosition}
+                  disabled={isThinking}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/40 transition-all cursor-pointer whitespace-nowrap shrink-0 shadow-xs"
+                >
+                  <Pencil className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Xếp lại cờ thế</span>
+                </button>
+              )}
+
+              {onRestartPuzzle && (
+                <button
+                  type="button"
+                  onClick={onRestartPuzzle}
+                  disabled={isThinking}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#26201C] hover:bg-[#312923] text-stone-200 border border-stone-700/80 transition-all cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Giải lại từ đầu</span>
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onNewGame}
+              disabled={isThinking}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] disabled:opacity-45 disabled:cursor-not-allowed text-white transition-all cursor-pointer whitespace-nowrap shrink-0 shadow-sm"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Ván mới</span>
+            </button>
+          )}
 
           <button
             type="button"

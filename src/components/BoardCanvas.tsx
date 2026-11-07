@@ -8,9 +8,11 @@ interface BoardCanvasProps {
   legalMoves: [number, number][];
   lastMove: { from_row: number; from_col: number; to_row: number; to_col: number } | null;
   onSquareClick: (row: number, col: number) => void;
+  onSquareRightClick?: (row: number, col: number) => void;
   disabled?: boolean;
   size?: number;
   children?: React.ReactNode;
+  isSetupMode?: boolean;
 }
 
 const BOARD_SIZE = 554.0;
@@ -167,9 +169,11 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   legalMoves,
   lastMove,
   onSquareClick,
+  onSquareRightClick,
   disabled = false,
   size,
   children,
+  isSetupMode = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [internalSize, setInternalSize] = useState<number>(() =>
@@ -286,6 +290,24 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     drawPalaceDiagonals(0);
     drawPalaceDiagonals(7);
 
+    // Subtle palace zone shading in setup mode to guide piece placement
+    if (isSetupMode) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(217, 119, 6, 0.08)';
+      ctx.strokeStyle = 'rgba(217, 119, 6, 0.35)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 4]);
+
+      // Top palace
+      ctx.fillRect(PADDING + 3 * CELL_WIDTH, PADDING, 2 * CELL_WIDTH, 2 * CELL_HEIGHT);
+      ctx.strokeRect(PADDING + 3 * CELL_WIDTH, PADDING, 2 * CELL_WIDTH, 2 * CELL_HEIGHT);
+
+      // Bottom palace
+      ctx.fillRect(PADDING + 3 * CELL_WIDTH, PADDING + 7 * CELL_HEIGHT, 2 * CELL_WIDTH, 2 * CELL_HEIGHT);
+      ctx.strokeRect(PADDING + 3 * CELL_WIDTH, PADDING + 7 * CELL_HEIGHT, 2 * CELL_WIDTH, 2 * CELL_HEIGHT);
+      ctx.restore();
+    }
+
     // Fiducial Markers for Cannons and Soldiers
     FIDUCIAL_POINTS.forEach(([r, c]) => {
       const { x, y } = getVisualCoords(r, c, playerSide);
@@ -310,7 +332,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     ctx.restore();
 
     // Highlight Last Move
-    if (lastMove) {
+    if (lastMove && !isSetupMode) {
       const fromCoord = getVisualCoords(lastMove.from_row, lastMove.from_col, playerSide);
       const toCoord = getVisualCoords(lastMove.to_row, lastMove.to_col, playerSide);
 
@@ -341,35 +363,54 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
       drawPiece(ctx, x, y, sq.piece, isSelected);
     });
 
-    // Draw Legal Move Indicators
-    legalMoves.forEach(([r, c]) => {
-      const { x, y } = getVisualCoords(r, c, playerSide);
-      const targetSquare = board.find((s) => s.row === r && s.col === c);
-      const isCapture = Boolean(targetSquare && targetSquare.piece);
-
-      ctx.save();
-      if (isCapture) {
-        // Vermilion capture target ring
-        ctx.strokeStyle = '#DC2626';
-        ctx.lineWidth = 3.2;
+    // Draw Setup Mode Selected Square ring (if empty square selected)
+    if (isSetupMode && selectedSquare) {
+      const [selR, selC] = selectedSquare;
+      const sq = board.find((s) => s.row === selR && s.col === selC);
+      if (!sq || !sq.piece) {
+        const { x, y } = getVisualCoords(selR, selC, playerSide);
+        ctx.save();
+        ctx.strokeStyle = '#F59E0B';
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([4, 3]);
         ctx.beginPath();
-        ctx.arc(x, y, 25, 0, Math.PI * 2);
+        ctx.arc(x, y, 22, 0, Math.PI * 2);
         ctx.stroke();
-      } else {
-        // Jade destination dot
-        ctx.fillStyle = 'rgba(22, 163, 74, 0.9)';
-        ctx.beginPath();
-        ctx.arc(x, y, 7.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#DCFCE7';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        ctx.restore();
       }
-      ctx.restore();
-    });
+    }
+
+    // Draw Legal Move Indicators (only in playing mode)
+    if (!isSetupMode) {
+      legalMoves.forEach(([r, c]) => {
+        const { x, y } = getVisualCoords(r, c, playerSide);
+        const targetSquare = board.find((s) => s.row === r && s.col === c);
+        const isCapture = Boolean(targetSquare && targetSquare.piece);
+
+        ctx.save();
+        if (isCapture) {
+          // Vermilion capture target ring
+          ctx.strokeStyle = '#DC2626';
+          ctx.lineWidth = 3.2;
+          ctx.beginPath();
+          ctx.arc(x, y, 25, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          // Jade destination dot
+          ctx.fillStyle = 'rgba(22, 163, 74, 0.9)';
+          ctx.beginPath();
+          ctx.arc(x, y, 7.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#DCFCE7';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
+    }
 
     ctx.restore();
-  }, [board, playerSide, selectedSquare, legalMoves, lastMove, effectiveSize]);
+  }, [board, playerSide, selectedSquare, legalMoves, lastMove, effectiveSize, isSetupMode]);
 
   useEffect(() => {
     drawBoard();
@@ -393,6 +434,25 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     }
   };
 
+  const handleCanvasContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (disabled || !isSetupMode || !onSquareRightClick) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = BOARD_WIDTH / rect.width;
+    const scaleY = BOARD_HEIGHT / rect.height;
+
+    const clickX = (e.clientX - rect.left) * scaleX;
+    const clickY = (e.clientY - rect.top) * scaleY;
+
+    const coords = getLogicCoords(clickX, clickY, playerSide);
+    if (coords) {
+      onSquareRightClick(coords[0], coords[1]);
+    }
+  };
+
   return (
     <div
       style={{
@@ -405,6 +465,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
       <canvas
         ref={canvasRef}
         onClick={handleCanvasClick}
+        onContextMenu={handleCanvasContextMenu}
         style={{
           width: `${effectiveSize}px`,
           height: `${effectiveSize}px`,

@@ -47,6 +47,12 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
     }
   } else if (gameMode === 'ComputerVsComputer') {
     roleLabel = `AI (${isRed ? 'Đỏ' : 'Đen'})`;
+  } else if (gameMode === 'Puzzle') {
+    if (side === playerSide) {
+      roleLabel = 'Bạn (Giải thế)';
+    } else {
+      roleLabel = `Đối thủ · ${isRed ? 'Đỏ' : 'Đen'}`;
+    }
   } else {
     roleLabel = isRed ? 'Tiên thủ' : 'Hậu thủ';
   }

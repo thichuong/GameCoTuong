@@ -9,13 +9,17 @@ import type {
   GameStatus,
   HistoryRecord,
   MoveCoords,
+  Piece,
   PieceColor,
+  PuzzleStage,
+  PuzzleSubMode,
   SearchStats,
   Square,
 } from './types/game.js';
 import { DEFAULT_ENGINE_CONFIG } from './types/game.js';
 import { BoardCanvas } from './components/BoardCanvas.js';
 import { ControlsArea } from './components/ControlsArea.js';
+import { PuzzleSetupArea } from './components/PuzzleSetupArea.js';
 import { LogPanel } from './components/LogPanel.js';
 import { ThinkingIndicator } from './components/ThinkingIndicator.js';
 import { ConfigModal } from './components/ConfigModal.js';
@@ -28,6 +32,7 @@ import {
 } from './utils/capturedPieces.js';
 import { soundManager } from './utils/sound.js';
 import { exportCsv } from './utils/export.js';
+import { boardToFen, fenToBoard, CLASSIC_PUZZLES } from './utils/fen.js';
 import './App.css';
 
 const DIFFICULTY_TIMES: Record<Difficulty, number> = {
@@ -49,6 +54,13 @@ export const App: React.FC = () => {
   const [isPaused, setIsPaused] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [lastStats, setLastStats] = useState<SearchStats | null>(null);
+
+  // Puzzle Mode State
+  const [puzzleStage, setPuzzleStage] = useState<PuzzleStage>('setup');
+  const [puzzleSubMode, setPuzzleSubMode] = useState<PuzzleSubMode>('HumanVsComputer');
+  const [puzzleFirstTurn, setPuzzleFirstTurn] = useState<PieceColor>('red');
+  const [puzzleSelectedTool, setPuzzleSelectedTool] = useState<Piece | 'erase' | null>(null);
+  const [initialPuzzleFen, setInitialPuzzleFen] = useState<string | null>(null);
 
   // Board presentation
   const [board, setBoard] = useState<Square[]>([]);
@@ -169,13 +181,19 @@ export const App: React.FC = () => {
     isAiProcessingRef.current = true;
     setIsThinking(true);
 
-    // 1. Check opening book move first
-    const bookMove = state.get_book_move() as {
-      from_row: number;
-      from_col: number;
-      to_row: number;
-      to_col: number;
-    } | null;
+    // 1. Check opening book move first (only in standard games and strictly verify legality)
+    const isPuzzle = gameMode === 'Puzzle';
+    const rawBookMove = isPuzzle ? null : (state.get_book_move() as MoveCoords | null);
+    const bookMove =
+      rawBookMove &&
+      state.is_move_legal(
+        rawBookMove.from_row,
+        rawBookMove.from_col,
+        rawBookMove.to_row,
+        rawBookMove.to_col
+      )
+        ? rawBookMove
+        : null;
 
     if (bookMove) {
       setTimeout(() => {
@@ -292,12 +310,11 @@ export const App: React.FC = () => {
     worker.addEventListener('message', handleWorkerMessage);
     worker.postMessage({
       type: 'SEARCH',
-      stateJson: state.to_json(),
       fen: state.to_fen(),
       timeLimitMs,
       configJson: JSON.stringify(config),
     });
-  }, [syncGameState]);
+  }, [syncGameState, gameMode]);
 
   // Handle Game Loop (Check whether AI should play)
   useEffect(() => {
@@ -305,16 +322,20 @@ export const App: React.FC = () => {
     const state = gameStateRef.current;
     if (!state) return;
 
+    if (gameMode === 'Puzzle' && puzzleStage === 'setup') return;
+
     const currentStatus = state.status() as GameStatus;
     if (currentStatus.status !== 'Playing') return;
 
     const currentTurn = state.turn() as PieceColor;
+    const effectivePlayMode =
+      gameMode === 'Puzzle' ? (puzzleStage === 'playing' ? puzzleSubMode : null) : gameMode;
 
-    if (gameMode === 'HumanVsComputer') {
+    if (effectivePlayMode === 'HumanVsComputer') {
       if (currentTurn !== playerSide) {
         triggerAiMove();
       }
-    } else if (gameMode === 'ComputerVsComputer') {
+    } else if (effectivePlayMode === 'ComputerVsComputer') {
       if (!isPaused) {
         const timer = setTimeout(() => {
           triggerAiMove();
@@ -329,17 +350,186 @@ export const App: React.FC = () => {
     playerSide,
     isPaused,
     isThinking,
+    puzzleStage,
+    puzzleSubMode,
     triggerAiMove,
   ]);
 
+  // Handle Board Click in Setup Mode
+  const handleSetupSquareClick = useCallback(
+    (row: number, col: number) => {
+      if (puzzleSelectedTool === 'erase') {
+        setBoard((prev) =>
+          prev.map((sq) => (sq.row === row && sq.col === col ? { ...sq, piece: null } : sq))
+        );
+        return;
+      }
+
+      if (puzzleSelectedTool) {
+        setBoard((prev) =>
+          prev.map((sq) =>
+            sq.row === row && sq.col === col
+              ? {
+                  ...sq,
+                  piece: { type: puzzleSelectedTool.type, color: puzzleSelectedTool.color },
+                }
+              : sq
+          )
+        );
+        return;
+      }
+
+      // No tool selected: select to reposition pieces
+      const clickedSq = board.find((s) => s.row === row && s.col === col);
+      if (selectedSquare) {
+        const [selR, selC] = selectedSquare;
+        if (selR === row && selC === col) {
+          setSelectedSquare(null);
+          return;
+        }
+
+        const sourceSq = board.find((s) => s.row === selR && s.col === selC);
+        const pieceToMove = sourceSq?.piece ?? null;
+
+        setBoard((prev) =>
+          prev.map((sq) => {
+            if (sq.row === selR && sq.col === selC) {
+              return { ...sq, piece: null };
+            }
+            if (sq.row === row && sq.col === col) {
+              return { ...sq, piece: pieceToMove };
+            }
+            return sq;
+          })
+        );
+        setSelectedSquare(null);
+      } else {
+        if (clickedSq?.piece) {
+          setSelectedSquare([row, col]);
+        }
+      }
+    },
+    [puzzleSelectedTool, board, selectedSquare]
+  );
+
+  // Right-click in Setup Mode: erase piece
+  const handleSetupSquareRightClick = useCallback((row: number, col: number) => {
+    setBoard((prev) =>
+      prev.map((sq) => (sq.row === row && sq.col === col ? { ...sq, piece: null } : sq))
+    );
+    setSelectedSquare(null);
+  }, []);
+
+  // Start Puzzle Solving
+  const handleStartSolving = useCallback(() => {
+    try {
+      const fen = boardToFen(board, puzzleFirstTurn);
+      const newState = WasmGameState.from_fen(fen);
+      gameStateRef.current = newState;
+      setInitialPuzzleFen(fen);
+      setPuzzleStage('playing');
+      syncGameState();
+      setSelectedSquare(null);
+      setLegalMoves([]);
+      setLastMove(null);
+      setLastStats(null);
+      setHistory([]);
+      if (puzzleSubMode === 'ComputerVsComputer') {
+        setIsPaused(false);
+      }
+    } catch (err) {
+      console.error('Failed to start puzzle solving:', err);
+    }
+  }, [board, puzzleFirstTurn, puzzleSubMode, syncGameState]);
+
+  // Restart Puzzle from Beginning
+  const handleRestartPuzzle = useCallback(() => {
+    if (isThinking || !initialPuzzleFen) return;
+    try {
+      const newState = WasmGameState.from_fen(initialPuzzleFen);
+      gameStateRef.current = newState;
+      syncGameState();
+      setSelectedSquare(null);
+      setLegalMoves([]);
+      setLastMove(null);
+      setLastStats(null);
+      setHistory([]);
+      if (puzzleSubMode === 'ComputerVsComputer') {
+        setIsPaused(false);
+      }
+    } catch (err) {
+      console.error('Failed to restart puzzle:', err);
+    }
+  }, [initialPuzzleFen, isThinking, puzzleSubMode, syncGameState]);
+
+  // Edit Puzzle Position (back to setup)
+  const handleEditPuzzlePosition = useCallback(() => {
+    if (isThinking) return;
+    setPuzzleStage('setup');
+    setSelectedSquare(null);
+    setLegalMoves([]);
+    setLastMove(null);
+    if (initialPuzzleFen) {
+      try {
+        const { squares, turn: initialTurn } = fenToBoard(initialPuzzleFen);
+        setBoard(squares);
+        setPuzzleFirstTurn(initialTurn);
+      } catch (e) {
+        // keep current board
+      }
+    }
+  }, [initialPuzzleFen, isThinking]);
+
+  // Handle Game Mode Change
+  const handleGameModeChange = useCallback(
+    (mode: GameMode) => {
+      if (isThinking) return;
+      setGameMode(mode);
+      setSelectedSquare(null);
+      setLegalMoves([]);
+      setLastMove(null);
+      setLastStats(null);
+
+      if (mode === 'Puzzle') {
+        setPuzzleStage('setup');
+        const defaultPuzzle = CLASSIC_PUZZLES[0]!;
+        try {
+          const { squares, turn: presetTurn } = fenToBoard(defaultPuzzle.fen);
+          setBoard(squares);
+          setPuzzleFirstTurn(presetTurn);
+          setInitialPuzzleFen(defaultPuzzle.fen);
+        } catch (e) {
+          // fallback
+        }
+      } else {
+        gameStateRef.current = new WasmGameState();
+        syncGameState();
+        if (mode === 'ComputerVsComputer') {
+          setIsPaused(true);
+        } else {
+          setIsPaused(false);
+        }
+      }
+    },
+    [isThinking, syncGameState]
+  );
+
   // Handle Board Click
   const handleSquareClick = (row: number, col: number) => {
+    if (gameMode === 'Puzzle' && puzzleStage === 'setup') {
+      handleSetupSquareClick(row, col);
+      return;
+    }
+
     if (isThinking || status.status !== 'Playing') return;
     const state = gameStateRef.current;
     if (!state) return;
 
-    if (gameMode === 'HumanVsComputer' && turn !== playerSide) return;
-    if (gameMode === 'ComputerVsComputer') return;
+    const effectivePlayMode =
+      gameMode === 'Puzzle' ? puzzleSubMode : gameMode;
+
+    if (effectivePlayMode === 'HumanVsComputer' && turn !== playerSide) return;
+    if (effectivePlayMode === 'ComputerVsComputer') return;
 
     const clickedSquare = board.find((s) => s.row === row && s.col === col);
     const piece = clickedSquare?.piece;
@@ -397,6 +587,10 @@ export const App: React.FC = () => {
   // New Game
   const handleNewGame = () => {
     if (isThinking) return;
+    if (gameMode === 'Puzzle') {
+      handleRestartPuzzle();
+      return;
+    }
     gameStateRef.current = new WasmGameState();
     setSelectedSquare(null);
     setLegalMoves([]);
@@ -414,7 +608,10 @@ export const App: React.FC = () => {
     const state = gameStateRef.current;
     if (!state) return;
 
-    if (gameMode === 'HumanVsComputer') {
+    const effectivePlayMode =
+      gameMode === 'Puzzle' ? puzzleSubMode : gameMode;
+
+    if (effectivePlayMode === 'HumanVsComputer') {
       if (state.turn() === playerSide && state.history_len() >= 2) {
         state.undo_move();
       }
@@ -538,23 +735,29 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#1E1915] border border-stone-800">
             <span
               className={`w-5 h-5 rounded-full flex items-center justify-center font-display-serif text-xs font-bold ${
-                turn === 'red'
+                (gameMode === 'Puzzle' && puzzleStage === 'setup' ? puzzleFirstTurn : turn) === 'red'
                   ? 'bg-red-900 text-red-200 border border-red-500/50'
                   : 'bg-stone-800 text-stone-200 border border-stone-600'
               }`}
             >
-              {turn === 'red' ? '帥' : '將'}
+              {(gameMode === 'Puzzle' && puzzleStage === 'setup' ? puzzleFirstTurn : turn) === 'red'
+                ? '帥'
+                : '將'}
             </span>
             <div className="text-xs">
-              <span className="text-stone-400 hidden xs:inline">Lượt đi: </span>
+              <span className="text-stone-400 hidden xs:inline">
+                {gameMode === 'Puzzle' && puzzleStage === 'setup' ? 'Đi tiên: ' : 'Lượt đi: '}
+              </span>
               <span
                 className={
-                  turn === 'red'
+                  (gameMode === 'Puzzle' && puzzleStage === 'setup' ? puzzleFirstTurn : turn) === 'red'
                     ? 'font-semibold text-red-400'
                     : 'font-semibold text-amber-300'
                 }
               >
-                {turn === 'red' ? 'Bên Đỏ' : 'Bên Đen'}
+                {(gameMode === 'Puzzle' && puzzleStage === 'setup' ? puzzleFirstTurn : turn) === 'red'
+                  ? 'Bên Đỏ'
+                  : 'Bên Đen'}
               </span>
             </div>
           </div>
@@ -572,24 +775,47 @@ export const App: React.FC = () => {
           }}
           className="w-full px-3 sm:px-6 transition-[max-width] duration-150"
         >
-          <ControlsArea
-            gameMode={gameMode}
-            setGameMode={setGameMode}
-            playerSide={playerSide}
-            setPlayerSide={setPlayerSide}
-            difficulty={difficulty}
-            setDifficulty={setDifficulty}
-            isPaused={isPaused}
-            setIsPaused={setIsPaused}
-            onNewGame={handleNewGame}
-            onUndo={handleUndo}
-            onExportCsv={() => exportCsv(history)}
-            onOpenConfig={() => setIsConfigOpen(true)}
-            onToggleLog={() => setIsLogOpen((prev) => !prev)}
-            moveCount={history.length}
-            isThinking={isThinking}
-            canUndo={history.length > 0}
-          />
+          {gameMode === 'Puzzle' && puzzleStage === 'setup' ? (
+            <PuzzleSetupArea
+              board={board}
+              setBoard={setBoard}
+              firstTurn={puzzleFirstTurn}
+              setFirstTurn={setPuzzleFirstTurn}
+              subMode={puzzleSubMode}
+              setSubMode={setPuzzleSubMode}
+              playerSide={playerSide}
+              setPlayerSide={setPlayerSide}
+              difficulty={difficulty}
+              setDifficulty={setDifficulty}
+              selectedTool={puzzleSelectedTool}
+              setSelectedTool={setPuzzleSelectedTool}
+              onStartSolving={handleStartSolving}
+              onExitPuzzleMode={() => handleGameModeChange('HumanVsComputer')}
+            />
+          ) : (
+            <ControlsArea
+              gameMode={gameMode}
+              setGameMode={handleGameModeChange}
+              playerSide={playerSide}
+              setPlayerSide={setPlayerSide}
+              difficulty={difficulty}
+              setDifficulty={setDifficulty}
+              isPaused={isPaused}
+              setIsPaused={setIsPaused}
+              onNewGame={handleNewGame}
+              onUndo={handleUndo}
+              onExportCsv={() => exportCsv(history)}
+              onOpenConfig={() => setIsConfigOpen(true)}
+              onToggleLog={() => setIsLogOpen((prev) => !prev)}
+              moveCount={history.length}
+              isThinking={isThinking}
+              canUndo={history.length > 0}
+              puzzleStage={puzzleStage}
+              puzzleSubMode={puzzleSubMode}
+              onEditPuzzlePosition={handleEditPuzzlePosition}
+              onRestartPuzzle={handleRestartPuzzle}
+            />
+          )}
         </div>
 
         {/* Board & Captured Pieces Container: Responsive Sides or Stacked Layout */}
@@ -624,8 +850,10 @@ export const App: React.FC = () => {
                 legalMoves={legalMoves}
                 lastMove={lastMove}
                 onSquareClick={handleSquareClick}
-                disabled={isThinking || status.status !== 'Playing'}
+                onSquareRightClick={handleSetupSquareRightClick}
+                disabled={isThinking || (status.status !== 'Playing' && !(gameMode === 'Puzzle' && puzzleStage === 'setup'))}
                 size={boardSize}
+                isSetupMode={gameMode === 'Puzzle' && puzzleStage === 'setup'}
               >
                 <ThinkingIndicator
                   isThinking={isThinking}
@@ -633,7 +861,7 @@ export const App: React.FC = () => {
                   difficulty={difficulty}
                   lastStats={lastStats}
                 />
-                {status.status !== 'Playing' && (
+                {status.status !== 'Playing' && !(gameMode === 'Puzzle' && puzzleStage === 'setup') && (
                   <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs rounded-2xl animate-board-overlay">
                     <div className="w-full max-w-[320px] rounded-2xl bg-[#1A1512] border border-amber-500/40 shadow-2xl p-5 text-center">
                       {status.status === 'Checkmate' ? (
@@ -645,7 +873,9 @@ export const App: React.FC = () => {
                             {status.winner === 'red' ? 'Bên Đỏ Chiến Thắng!' : 'Bên Đen Chiến Thắng!'}
                           </h2>
                           <p className="text-xs text-stone-400 mt-1">
-                            Chiếu bí (Checkmate) sau {history.length} nước đi
+                            {gameMode === 'Puzzle'
+                              ? `Giải cờ thế thành công sau ${history.length} nước!`
+                              : `Chiếu bí (Checkmate) sau ${history.length} nước đi`}
                           </p>
                         </>
                       ) : (
@@ -662,14 +892,34 @@ export const App: React.FC = () => {
                         </>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={handleNewGame}
-                        className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] text-white transition-colors cursor-pointer shadow-md"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        <span>Chơi ván mới</span>
-                      </button>
+                      {gameMode === 'Puzzle' ? (
+                        <div className="mt-4 flex flex-col gap-2">
+                          <button
+                            type="button"
+                            onClick={handleRestartPuzzle}
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer shadow-md"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            <span>Giải lại từ đầu</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleEditPuzzlePosition}
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[#26201C] hover:bg-stone-800 text-stone-200 border border-stone-700 transition-colors cursor-pointer"
+                          >
+                            <span>Xếp lại cờ thế</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleNewGame}
+                          className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] text-white transition-colors cursor-pointer shadow-md"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          <span>Chơi ván mới</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -723,8 +973,10 @@ export const App: React.FC = () => {
                 legalMoves={legalMoves}
                 lastMove={lastMove}
                 onSquareClick={handleSquareClick}
-                disabled={isThinking || status.status !== 'Playing'}
+                onSquareRightClick={handleSetupSquareRightClick}
+                disabled={isThinking || (status.status !== 'Playing' && !(gameMode === 'Puzzle' && puzzleStage === 'setup'))}
                 size={boardSize}
+                isSetupMode={gameMode === 'Puzzle' && puzzleStage === 'setup'}
               >
                 <ThinkingIndicator
                   isThinking={isThinking}
@@ -733,7 +985,7 @@ export const App: React.FC = () => {
                   lastStats={lastStats}
                 />
 
-                {status.status !== 'Playing' && (
+                {status.status !== 'Playing' && !(gameMode === 'Puzzle' && puzzleStage === 'setup') && (
                   <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs rounded-2xl animate-board-overlay">
                     <div className="w-full max-w-[320px] rounded-2xl bg-[#1A1512] border border-amber-500/40 shadow-2xl p-5 text-center">
                       {status.status === 'Checkmate' ? (
@@ -745,7 +997,9 @@ export const App: React.FC = () => {
                             {status.winner === 'red' ? 'Bên Đỏ Chiến Thắng!' : 'Bên Đen Chiến Thắng!'}
                           </h2>
                           <p className="text-xs text-stone-400 mt-1">
-                            Chiếu bí (Checkmate) sau {history.length} nước đi
+                            {gameMode === 'Puzzle'
+                              ? `Giải cờ thế thành công sau ${history.length} nước!`
+                              : `Chiếu bí (Checkmate) sau ${history.length} nước đi`}
                           </p>
                         </>
                       ) : (
@@ -762,14 +1016,34 @@ export const App: React.FC = () => {
                         </>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={handleNewGame}
-                        className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] text-white transition-colors cursor-pointer shadow-md"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        <span>Chơi ván mới</span>
-                      </button>
+                      {gameMode === 'Puzzle' ? (
+                        <div className="mt-4 flex flex-col gap-2">
+                          <button
+                            type="button"
+                            onClick={handleRestartPuzzle}
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer shadow-md"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            <span>Giải lại từ đầu</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleEditPuzzlePosition}
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[#26201C] hover:bg-stone-800 text-stone-200 border border-stone-700 transition-colors cursor-pointer"
+                          >
+                            <span>Xếp lại cờ thế</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleNewGame}
+                          className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#B91C1C] hover:bg-[#DC2626] text-white transition-colors cursor-pointer shadow-md"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          <span>Chơi ván mới</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
