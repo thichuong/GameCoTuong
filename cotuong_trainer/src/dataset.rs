@@ -52,10 +52,14 @@ pub fn extract_features(board: &Board) -> (Vec<usize>, Vec<usize>) {
     (red, black)
 }
 
-/// Parses a result string ("1-0", "0-1", "1/2-1/2", "draw", "win", "loss") into a float score.
+/// Parses a result string ("1-0", "0-1", "1/2-1/2", "1.0", "0.0", "0.5", "draw", "win", "loss") into a float score.
 #[must_use]
 pub fn parse_result_score(res_str: &str) -> f32 {
-    let lower = res_str.trim().to_lowercase();
+    let trimmed = res_str.trim();
+    if let Ok(val) = trimmed.parse::<f32>() {
+        return val.clamp(0.0, 1.0);
+    }
+    let lower = trimmed.to_lowercase();
     if lower.contains("1-0") || lower == "1" || lower == "red_win" || lower == "win" {
         1.0
     } else if lower.contains("0-1") || lower == "0" || lower == "black_win" || lower == "loss" {
@@ -177,15 +181,24 @@ pub fn load_dataset_file<P: AsRef<Path>>(path: P) -> Result<Vec<PositionSample>,
             let move_tokens: Vec<&str> = moves_part.split_whitespace().collect();
             // Games should have at least 2 moves
             if move_tokens.len() >= 2 && move_tokens.iter().all(|t| t.len() == 4) {
-                for token in move_tokens {
+                #[allow(clippy::cast_precision_loss)]
+                let total_moves = move_tokens.len() as f32;
+                for (ply_idx, token) in move_tokens.into_iter().enumerate() {
                     match Move::from_uci(token) {
                         Ok(mv) => {
                             let (red_feats, black_feats) = extract_features(&board);
+                            // Smooth interpolation for move sequences without engine eval:
+                            // Early moves (opening) stay near 0.5 (balanced), transitioning
+                            // smoothly towards the final game result as the match progresses.
+                            #[allow(clippy::cast_precision_loss)]
+                            let progress = (ply_idx as f32 / total_moves).clamp(0.0, 1.0);
+                            let smoothed_result = 0.5 * (1.0 - progress) + result_score * progress;
+
                             samples.push(PositionSample {
                                 red_features: red_feats,
                                 black_features: black_feats,
                                 search_eval: 0.0,
-                                game_result: result_score,
+                                game_result: smoothed_result,
                                 fen: board.to_fen_string(turn),
                                 turn,
                             });
@@ -225,7 +238,8 @@ pub fn load_dataset_file<P: AsRef<Path>>(path: P) -> Result<Vec<PositionSample>,
                         result_score = parse_result_score(res_str);
                     } else if let Some(eval_str) = p.strip_prefix("eval:") {
                         if let Ok(val) = eval_str.trim().parse::<f32>() {
-                            eval_cp = val;
+                            // Clamp extreme endgame/mate evaluation to prevent gradient saturation
+                            eval_cp = val.clamp(-1200.0, 1200.0);
                         }
                     }
                 }
@@ -263,6 +277,9 @@ mod tests {
         assert_eq!(parse_result_score("1-0"), 1.0);
         assert_eq!(parse_result_score("0-1"), 0.0);
         assert_eq!(parse_result_score("1/2-1/2"), 0.5);
+        assert_eq!(parse_result_score("1.0"), 1.0);
+        assert_eq!(parse_result_score("0.0"), 0.0);
+        assert_eq!(parse_result_score("0.5"), 0.5);
         assert_eq!(parse_result_score("draw"), 0.5);
     }
 

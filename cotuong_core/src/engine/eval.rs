@@ -29,6 +29,14 @@ impl SimpleEvaluator {
     pub fn set_weights(&mut self, weights: Option<Arc<NnueWeights>>) {
         self.weights = weights;
     }
+
+    #[must_use]
+    pub fn weights(&self) -> &NnueWeights {
+        match &self.weights {
+            Some(w) => w.as_ref(),
+            None => NnueWeights::get(),
+        }
+    }
 }
 
 impl Evaluator for SimpleEvaluator {

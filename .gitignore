@@ -32,3 +32,9 @@ checkpoints/*
 
 .aistudio/
 .aistudio
+
+# Auto-generated Arena Data (per-session training data from Pikafish vs Fairy-Stockfish)
+/cotuong_trainer/data/generated/
+cotuong_trainer/data/generated/*
+/cotuong_trainer/data/arena_*.txt
+cotuong_trainer/data/arena_*.txt

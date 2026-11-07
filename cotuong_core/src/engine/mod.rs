@@ -100,6 +100,8 @@ pub struct SearchStats {
     pub depth: u8,
     pub nodes: u32,
     pub time_ms: u64,
+    #[serde(default)]
+    pub score: i32,
 }
 
 pub trait Evaluator {

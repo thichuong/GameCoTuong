@@ -500,7 +500,18 @@ impl Board {
         piece: Piece,
         captured: Option<Piece>,
     ) {
-        let weights = NnueWeights::get();
+        self.update_nnue_for_move_with_weights(from_sq, to_sq, piece, captured, NnueWeights::get());
+    }
+
+    #[inline]
+    pub fn update_nnue_for_move_with_weights(
+        &mut self,
+        from_sq: usize,
+        to_sq: usize,
+        piece: Piece,
+        captured: Option<Piece>,
+        weights: &NnueWeights,
+    ) {
         let k_red = crate::engine::nnue::get_red_king_palace_idx(self);
         let k_black = crate::engine::nnue::get_black_king_palace_idx(self);
         let is_general = piece.piece_type == PieceType::General;
@@ -628,7 +639,11 @@ impl Board {
 
     #[inline]
     pub fn refresh_nnue(&mut self) {
-        let weights = NnueWeights::get();
+        self.refresh_nnue_with_weights(NnueWeights::get());
+    }
+
+    #[inline]
+    pub fn refresh_nnue_with_weights(&mut self, weights: &NnueWeights) {
         let k_red = crate::engine::nnue::get_red_king_palace_idx(self);
         let k_black = crate::engine::nnue::get_black_king_palace_idx(self);
         self.nnue_acc.refresh_red(&self.grid, k_red, weights);

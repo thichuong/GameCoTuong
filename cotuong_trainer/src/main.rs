@@ -341,22 +341,26 @@ impl FloatNnue {
             b4: 0.0,
         }
     }
+}
 
+pub struct DualForwardOutputs {
+    pub total_eval: f32,
+    pub l1_clamped_red: [f32; L2_INPUT_SIZE],
+    pub l1_clamped_black: [f32; L2_INPUT_SIZE],
+    pub l2_inp_red: [f32; L2_INPUT_SIZE],
+    pub l2_inp_black: [f32; L2_INPUT_SIZE],
+    pub l2_out_red: [f32; L2_OUTPUT_SIZE],
+    pub l2_out_black: [f32; L2_OUTPUT_SIZE],
+    pub l3_out_red: [f32; L3_OUTPUT_SIZE],
+    pub l3_out_black: [f32; L3_OUTPUT_SIZE],
+    pub bucket: usize,
+}
+
+impl FloatNnue {
     #[must_use]
     #[allow(clippy::type_complexity, clippy::cast_precision_loss)]
-    pub fn forward(
-        &self,
-        red_features: &[usize],
-        black_features: &[usize],
-    ) -> (
-        f32,
-        [f32; L2_INPUT_SIZE],
-        [f32; L2_INPUT_SIZE],
-        [f32; L2_OUTPUT_SIZE],
-        [f32; L3_OUTPUT_SIZE],
-        usize,
-    ) {
-        let piece_count = red_features.len().max(black_features.len()) + 2;
+    pub fn forward(&self, red_features: &[usize], black_features: &[usize]) -> DualForwardOutputs {
+        let piece_count = red_features.len().max(black_features.len()) + 1;
         let bucket = ((piece_count.saturating_sub(2)) * PSQT_BUCKETS / 30).min(PSQT_BUCKETS - 1);
 
         let mut acc_red = self.b1;
@@ -389,188 +393,254 @@ impl FloatNnue {
             }
         }
 
-        // L1 SCReLU activation: clamped in [0.0, 1.0], squared
-        let mut l1_clamped = [0.0f32; L2_INPUT_SIZE];
-        let mut l2_input = [0.0f32; L2_INPUT_SIZE];
-        if let Some(left_c) = l1_clamped.get_mut(..L1_OUTPUT_SIZE) {
-            for (c_out, &val) in left_c.iter_mut().zip(acc_red.iter()) {
-                *c_out = val.clamp(0.0, 1.0);
-            }
+        // L1 Clamped activations: [0.0, 1.0]
+        let mut l1_clamped_red = [0.0f32; L2_INPUT_SIZE];
+        let mut l1_clamped_black = [0.0f32; L2_INPUT_SIZE];
+
+        for (dst, &v) in l1_clamped_red[..L1_OUTPUT_SIZE]
+            .iter_mut()
+            .zip(acc_red.iter())
+        {
+            *dst = v.clamp(0.0, 1.0);
         }
-        if let Some(right_c) = l1_clamped.get_mut(L1_OUTPUT_SIZE..) {
-            for (c_out, &val) in right_c.iter_mut().zip(acc_black.iter()) {
-                *c_out = val.clamp(0.0, 1.0);
-            }
+        for (dst, &v) in l1_clamped_red[L1_OUTPUT_SIZE..]
+            .iter_mut()
+            .zip(acc_black.iter())
+        {
+            *dst = v.clamp(0.0, 1.0);
         }
-        for (act_out, &c_val) in l2_input.iter_mut().zip(l1_clamped.iter()) {
-            *act_out = c_val * c_val;
+
+        for (dst, &v) in l1_clamped_black[..L1_OUTPUT_SIZE]
+            .iter_mut()
+            .zip(acc_black.iter())
+        {
+            *dst = v.clamp(0.0, 1.0);
+        }
+        for (dst, &v) in l1_clamped_black[L1_OUTPUT_SIZE..]
+            .iter_mut()
+            .zip(acc_red.iter())
+        {
+            *dst = v.clamp(0.0, 1.0);
+        }
+
+        // L2 input (SCReLU squared)
+        let mut l2_inp_red = [0.0f32; L2_INPUT_SIZE];
+        let mut l2_inp_black = [0.0f32; L2_INPUT_SIZE];
+        for (dst, &v) in l2_inp_red.iter_mut().zip(l1_clamped_red.iter()) {
+            *dst = v * v;
+        }
+        for (dst, &v) in l2_inp_black.iter_mut().zip(l1_clamped_black.iter()) {
+            *dst = v * v;
         }
 
         // Layer 2: 384 -> 32
-        let mut l2_output = [0.0f32; L2_OUTPUT_SIZE];
-        for (j, (out, &b)) in l2_output.iter_mut().zip(self.b2.iter()).enumerate() {
-            if let Some(w_row) = self.w2.get(j) {
-                let mut sum = b;
-                for (&inp, &w) in l2_input.iter().zip(w_row.iter()) {
-                    sum += inp * w;
-                }
-                *out = sum.clamp(0.0, 1.0);
+        let mut l2_out_red = self.b2;
+        let mut l2_out_black = self.b2;
+
+        for (j, row) in self.w2.iter().enumerate() {
+            let mut sum_r = l2_out_red[j];
+            let mut sum_b = l2_out_black[j];
+            for (&inp_r, &w) in l2_inp_red.iter().zip(row.iter()) {
+                sum_r += inp_r * w;
             }
+            for (&inp_b, &w) in l2_inp_black.iter().zip(row.iter()) {
+                sum_b += inp_b * w;
+            }
+            l2_out_red[j] = sum_r.clamp(0.0, 1.0);
+            l2_out_black[j] = sum_b.clamp(0.0, 1.0);
         }
 
         // Layer 3: 32 -> 32
-        let mut l3_output = [0.0f32; L3_OUTPUT_SIZE];
-        for (k, (out, &b)) in l3_output.iter_mut().zip(self.b3.iter()).enumerate() {
-            if let Some(w_row) = self.w3.get(k) {
-                let mut sum = b;
-                for (&inp, &w) in l2_output.iter().zip(w_row.iter()) {
-                    sum += inp * w;
-                }
-                *out = sum.clamp(0.0, 1.0);
+        let mut l3_out_red = self.b3;
+        let mut l3_out_black = self.b3;
+
+        for (k, row) in self.w3.iter().enumerate() {
+            let mut sum_r = l3_out_red[k];
+            let mut sum_b = l3_out_black[k];
+            for (&inp_r, &w) in l2_out_red.iter().zip(row.iter()) {
+                sum_r += inp_r * w;
             }
+            for (&inp_b, &w) in l2_out_black.iter().zip(row.iter()) {
+                sum_b += inp_b * w;
+            }
+            l3_out_red[k] = sum_r.clamp(0.0, 1.0);
+            l3_out_black[k] = sum_b.clamp(0.0, 1.0);
         }
 
-        // Layer 4 (Output): 32 -> 1 + PSQT Head
-        let mut nn_sum = self.b4;
-        for (&val, &w) in l3_output.iter().zip(self.w4.iter()) {
-            nn_sum += val * w;
+        // Layer 4 (Output): 32 -> 1
+        let mut final_red = self.b4;
+        let mut final_black = self.b4;
+        for (&inp_r, &w) in l3_out_red.iter().zip(self.w4.iter()) {
+            final_red += inp_r * w;
+        }
+        for (&inp_b, &w) in l3_out_black.iter().zip(self.w4.iter()) {
+            final_black += inp_b * w;
         }
 
-        let total_eval = (psqt_red - psqt_black) + nn_sum;
-        (
-            total_eval, l1_clamped, l2_input, l2_output, l3_output, bucket,
-        )
+        let positional_score = (final_red - final_black) / 2.0;
+        let total_eval = (psqt_red - psqt_black) + positional_score;
+
+        DualForwardOutputs {
+            total_eval,
+            l1_clamped_red,
+            l1_clamped_black,
+            l2_inp_red,
+            l2_inp_black,
+            l2_out_red,
+            l2_out_black,
+            l3_out_red,
+            l3_out_black,
+            bucket,
+        }
     }
 
     #[allow(clippy::indexing_slicing, clippy::too_many_lines)]
     pub fn train_step(&mut self, sample: &PositionSample, lr: f32) -> f32 {
-        let (pred, l1_clamped, l2_inp, l2_out, l3_out, bucket) =
-            self.forward(&sample.red_features, &sample.black_features);
+        let fwd = self.forward(&sample.red_features, &sample.black_features);
 
+        let eval_clamped = sample.search_eval.clamp(-1200.0, 1200.0);
         let target_score = if sample.search_eval.abs() > 1e-4 {
-            0.5 * sigmoid(sample.search_eval / 400.0) + 0.5 * sample.game_result
+            0.85 * sigmoid(eval_clamped / 400.0) + 0.15 * sample.game_result
         } else {
             sample.game_result
         };
 
-        let pred_prob = sigmoid(pred / 400.0);
+        let pred_prob = sigmoid(fwd.total_eval / 400.0);
         let error = pred_prob - target_score;
 
         let grad_out = (error * (pred_prob * (1.0 - pred_prob)) / 400.0).clamp(-1.0, 1.0);
 
         // 1. Update PSQT Head for active features
-        let psqt_lr = lr * 2.5;
+        let psqt_lr = lr * 2.0;
         for &feat in &sample.red_features {
             if let Some(psqt_row) = self.w_psqt.get_mut(feat) {
-                if let Some(cell) = psqt_row.get_mut(bucket) {
+                if let Some(cell) = psqt_row.get_mut(fwd.bucket) {
                     *cell -= psqt_lr * grad_out;
                 }
             }
         }
         for &feat in &sample.black_features {
             if let Some(psqt_row) = self.w_psqt.get_mut(feat) {
-                if let Some(cell) = psqt_row.get_mut(bucket) {
+                if let Some(cell) = psqt_row.get_mut(fwd.bucket) {
                     *cell += psqt_lr * grad_out;
                 }
             }
         }
 
-        // 2. Update Layer 4
-        self.b4 -= lr * grad_out;
-        for (w, &val) in self.w4.iter_mut().zip(l3_out.iter()) {
-            *w -= lr * grad_out * val;
-        }
+        // Dual perspectives backpropagation: Red (+0.5 * grad_out), Black (-0.5 * grad_out)
+        let branches = [
+            (
+                0.5f32 * grad_out,
+                &fwd.l1_clamped_red,
+                &fwd.l2_inp_red,
+                &fwd.l2_out_red,
+                &fwd.l3_out_red,
+                true,
+            ),
+            (
+                -0.5f32 * grad_out,
+                &fwd.l1_clamped_black,
+                &fwd.l2_inp_black,
+                &fwd.l2_out_black,
+                &fwd.l3_out_black,
+                false,
+            ),
+        ];
 
-        // 3. Backprop to Layer 3
-        let mut grad_l3 = [0.0f32; L3_OUTPUT_SIZE];
-        for (k, (&w4_val, &l3_val)) in self.w4.iter().zip(l3_out.iter()).enumerate() {
-            if l3_val > 0.0 && l3_val < 1.0 {
-                if let Some(g) = grad_l3.get_mut(k) {
-                    *g = (grad_out * w4_val).clamp(-1.0, 1.0);
+        for (g_branch, l1_clamped, l2_inp, l2_out, l3_out, is_red_branch) in branches {
+            if g_branch.abs() < 1e-8 {
+                continue;
+            }
+
+            // 2. Update Layer 4
+            self.b4 -= lr * g_branch;
+            for (w, &val) in self.w4.iter_mut().zip(l3_out.iter()) {
+                *w -= lr * g_branch * val;
+            }
+
+            // 3. Backprop to Layer 3
+            let mut grad_l3 = [0.0f32; L3_OUTPUT_SIZE];
+            for (k, (&w4_val, &l3_val)) in self.w4.iter().zip(l3_out.iter()).enumerate() {
+                if l3_val > 0.0 && l3_val < 1.0 {
+                    grad_l3[k] = (g_branch * w4_val).clamp(-1.0, 1.0);
                 }
             }
-        }
 
-        for (k, &g_l3) in grad_l3.iter().enumerate() {
-            if g_l3.abs() > 1e-7 {
-                if let Some(b) = self.b3.get_mut(k) {
-                    *b -= lr * g_l3;
-                }
-                if let Some(w_row) = self.w3.get_mut(k) {
-                    for (w, &inp) in w_row.iter_mut().zip(l2_out.iter()) {
-                        *w -= lr * g_l3 * inp;
-                    }
-                }
-            }
-        }
-
-        // 4. Backprop to Layer 2
-        let mut grad_l2 = [0.0f32; L2_OUTPUT_SIZE];
-        for (j, &l2_val) in l2_out.iter().enumerate() {
-            if l2_val > 0.0 && l2_val < 1.0 {
-                let mut sum_g = 0.0f32;
-                for (k, &g_l3) in grad_l3.iter().enumerate() {
-                    if let Some(w_row) = self.w3.get(k) {
-                        if let Some(&w) = w_row.get(j) {
-                            sum_g += g_l3 * w;
+            for (k, &g_l3) in grad_l3.iter().enumerate() {
+                if g_l3.abs() > 1e-7 {
+                    self.b3[k] -= lr * g_l3;
+                    if let Some(w_row) = self.w3.get_mut(k) {
+                        for (w, &inp) in w_row.iter_mut().zip(l2_out.iter()) {
+                            *w -= lr * g_l3 * inp;
                         }
                     }
                 }
-                if let Some(g) = grad_l2.get_mut(j) {
-                    *g = sum_g.clamp(-1.0, 1.0);
+            }
+
+            // 4. Backprop to Layer 2
+            let mut grad_l2 = [0.0f32; L2_OUTPUT_SIZE];
+            for (j, &l2_val) in l2_out.iter().enumerate() {
+                if l2_val > 0.0 && l2_val < 1.0 {
+                    let mut sum_g = 0.0f32;
+                    for (k, &g_l3) in grad_l3.iter().enumerate() {
+                        if let Some(w_row) = self.w3.get(k) {
+                            sum_g += g_l3 * w_row[j];
+                        }
+                    }
+                    grad_l2[j] = sum_g.clamp(-1.0, 1.0);
                 }
             }
-        }
 
-        // 5. Backprop to Layer 1 (SCReLU derivative: 2 * c_val for c_val in (0, 1))
-        let mut grad_l1 = [0.0f32; L2_INPUT_SIZE];
-        for (i, &c_val) in l1_clamped.iter().enumerate() {
-            if c_val > 0.0 && c_val < 1.0 {
-                let mut sum_g = 0.0f32;
-                for (j, &g_l2) in grad_l2.iter().enumerate() {
-                    if let Some(w_row) = self.w2.get(j) {
-                        if let Some(&w) = w_row.get(i) {
-                            sum_g += g_l2 * w;
+            for (j, &g_l2) in grad_l2.iter().enumerate() {
+                if g_l2.abs() > 1e-7 {
+                    self.b2[j] -= lr * g_l2;
+                    if let Some(w_row) = self.w2.get_mut(j) {
+                        for (w, &inp) in w_row.iter_mut().zip(l2_inp.iter()) {
+                            *w -= lr * g_l2 * inp;
                         }
                     }
                 }
-                if let Some(g1) = grad_l1.get_mut(i) {
-                    *g1 = (sum_g * 2.0 * c_val).clamp(-1.0, 1.0);
+            }
+
+            // 5. Backprop to Layer 1 (SCReLU derivative: 2 * c_val for c_val in (0, 1))
+            let mut grad_l1 = [0.0f32; L2_INPUT_SIZE];
+            for (i, &c_val) in l1_clamped.iter().enumerate() {
+                if c_val > 0.0 && c_val < 1.0 {
+                    let mut sum_g = 0.0f32;
+                    for (j, &g_l2) in grad_l2.iter().enumerate() {
+                        if let Some(w_row) = self.w2.get(j) {
+                            sum_g += g_l2 * w_row[i];
+                        }
+                    }
+                    grad_l1[i] = (sum_g * 2.0 * c_val).clamp(-1.0, 1.0);
                 }
             }
-        }
 
-        for (j, &g_l2) in grad_l2.iter().enumerate() {
-            if g_l2.abs() > 1e-7 {
-                if let Some(b) = self.b2.get_mut(j) {
-                    *b -= lr * g_l2;
-                }
-                if let Some(w_row) = self.w2.get_mut(j) {
-                    for (w, &inp) in w_row.iter_mut().zip(l2_inp.iter()) {
-                        *w -= lr * g_l2 * inp;
+            // Update sparse active features in W1
+            let l1_lr = lr * 0.25;
+            let (active_feats, opp_feats) = if is_red_branch {
+                (&sample.red_features, &sample.black_features)
+            } else {
+                (&sample.black_features, &sample.red_features)
+            };
+
+            for &feat in active_feats {
+                if let Some(row) = self.w1.get_mut(feat) {
+                    for (idx, cell) in row.iter_mut().enumerate() {
+                        let g = grad_l1[idx];
+                        if g.abs() > 1e-7 {
+                            *cell = (*cell - l1_lr * g).clamp(-4.0, 4.0);
+                        }
                     }
                 }
             }
-        }
-
-        // Update sparse active features in W1 (trainable channels 24..L1_OUTPUT_SIZE)
-        let l1_lr = lr * 0.25;
-        for &feat in &sample.red_features {
-            if let Some(row) = self.w1.get_mut(feat) {
-                for idx in 24..L1_OUTPUT_SIZE {
-                    let g = grad_l1[idx];
-                    if g.abs() > 1e-7 {
-                        row[idx] = (row[idx] - l1_lr * g).clamp(-4.0, 4.0);
-                    }
-                }
-            }
-        }
-        for &feat in &sample.black_features {
-            if let Some(row) = self.w1.get_mut(feat) {
-                for idx in 24..L1_OUTPUT_SIZE {
-                    let g = grad_l1[L1_OUTPUT_SIZE + idx];
-                    if g.abs() > 1e-7 {
-                        row[idx] = (row[idx] - l1_lr * g).clamp(-4.0, 4.0);
+            for &feat in opp_feats {
+                if let Some(row) = self.w1.get_mut(feat) {
+                    for (idx, cell) in row.iter_mut().enumerate() {
+                        let g = grad_l1[L1_OUTPUT_SIZE + idx];
+                        if g.abs() > 1e-7 {
+                            *cell = (*cell - l1_lr * g).clamp(-4.0, 4.0);
+                        }
                     }
                 }
             }
@@ -635,7 +705,7 @@ impl FloatNnue {
         for (dst, &val) in b2.iter_mut().zip(self.b2.iter()) {
             #[allow(clippy::cast_possible_truncation)]
             {
-                *dst = (val * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+                *dst = (val * 16384.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
             }
         }
 
@@ -659,7 +729,7 @@ impl FloatNnue {
         for (dst, &val) in b3.iter_mut().zip(self.b3.iter()) {
             #[allow(clippy::cast_possible_truncation)]
             {
-                *dst = (val * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+                *dst = (val * 8192.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
             }
         }
 
@@ -672,7 +742,7 @@ impl FloatNnue {
         }
 
         #[allow(clippy::cast_possible_truncation)]
-        let b4 = (self.b4 * 16.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+        let b4 = (self.b4 * 2048.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
 
         NnueWeights {
             w1,
@@ -734,7 +804,7 @@ impl FloatNnue {
         // B2: scale f32 to i32
         for &val in self.b2.iter() {
             #[allow(clippy::cast_possible_truncation)]
-            let q = (val * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+            let q = (val * 16384.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
             bytes.extend_from_slice(&q.to_le_bytes());
         }
 
@@ -751,7 +821,7 @@ impl FloatNnue {
         // B3: scale f32 to i32
         for &val in self.b3.iter() {
             #[allow(clippy::cast_possible_truncation)]
-            let q = (val * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+            let q = (val * 8192.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
             bytes.extend_from_slice(&q.to_le_bytes());
         }
 
@@ -764,7 +834,7 @@ impl FloatNnue {
 
         // B4: scale f32 to i32
         #[allow(clippy::cast_possible_truncation)]
-        let q_b4 = (self.b4 * 16.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+        let q_b4 = (self.b4 * 2048.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
         bytes.extend_from_slice(&q_b4.to_le_bytes());
 
         file.write_all(&bytes)?;
@@ -818,7 +888,7 @@ impl FloatNnue {
         // B2: scale f32 to i32
         for &val in self.b2.iter() {
             #[allow(clippy::cast_possible_truncation)]
-            let q = (val * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+            let q = (val * 16384.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
             bytes.extend_from_slice(&q.to_le_bytes());
         }
 
@@ -835,7 +905,7 @@ impl FloatNnue {
         // B3: scale f32 to i32
         for &val in self.b3.iter() {
             #[allow(clippy::cast_possible_truncation)]
-            let q = (val * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+            let q = (val * 8192.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
             bytes.extend_from_slice(&q.to_le_bytes());
         }
 
@@ -848,7 +918,7 @@ impl FloatNnue {
 
         // B4: scale f32 to i32
         #[allow(clippy::cast_possible_truncation)]
-        let q_b4 = (self.b4 * 16.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+        let q_b4 = (self.b4 * 2048.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
         bytes.extend_from_slice(&q_b4.to_le_bytes());
 
         file.write_all(&bytes)?;
@@ -1042,7 +1112,7 @@ impl FloatNnue {
 
         let mut b2 = [0.0f32; L2_OUTPUT_SIZE];
         for (dst, &val) in b2.iter_mut().zip(weights.b2.iter()) {
-            *dst = (val as f32) / 4096.0;
+            *dst = (val as f32) / 16384.0;
         }
 
         let mut w3_vec = vec![[0.0f32; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
@@ -1057,7 +1127,7 @@ impl FloatNnue {
 
         let mut b3 = [0.0f32; L3_OUTPUT_SIZE];
         for (dst, &val) in b3.iter_mut().zip(weights.b3.iter()) {
-            *dst = (val as f32) / 4096.0;
+            *dst = (val as f32) / 8192.0;
         }
 
         let mut w4 = [0.0f32; L3_OUTPUT_SIZE];
@@ -1065,7 +1135,7 @@ impl FloatNnue {
             *dst = f32::from(val) / 16.0;
         }
 
-        let b4 = (weights.b4 as f32) / 16.0;
+        let b4 = (weights.b4 as f32) / 2048.0;
 
         Self {
             w1,
@@ -1222,8 +1292,8 @@ fn play_selfplay_game(
             match search_res {
                 Some((mv, stats)) => {
                     let eval = match game_state.turn {
-                        Color::Red => stats.depth as f32 * 10.0,
-                        Color::Black => -(stats.depth as f32 * 10.0),
+                        Color::Red => stats.score as f32,
+                        Color::Black => -(stats.score as f32),
                     };
                     samples.push((red_feats, black_feats, eval, current_fen, current_turn));
                     mv
@@ -1642,7 +1712,9 @@ fn run_teacher_distillation(
     }
 }
 
-/// Runs Head-to-Head Sparring match against External Engine.
+/// Runs Head-to-Head Sparring match against External Engine with Online Learning.
+/// After every game, the model learns directly from that game's positions using Pikafish's
+/// feedback, progressively tuning and improving weights for the subsequent matches.
 fn run_sparring_match(
     engine_path: &str,
     protocol: EngineProtocol,
@@ -1651,7 +1723,7 @@ fn run_sparring_match(
     output_path: &str,
     resume_path: Option<&str>,
 ) {
-    println!("\n▶ Khởi tạo trận đấu tập (Sparring) với Engine: {engine_path} ...");
+    println!("\n▶ Khởi tạo đấu tập & tự động sửa sai (Sparring & Online Learning) với: {engine_path} ...");
     let mut client = match ExternalEngineClient::spawn(engine_path, protocol) {
         Ok(c) => c,
         Err(e) => {
@@ -1659,52 +1731,138 @@ fn run_sparring_match(
             return;
         }
     };
-    println!("✅ Đã sẵn sàng thi đấu {num_games} ván đối kháng!");
+    println!("✅ Đã sẵn sàng thi đấu {num_games} ván đối kháng (vừa đấu vừa học từ Pikafish)!");
 
-    let candidate_model = FloatNnue::load_or_init(resume_path, Some(output_path), false);
-    let cand_weights = Arc::new(candidate_model.to_quantized_weights());
+    let mut candidate_model = FloatNnue::load_or_init(resume_path, Some(output_path), false);
+    let mut cand_weights = Arc::new(candidate_model.to_quantized_weights());
     let config_cand = Arc::new(EngineConfig::default());
 
     let mut wins = 0;
     let mut draws = 0;
     let mut losses = 0;
 
+    let opening_books = [
+        vec!["h2e2", "b9c7", "b0c2", "h9g7"],
+        vec!["h2e2", "h7e7", "b0c2", "b9c7"],
+        vec!["g3g4", "c6c5", "b0c2", "b9a7"],
+        vec!["g0e2", "b9c7", "b0a2", "h9g7"],
+        vec!["b0c2", "b9c7", "h2g2", "h9g7"],
+        vec!["h2f2", "b9c7", "b0c2", "h9g7"],
+        vec!["h2e2", "b9c7", "b0c2", "h9i7"],
+        vec!["c3c4", "c6c5", "h2e2", "b9c7"],
+        vec!["h2d2", "b9c7", "b0c2", "h9g7"],
+        vec!["b2b6", "b9c7", "b0c2", "h9g7"],
+    ];
+
+    let mut rng = rand::thread_rng();
+
     for game_idx in 1..=num_games {
         let cand_is_red = game_idx % 2 == 1;
         let mut game_state = cotuong_core::logic::game::GameState::new();
+        let mut move_history: Vec<Move> = Vec::new();
+        let mut game_samples: Vec<PositionSample> = Vec::new();
+
+        let _ = client.new_game();
+
         let mut cand_engine =
             AlphaBetaEngine::with_weights(config_cand.clone(), cand_weights.clone());
 
         println!(
-            "  ▶ Ván {game_idx}/{num_games}: Bot cầm {}",
+            "\n  ▶ [Ván {game_idx}/{num_games}] Bot cầm {}",
             if cand_is_red { "ĐỎ" } else { "ĐEN" }
         );
 
-        for _ply in 0..100 {
-            if game_state.status != cotuong_core::logic::game::GameStatus::Playing {
-                break;
+        // Khai cuộc đa dạng từ opening book
+        if let Some(opening_moves) = opening_books.choose(&mut rng) {
+            for &m_str in opening_moves {
+                if let Ok(mv) = Move::from_uci(m_str) {
+                    if let (Some(from), Some(to)) = (
+                        BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize),
+                        BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize),
+                    ) {
+                        if game_state.make_move(from, to).is_ok() {
+                            move_history.push(mv);
+                        }
+                    }
+                }
             }
+        }
 
+        let max_plies = 120;
+        let mut decisive_eval_streak = 0usize;
+
+        while move_history.len() < max_plies
+            && game_state.status == cotuong_core::logic::game::GameStatus::Playing
+        {
             let turn = game_state.turn;
-            let best_move =
-                if (turn == Color::Red && cand_is_red) || (turn == Color::Black && !cand_is_red) {
-                    cand_engine
-                        .search(
-                            &game_state,
-                            SearchLimit::DepthOrTime {
-                                depth,
-                                time_ms: 2000,
-                            },
-                            &[],
-                        )
-                        .map(|(mv, _)| mv)
-                } else {
-                    let fen = game_state.board.to_fen_string(turn);
-                    client
-                        .get_best_move(&fen, &[], depth, Duration::from_millis(2000))
-                        .ok()
-                        .flatten()
-                };
+            let is_bot_turn =
+                (turn == Color::Red && cand_is_red) || (turn == Color::Black && !cand_is_red);
+
+            let (red_feats, black_feats) = extract_features(&game_state.board);
+            let current_fen = game_state.board.to_fen_string(turn);
+
+            let (best_move, eval_cp) = if is_bot_turn {
+                let search_res = cand_engine.search(
+                    &game_state,
+                    SearchLimit::DepthOrTime {
+                        depth,
+                        time_ms: 2000,
+                    },
+                    &[],
+                );
+                match search_res {
+                    Some((mv, stats)) => (Some(mv), stats.score as f32),
+                    None => (None, 0.0),
+                }
+            } else {
+                let eval_res = client.evaluate_game_position(
+                    &move_history,
+                    depth,
+                    Duration::from_millis(3000),
+                );
+                match eval_res {
+                    Ok((cp, mv_opt)) => (mv_opt, cp),
+                    Err(_) => (None, 0.0),
+                }
+            };
+
+            let eval_red = if turn == Color::Black {
+                -eval_cp
+            } else {
+                eval_cp
+            };
+
+            game_samples.push(PositionSample {
+                red_features: red_feats,
+                black_features: black_feats,
+                search_eval: eval_red,
+                game_result: 0.5,
+                fen: current_fen,
+                turn,
+            });
+
+            // Adjudication nếu điểm quá chênh lệch liên tiếp 4 nước
+            if eval_cp.abs() >= 1200.0 {
+                decisive_eval_streak += 1;
+                if decisive_eval_streak >= 4 {
+                    let winner = if (turn == Color::Red && eval_cp > 0.0)
+                        || (turn == Color::Black && eval_cp < 0.0)
+                    {
+                        Color::Red
+                    } else {
+                        Color::Black
+                    };
+                    println!(
+                        "    ⚡ Thắng áp đảo (Adjudication Eval {:.0}) tại nước {}.",
+                        eval_cp,
+                        move_history.len()
+                    );
+                    game_state.status = cotuong_core::logic::game::GameStatus::Checkmate(winner);
+                    break;
+                }
+            } else {
+                decisive_eval_streak = 0;
+            }
 
             match best_move {
                 Some(mv) => {
@@ -1712,8 +1870,15 @@ fn run_sparring_match(
                         BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize),
                         BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize),
                     ) {
-                        if game_state.make_move(from, to).is_err() {
-                            break;
+                        match game_state.make_move(from, to) {
+                            Ok(()) => move_history.push(mv),
+                            Err(cotuong_core::logic::rules::MoveError::ThreeFoldRepetition) => {
+                                println!("    ⚖️ Hòa ván do lặp lại thế cờ 3 lần.");
+                                game_state.status =
+                                    cotuong_core::logic::game::GameStatus::Stalemate;
+                                break;
+                            }
+                            Err(_) => break,
                         }
                     } else {
                         break;
@@ -1729,28 +1894,68 @@ fn run_sparring_match(
             _ => (false, false),
         };
 
-        if cand_is_red {
-            if red_wins {
-                wins += 1;
-            } else if black_wins {
-                losses += 1;
-            } else {
-                draws += 1;
-            }
+        let result_score = if red_wins {
+            1.0f32
         } else if black_wins {
+            0.0f32
+        } else {
+            0.5f32
+        };
+
+        let result_str = if (cand_is_red && red_wins) || (!cand_is_red && black_wins) {
             wins += 1;
-        } else if red_wins {
+            "Bot Thắng 🏆"
+        } else if (cand_is_red && black_wins) || (!cand_is_red && red_wins) {
             losses += 1;
+            "Bot Thua ❌"
         } else {
             draws += 1;
+            "Hòa ⚖️"
+        };
+
+        println!(
+            "    🏁 Kết thúc ván {game_idx}: {result_str} (Tổng {} nước đi)",
+            move_history.len()
+        );
+
+        // Online Fine-Tuning: Lấy dữ liệu ván vừa đấu để train ngay 2 lượt
+        if !game_samples.is_empty() {
+            for sample in &mut game_samples {
+                sample.game_result = result_score;
+            }
+
+            let mut game_loss = 0.0f32;
+            let lr = 0.005f32;
+            for _ in 0..2 {
+                for sample in &game_samples {
+                    game_loss += candidate_model.train_step(sample, lr);
+                }
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let avg_loss = game_loss / (game_samples.len() as f32 * 2.0);
+
+            // Cập nhật trọng số lượng tử hóa mới cho Bot thi đấu ván tiếp theo!
+            cand_weights = Arc::new(candidate_model.to_quantized_weights());
+
+            // Lưu mô hình cải tiến
+            let _ = candidate_model.save_float(output_path);
+
+            println!(
+                "    🎓 [Tự động sửa sai] Đã học từ {} thế cờ ván {} (MAE = {:.4}) -> Cập nhật trọng số cho ván tiếp!",
+                game_samples.len(),
+                game_idx,
+                avg_loss
+            );
         }
     }
 
-    println!("\n📊 KẾT QUẢ ĐẤU TẬP VỚI ENGINE NGOÀI:");
+    println!("\n📊 KẾT QUẢ ĐẤU TẬP & TINH CHỈNH TỪ ENGINE NGOÀI:");
     println!("   • Bot : {wins} Thắng | {draws} Hòa | {losses} Thua / {num_games} ván");
     let score_rate = (wins as f64 + 0.5 * draws as f64) / (num_games as f64);
     println!("   • Tỷ lệ đạt điểm: {:.1}%", score_rate * 100.0);
-    println!("💡 Trận đấu tập đánh giá (Sparring) hoàn tất, mô hình được giữ nguyên.");
+    println!(
+        "💾 Trọng số mô hình đã được Pikafish nắn chỉnh qua từng ván và lưu tại: {output_path}"
+    );
 }
 
 /// Plays automated matches between two external engines (e.g. Pikafish vs Fairy-Stockfish)
@@ -1881,6 +2086,7 @@ fn run_engine_versus_datagen(
         // 2. Play game
         let max_plies = 140;
         let mut ply_count = move_history.len();
+        let mut decisive_eval_streak = 0usize;
 
         while ply_count < max_plies
             && game_state.status == cotuong_core::logic::game::GameStatus::Playing
@@ -1909,6 +2115,31 @@ fn run_engine_versus_datagen(
                         eval_cp
                     };
                     position_records.push((fen, eval_red));
+
+                    // Early adjudication: if one side has a decisive winning advantage
+                    // (|eval| >= 1200 cp) for 4 consecutive moves, adjudicate the game as won
+                    // to prevent flooding the dataset with redundant trivial endgame moves.
+                    if eval_cp.abs() >= 1200.0 {
+                        decisive_eval_streak += 1;
+                        if decisive_eval_streak >= 4 {
+                            let winner = if (turn == Color::Red && eval_cp > 0.0)
+                                || (turn == Color::Black && eval_cp < 0.0)
+                            {
+                                Color::Red
+                            } else {
+                                Color::Black
+                            };
+                            println!(
+                                "   🏆 Thắng áp đảo (Adjudication bởi Eval {:.0}) -> Kết thúc ván tại nước {}.",
+                                eval_cp, ply_count
+                            );
+                            game_state.status =
+                                cotuong_core::logic::game::GameStatus::Checkmate(winner);
+                            break;
+                        }
+                    } else {
+                        decisive_eval_streak = 0;
+                    }
 
                     if let (Some(from), Some(to)) = (
                         BoardCoordinate::new(best_mv.from_row as usize, best_mv.from_col as usize),
@@ -1997,7 +2228,7 @@ fn run_engine_versus_datagen(
                     "Pikafish"
                 }
             );
-            let _ = writeln!(file, "moves {moves_str} | result: {result_str}");
+            let _ = writeln!(file, "# moves {moves_str} | result: {result_str}");
 
             for (fen, eval_red) in &position_records {
                 let _ = writeln!(
@@ -2005,7 +2236,7 @@ fn run_engine_versus_datagen(
                     "{fen} | eval: {eval_red:.0} | result: {result_score:.1}"
                 );
             }
-            total_positions_generated += position_records.len() + move_history.len();
+            total_positions_generated += position_records.len();
         }
     }
 

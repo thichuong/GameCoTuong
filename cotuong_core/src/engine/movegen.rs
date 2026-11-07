@@ -6,12 +6,16 @@ use crate::logic::lookup::AttackTables;
 
 pub const SCORE_HASH_MOVE: i32 = 1_000_000;
 pub const SCORE_CAPTURE_BASE: i32 = 100_000;
+pub const SCORE_KILLER_1: i32 = 90_000;
+pub const SCORE_KILLER_2: i32 = 80_000;
 
 pub struct MoveGenContext<'a> {
     pub board: &'a Board,
     pub turn: Color,
     pub moves: &'a mut MoveList,
     pub best_move: Option<Move>,
+    pub killers: &'a [Option<Move>],
+    pub history: Option<&'a [[i32; 90]; 90]>,
     pub only_captures: bool,
     pub enemy_bb: u128,
     pub friendly_bb: u128,
@@ -29,12 +33,24 @@ impl EngineMoveGen {
 
     #[inline]
     pub fn generate_moves(&self, board: &Board, turn: Color, best_move: Option<Move>) -> MoveList {
-        self.generate_moves_internal(board, turn, best_move, false)
+        self.generate_moves_internal(board, turn, best_move, &[], None, false)
+    }
+
+    #[inline]
+    pub fn generate_moves_with_ordering(
+        &self,
+        board: &Board,
+        turn: Color,
+        best_move: Option<Move>,
+        killers: &[Option<Move>],
+        history: Option<&[[i32; 90]; 90]>,
+    ) -> MoveList {
+        self.generate_moves_internal(board, turn, best_move, killers, history, false)
     }
 
     #[inline]
     pub fn generate_captures(&self, board: &Board, turn: Color) -> MoveList {
-        self.generate_moves_internal(board, turn, None, true)
+        self.generate_moves_internal(board, turn, None, &[], None, true)
     }
 
     fn generate_moves_internal(
@@ -42,6 +58,8 @@ impl EngineMoveGen {
         board: &Board,
         turn: Color,
         best_move: Option<Move>,
+        killers: &[Option<Move>],
+        history: Option<&[[i32; 90]; 90]>,
         only_captures: bool,
     ) -> MoveList {
         let mut moves = MoveList::new();
@@ -53,6 +71,8 @@ impl EngineMoveGen {
             turn,
             moves: &mut moves,
             best_move,
+            killers,
+            history,
             only_captures,
             enemy_bb,
             friendly_bb,
@@ -62,19 +82,20 @@ impl EngineMoveGen {
         use crate::logic::board::BitboardIterator;
 
         let start = turn.index() * 7;
-        for pt_idx in 0..7 {
+        let priority_pieces = [
+            PieceType::Chariot,
+            PieceType::Cannon,
+            PieceType::Horse,
+            PieceType::Soldier,
+            PieceType::Elephant,
+            PieceType::Advisor,
+            PieceType::General,
+        ];
+
+        for &piece_type in &priority_pieces {
+            let pt_idx = piece_type.index();
             let Some(&bb) = board.bitboards.get(start + pt_idx) else {
                 continue;
-            };
-            let piece_type = match pt_idx {
-                0 => PieceType::General,
-                1 => PieceType::Advisor,
-                2 => PieceType::Elephant,
-                3 => PieceType::Horse,
-                4 => PieceType::Chariot,
-                5 => PieceType::Cannon,
-                6 => PieceType::Soldier,
-                _ => unreachable!(),
             };
             ctx.attacker_val = get_piece_value(piece_type);
 
@@ -125,12 +146,37 @@ impl EngineMoveGen {
                 && bm.to_col as usize == tc
         });
 
+        let is_killer_1 = ctx.killers.first().and_then(|&k| k).is_some_and(|km| {
+            km.from_row as usize == r
+                && km.from_col as usize == c
+                && km.to_row as usize == tr
+                && km.to_col as usize == tc
+        });
+
+        let is_killer_2 = ctx.killers.get(1).and_then(|&k| k).is_some_and(|km| {
+            km.from_row as usize == r
+                && km.from_col as usize == c
+                && km.to_row as usize == tr
+                && km.to_col as usize == tc
+        });
+
         let score = if is_hash_move {
             SCORE_HASH_MOVE
         } else if let Some(t) = target {
             let victim_val = get_piece_value(t.piece_type);
             // MVV-LVA: Most Valuable Victim - Least Valuable Attacker
             SCORE_CAPTURE_BASE + victim_val * 10 - ctx.attacker_val
+        } else if is_killer_1 {
+            SCORE_KILLER_1
+        } else if is_killer_2 {
+            SCORE_KILLER_2
+        } else if let Some(hist) = ctx.history {
+            let from_sq = Board::square_index(r, c);
+            hist.get(from_sq)
+                .and_then(|row| row.get(target_sq))
+                .copied()
+                .unwrap_or(0)
+                .clamp(0, 50_000)
         } else {
             0
         };

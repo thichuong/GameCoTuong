@@ -17,6 +17,8 @@ pub struct AlphaBetaEngine {
     evaluator: SimpleEvaluator,
     tt: TranspositionTable,
     history_stack: Vec<u64>,
+    killer_moves: [[Option<Move>; 2]; 64],
+    history_table: Box<[[i32; 90]; 90]>,
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
@@ -37,6 +39,8 @@ impl AlphaBetaEngine {
             evaluator: SimpleEvaluator::new(config.clone()),
             tt: TranspositionTable::new(tt_size),
             history_stack: Vec::with_capacity(64),
+            killer_moves: [[None; 2]; 64],
+            history_table: Box::new([[0; 90]; 90]),
             nodes_searched: 0,
             start_time: 0.0,
             time_limit: None,
@@ -234,6 +238,86 @@ impl AlphaBetaEngine {
         None
     }
 
+    fn quiescence(
+        &mut self,
+        board: &mut Board,
+        mut alpha: i32,
+        beta: i32,
+        turn: Color,
+        ply: u8,
+    ) -> Option<i32> {
+        if ply >= MAX_PLY {
+            return Some(self.eval_for_turn(board, turn));
+        }
+
+        self.nodes_searched += 1;
+        if self.check_time() {
+            return None;
+        }
+
+        let in_check = is_in_check(board, turn);
+        if !in_check {
+            let stand_pat = self.eval_for_turn(board, turn);
+            if stand_pat >= beta {
+                return Some(beta);
+            }
+            if stand_pat > alpha {
+                alpha = stand_pat;
+            }
+        }
+
+        let movegen = EngineMoveGen::new();
+        let moves = if in_check {
+            movegen.generate_moves(board, turn, None)
+        } else {
+            movegen.generate_captures(board, turn)
+        };
+
+        let mut legal_moves_count = 0;
+        for mv in moves.iter() {
+            let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(mv) else {
+                continue;
+            };
+
+            if is_in_check(board, turn) || is_flying_general(board) {
+                board.undo_move_board_only(mv, piece, captured);
+                continue;
+            }
+
+            legal_moves_count += 1;
+            let saved_acc = board.nnue_acc;
+            board.update_nnue_for_move_with_weights(
+                from_sq,
+                to_sq,
+                piece,
+                captured,
+                self.evaluator.weights(),
+            );
+
+            let score_opt = self
+                .quiescence(board, -beta, -alpha, turn.opposite(), ply.saturating_add(1))
+                .map(|v| -v);
+
+            board.undo_move_board_only(mv, piece, captured);
+            board.nnue_acc = saved_acc;
+
+            let score = score_opt?;
+
+            if score >= beta {
+                return Some(beta);
+            }
+            if score > alpha {
+                alpha = score;
+            }
+        }
+
+        if in_check && legal_moves_count == 0 {
+            return Some(-self.calculate_mate_score(ply));
+        }
+
+        Some(alpha)
+    }
+
     #[allow(clippy::too_many_lines)]
     fn alpha_beta(
         &mut self,
@@ -300,11 +384,11 @@ impl AlphaBetaEngine {
             }
         }
 
-        // Direct leaf evaluation: no Quiescence Search needed
+        // Quiescence Search at depth 0
         if depth == 0 {
-            let eval = self.eval_for_turn(board, turn);
+            let eval = self.quiescence(board, alpha, beta, turn, ply);
             self.history_stack.pop();
-            return Some(eval);
+            return eval;
         }
 
         let in_check = is_in_check(board, turn);
@@ -337,8 +421,17 @@ impl AlphaBetaEngine {
             depth -= 1;
         }
 
+        let p_idx = (ply as usize).min(63);
+        let killers = self.killer_moves[p_idx];
+
         let movegen = EngineMoveGen::new();
-        let moves = movegen.generate_moves(board, turn, best_move_tt);
+        let moves = movegen.generate_moves_with_ordering(
+            board,
+            turn,
+            best_move_tt,
+            &killers,
+            Some(&*self.history_table),
+        );
 
         let mut best_score = -INF_SCORE;
         let mut best_move_this_node = None;
@@ -375,7 +468,13 @@ impl AlphaBetaEngine {
 
             // Lazy NNUE update: save accumulator on stack, update for this move
             let saved_acc = board.nnue_acc;
-            board.update_nnue_for_move(from_sq, to_sq, piece, captured);
+            board.update_nnue_for_move_with_weights(
+                from_sq,
+                to_sq,
+                piece,
+                captured,
+                self.evaluator.weights(),
+            );
 
             // Late Move Reductions (LMR)
             let mut reduction = 0u8;
@@ -453,6 +552,18 @@ impl AlphaBetaEngine {
 
             if alpha >= beta {
                 tt_flag = TTFlag::LowerBound;
+                if !is_capture {
+                    if self.killer_moves[p_idx][0] != Some(*mv) {
+                        self.killer_moves[p_idx][1] = self.killer_moves[p_idx][0];
+                        self.killer_moves[p_idx][0] = Some(*mv);
+                    }
+                    if let Some(row) = self.history_table.get_mut(from_sq) {
+                        if let Some(val) = row.get_mut(to_sq) {
+                            let bonus = i32::from(depth) * i32::from(depth);
+                            *val = (*val + bonus).min(50_000);
+                        }
+                    }
+                }
                 break;
             }
         }
@@ -484,6 +595,8 @@ impl Searcher for AlphaBetaEngine {
         self.nodes_searched = 0;
         self.start_time = Self::now();
         self.history_stack.clear();
+        self.killer_moves = [[None; 2]; 64];
+        *self.history_table = [[0; 90]; 90];
 
         let (max_depth, time_limit) = match limit {
             SearchLimit::Depth(d) => (d.min(63), None),
@@ -496,7 +609,7 @@ impl Searcher for AlphaBetaEngine {
         let soft_limit = time_limit.map(|t| t * 0.6);
 
         let mut board = game_state.board.clone();
-        board.refresh_nnue();
+        board.refresh_nnue_with_weights(self.evaluator.weights());
         let board = &mut board;
         let turn = game_state.turn;
 
@@ -542,7 +655,13 @@ impl Searcher for AlphaBetaEngine {
                 let tt_move = best_move.or_else(|| self.tt.get_move(hash));
 
                 let movegen = EngineMoveGen::new();
-                let mut moves = movegen.generate_moves(board, turn, tt_move);
+                let mut moves = movegen.generate_moves_with_ordering(
+                    board,
+                    turn,
+                    tt_move,
+                    &self.killer_moves[0],
+                    Some(&*self.history_table),
+                );
 
                 if !excluded_moves.is_empty() {
                     moves.retain(|m| {
@@ -606,7 +725,13 @@ impl Searcher for AlphaBetaEngine {
                         continue;
                     };
                     let saved_acc = board.nnue_acc;
-                    board.update_nnue_for_move(from_sq, to_sq, piece, captured);
+                    board.update_nnue_for_move_with_weights(
+                        from_sq,
+                        to_sq,
+                        piece,
+                        captured,
+                        self.evaluator.weights(),
+                    );
 
                     let score_opt = if moves_searched == 0 {
                         self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), 1)
@@ -707,6 +832,7 @@ impl Searcher for AlphaBetaEngine {
                             nodes: self.nodes_searched,
                             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             time_ms: (Self::now() - self.start_time) as u64,
+                            score: previous_score.unwrap_or(0),
                         },
                     )
                 });
@@ -728,6 +854,7 @@ impl Searcher for AlphaBetaEngine {
                     nodes: self.nodes_searched,
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     time_ms: elapsed as u64,
+                    score: previous_score.unwrap_or(0),
                 },
             )
         })

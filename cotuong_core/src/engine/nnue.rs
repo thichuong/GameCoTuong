@@ -469,7 +469,7 @@ impl NnueWeights {
             ]);
             #[allow(clippy::cast_possible_truncation)]
             {
-                *val = (f * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+                *val = (f * 16384.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
             }
             offset += 4;
         }
@@ -513,7 +513,7 @@ impl NnueWeights {
             ]);
             #[allow(clippy::cast_possible_truncation)]
             {
-                *val = (f * 4096.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+                *val = (f * 8192.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
             }
             offset += 4;
         }
@@ -546,7 +546,7 @@ impl NnueWeights {
             *slice.get(3).unwrap_or(&0),
         ]);
         #[allow(clippy::cast_possible_truncation)]
-        let b4 = (f_b4 * 16.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+        let b4 = (f_b4 * 2048.0).clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
 
         Ok(Self {
             w1,
@@ -1053,7 +1053,7 @@ pub fn evaluate_dual_forward(
     // 2. Layer 2 -> Layer 3 (32 -> 32)
     let mut l3_red = weights.b3;
     for (j, &sum) in l2_red.iter().enumerate() {
-        let act = (sum >> 6).clamp(0, 127);
+        let act = (sum >> 7).clamp(0, 128);
         if act != 0 {
             if let Some(col) = weights.w3_col.get(j) {
                 for (out, &w) in l3_red.iter_mut().zip(col.iter()) {
@@ -1065,7 +1065,7 @@ pub fn evaluate_dual_forward(
 
     let mut l3_black = weights.b3;
     for (j, &sum) in l2_black.iter().enumerate() {
-        let act = (sum >> 6).clamp(0, 127);
+        let act = (sum >> 7).clamp(0, 128);
         if act != 0 {
             if let Some(col) = weights.w3_col.get(j) {
                 for (out, &w) in l3_black.iter_mut().zip(col.iter()) {
@@ -1078,7 +1078,7 @@ pub fn evaluate_dual_forward(
     // 3. Layer 3 -> Layer 4 (32 -> 1)
     let mut final_red = weights.b4;
     for (&sum, &w) in l3_red.iter().zip(weights.w4.iter()) {
-        let act = (sum >> 6).clamp(0, 127);
+        let act = (sum >> 6).clamp(0, 128);
         if act != 0 {
             final_red += act * i32::from(w);
         }
@@ -1086,13 +1086,13 @@ pub fn evaluate_dual_forward(
 
     let mut final_black = weights.b4;
     for (&sum, &w) in l3_black.iter().zip(weights.w4.iter()) {
-        let act = (sum >> 6).clamp(0, 127);
+        let act = (sum >> 6).clamp(0, 128);
         if act != 0 {
             final_black += act * i32::from(w);
         }
     }
 
-    (final_red / 16, final_black / 16)
+    (final_red / 2048, final_black / 2048)
 }
 
 /// Evaluates the deep FC layers (L1 -> L2 -> L3 -> Out) using SCReLU activation
@@ -1172,22 +1172,6 @@ mod tests {
                 "Failed to load model_int8.nnue: {:?}",
                 loaded_i8.err()
             );
-        }
-    }
-
-    #[test]
-    fn test_load_all_three_model_variants() {
-        if let Ok(bytes) = std::fs::read("assets/model_f32.bin") {
-            let loaded_f32 = NnueWeights::load_from_bytes(&bytes);
-            assert!(loaded_f32.is_ok(), "Failed to load model_f32.bin: {:?}", loaded_f32.err());
-        }
-        if let Ok(bytes) = std::fs::read("assets/model_int16.nnue") {
-            let loaded_i16 = NnueWeights::load_from_bytes(&bytes);
-            assert!(loaded_i16.is_ok(), "Failed to load model_int16.nnue: {:?}", loaded_i16.err());
-        }
-        if let Ok(bytes) = std::fs::read("assets/model_int8.nnue") {
-            let loaded_i8 = NnueWeights::load_from_bytes(&bytes);
-            assert!(loaded_i8.is_ok(), "Failed to load model_int8.nnue: {:?}", loaded_i8.err());
         }
     }
 
