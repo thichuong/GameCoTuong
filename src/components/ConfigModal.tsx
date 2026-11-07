@@ -38,29 +38,32 @@ interface Preset {
 const PRESETS: Preset[] = [
   {
     name: 'Tiêu Chuẩn (Mặc định)',
-    desc: 'Cân bằng hoàn hảo theo cấu hình gốc của cotuong_core.',
+    desc: 'Cân bằng hoàn hảo theo cấu hình gốc của cotuong_core với SIMD Int16.',
     config: {
       mate_score: 300000,
       tt_size_mb: 256,
       nnue_weight: 100,
+      model_type: 'int16',
     },
   },
   {
-    name: 'Tấn Công / Ép Sát',
-    desc: 'Tăng điểm chiếu bí và khuếch đại thế công mạng NNUE.',
+    name: 'Tấn Công / Chuẩn Xác Cao',
+    desc: 'Tăng điểm chiếu bí, khuếch đại thế công mạng và dùng trọng số Float32 nguyên bản.',
     config: {
       mate_score: 400000,
       tt_size_mb: 256,
       nnue_weight: 120,
+      model_type: 'f32',
     },
   },
   {
     name: 'Tiết Kiệm RAM',
-    desc: 'Thu nhỏ bảng băm TT xuống 64MB phù hợp thiết bị di động.',
+    desc: 'Bảng băm TT 64MB kết hợp model Int8 siêu nén cho thiết bị di động.',
     config: {
       mate_score: 200000,
       tt_size_mb: 64,
       nnue_weight: 100,
+      model_type: 'int8',
     },
   },
   {
@@ -70,6 +73,7 @@ const PRESETS: Preset[] = [
       mate_score: 500000,
       tt_size_mb: 512,
       nnue_weight: 95,
+      model_type: 'int16',
     },
   },
 ];
@@ -326,7 +330,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 const isSelected =
                   currentConfig.mate_score === preset.config.mate_score &&
                   currentConfig.tt_size_mb === preset.config.tt_size_mb &&
-                  currentConfig.nnue_weight === preset.config.nnue_weight;
+                  currentConfig.nnue_weight === preset.config.nnue_weight &&
+                  (currentConfig.model_type || 'int16') === (preset.config.model_type || 'int16');
 
                 return (
                   <button
@@ -352,12 +357,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                     <p className="text-[11px] text-stone-400 mt-1 leading-relaxed">
                       {preset.desc}
                     </p>
-                    <div className="flex items-center gap-2 mt-2 text-[10px] font-mono text-stone-400">
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[10px] font-mono text-stone-400">
                       <span>TT: {preset.config.tt_size_mb}MB</span>
                       <span>•</span>
-                      <span>Mate: {preset.config.mate_score.toLocaleString('vi-VN')}</span>
+                      <span>Mate: {(preset.config.mate_score / 1000).toLocaleString('vi-VN')}k</span>
                       <span>•</span>
                       <span>NNUE: {preset.config.nnue_weight}%</span>
+                      <span>•</span>
+                      <span className="text-amber-300 font-semibold">{preset.config.model_type?.toUpperCase()}</span>
                     </div>
                   </button>
                 );

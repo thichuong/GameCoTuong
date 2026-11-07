@@ -49,6 +49,8 @@ pub const FLOAT_FILE_SIZE: usize = 8
     + 4;
 
 const EMBEDDED_WEIGHTS: &[u8] = include_bytes!("../../assets/default.nnue");
+const EMBEDDED_INT8_WEIGHTS: &[u8] = include_bytes!("../../assets/model_int8.nnue");
+const EMBEDDED_F32_WEIGHTS: &[u8] = include_bytes!("../../assets/model_f32.bin");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NnueAccumulator {
@@ -85,6 +87,8 @@ pub struct NnueWeights {
 }
 
 static NNUE_INSTANCE: OnceLock<NnueWeights> = OnceLock::new();
+static NNUE_INSTANCE_INT8: OnceLock<NnueWeights> = OnceLock::new();
+static NNUE_INSTANCE_F32: OnceLock<NnueWeights> = OnceLock::new();
 
 impl NnueWeights {
     #[must_use]
@@ -92,6 +96,19 @@ impl NnueWeights {
         NNUE_INSTANCE.get_or_init(|| {
             Self::load_from_bytes(EMBEDDED_WEIGHTS).unwrap_or_else(|_| Self::empty())
         })
+    }
+
+    #[must_use]
+    pub fn get_by_type(model_type: &str) -> &'static Self {
+        match model_type {
+            "int8" => NNUE_INSTANCE_INT8.get_or_init(|| {
+                Self::load_from_bytes(EMBEDDED_INT8_WEIGHTS).unwrap_or_else(|_| Self::empty())
+            }),
+            "f32" => NNUE_INSTANCE_F32.get_or_init(|| {
+                Self::load_from_bytes(EMBEDDED_F32_WEIGHTS).unwrap_or_else(|_| Self::empty())
+            }),
+            _ => Self::get(),
+        }
     }
 
     #[must_use]
