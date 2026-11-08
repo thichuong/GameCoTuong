@@ -1,5 +1,4 @@
 import init, { WasmEngine, WasmGameState } from '../wasm/cotuong_core.js';
-import wasmUrl from '../wasm/cotuong_core_bg.wasm?url';
 import type { SearchResult } from '../types/game.js';
 
 let isWasmInitialized = false;
@@ -8,7 +7,7 @@ let currentConfigJson: string | null = null;
 
 async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
   if (!isWasmInitialized) {
-    await init(wasmUrl);
+    await init();
     isWasmInitialized = true;
   }
 

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Trophy, Handshake, AlertTriangle, RotateCcw, LayoutGrid, Columns, Rows } from 'lucide-react';
 import init, { WasmGameState } from './wasm/cotuong_core.js';
-import wasmUrl from './wasm/cotuong_core_bg.wasm?url';
 import type {
   Difficulty,
   EngineConfig,
@@ -148,7 +147,7 @@ export const App: React.FC = () => {
     let worker: Worker | null = null;
 
     async function setup() {
-      await init(wasmUrl);
+      await init();
       gameStateRef.current = new WasmGameState();
       syncGameState();
       setIsWasmReady(true);
