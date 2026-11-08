@@ -9,6 +9,7 @@
     "lint": "tsc --noEmit",
     "test": "npx tsx --test src/**/*.test.ts",
     "preview": "vite preview",
+    "deploy": "npm run build && npx wrangler deploy",
     "build:wasm": "cargo build -p cotuong_core --target wasm32-unknown-unknown --release && wasm-bindgen --target web --out-dir src/wasm target/wasm32-unknown-unknown/release/cotuong_core.wasm",
     "train": "bash train.sh"
   },
@@ -24,6 +25,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "wrangler": "^4.158.0"
   }
 }

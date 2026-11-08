@@ -1,5 +1,4 @@
 const CACHE_NAME = 'xiangqi-pwa-v2';
-const REPO_NAME = '/GameCoTuong';
 const ASSETS = [
     './',
     './index.html',
