@@ -93,4 +93,5 @@ This compiles `cotuong_core` for `wasm32-unknown-unknown` in release mode and ru
 ### Modifying UI components
 1. Keep components modular under `src/components/`
 2. Maintain the dark wood/lacquerware palette (`#14110F`, `#1C1815`, `#F5EFE6`, amber/vermilion accents)
-3. Verify TypeScript compilation and bundle build with `npm run lint && npm run build`
+3. **DO NOT modify generated WASM bridge files directly**: Never edit `src/wasm/cotuong_core.js`, `src/wasm/cotuong_core.d.ts`, or `src/wasm/cotuong_core_bg.wasm.d.ts`. They are auto-generated artifacts of `npm run build:wasm`. Any changes must be made in `cotuong_core/src/wasm.rs` followed by a rebuild.
+4. Verify TypeScript compilation and bundle build with `npm run lint && npm run build`

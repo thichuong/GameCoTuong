@@ -15,6 +15,13 @@ description: Các quy tắc bắt buộc (Mandatory Rules) về an toàn, xử l
 
 ## 2. Code Integrity (Tính toàn vẹn)
 - **Không xóa Logic**: Không tự ý xóa logic phức tạp trong bộ tìm kiếm Alpha-Beta, hàm lượng giá hoặc luật cờ nếu không có yêu cầu refactor rõ ràng.
+- **CẤM sửa trực tiếp các file WASM sinh tự động**:
+  - Khi sửa UI React hoặc TypeScript frontend, **TUYỆT ĐỐI CẤM** sửa, thay đổi hoặc can thiệp thủ công vào các file được sinh tự động bởi quá trình build WASM:
+    - `src/wasm/cotuong_core.js`
+    - `src/wasm/cotuong_core.d.ts`
+    - `src/wasm/cotuong_core_bg.wasm.d.ts`
+  - *Lý do*: Đây là các file sinh tự động (generated artifacts) bởi `wasm-bindgen` khi build gói WASM (`npm run build:wasm`). Mọi sửa đổi thủ công sẽ bị ghi đè và gây mất đồng bộ giữa Rust và TypeScript.
+  - *Hành động đúng*: Mọi thay đổi logic hoặc interface WASM phải được thực hiện trong Rust (`cotuong_core/src/wasm.rs`), sau đó chạy `npm run build:wasm` để sinh lại file tự động.
 - **Đồng bộ Ranh giới WASM – TypeScript**: Khi thay đổi DTO trong `cotuong_core/src/wasm.rs`, bắt buộc cập nhật tương ứng trong `src/types/game.ts` và build lại gói WASM (`npm run build:wasm`).
 
 ## 3. Language Standards (Tiêu chuẩn Ngôn ngữ)
