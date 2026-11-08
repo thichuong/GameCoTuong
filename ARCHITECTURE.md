@@ -70,7 +70,7 @@ GameCoTuong/
 ├── train_ai.ipynb              # Notebook huấn luyện AI trên Google Colab
 ├── cotuong_core/               # Crate Rust trung tâm (Game Logic + AI Engine + NNUE + WASM)
 │   ├── Cargo.toml
-│   ├── assets/                 # Trọng số NNUE nhúng sẵn: default.nnue, model_f32.bin, model_int16.nnue, model_int8.nnue
+│   ├── assets/                 # Trọng số NNUE nhúng sẵn: default.nnue (~4.0MB), model_f32.bin (~8.1MB)
 │   ├── src/
 │   │   ├── lib.rs              # Re-exports: engine, logic, wasm (cfg wasm32)
 │   │   ├── wasm.rs             # #[wasm_bindgen] exports: WasmGameState, WasmEngine
@@ -260,11 +260,11 @@ flowchart LR
     L4 --> Sum
 ```
 
-- **3 Biến thể Trọng số Nhúng sẵn (`cotuong_core/assets/`)**:
-  1. `model_f32.bin` (`"f32"`, magic `COTF32_1`, ~8.1 MB): Trọng số thực 32-bit chưa lượng tử hóa, giữ nguyên độ chính xác từ quá trình huấn luyện.
-  2. `default.nnue` / `model_int16.nnue` (`"int16"`, magic `XNNU` v3, ~4.0 MB): Trọng số lượng tử hóa 16-bit/8-bit chuẩn SIMD, mặc định của Engine.
-  3. `model_int8.nnue` (`"int8"`, magic `COTINT8_`, ~2.0 MB): Trọng số nén 8-bit siêu gọn cho thiết bị di động.
-- Tất cả 3 biến thể đều được khởi tạo lười (lazy initialization) một lần duy nhất qua `OnceLock<NnueWeights>` (`NNUE_INSTANCE`, `NNUE_INSTANCE_INT8`, `NNUE_INSTANCE_F32`).
+- **Mô Hình Trọng Số NNUE Chuẩn Nhúng Trực Tiếp (`cotuong_core/assets/default.nnue`)**:
+  - `default.nnue` (magic `XNNU` v3, dung lượng ~4.0 MB): Trọng số lượng tử hóa số nguyên chuẩn SIMD (Feature Transformer $W_1$ là `i16`, các tầng FC $W_2, W_3$ là `i8`, $W_4$ là `i16`).
+  - Toàn bộ pipeline forward pass chạy thuần túy số nguyên (integer arithmetic), không phát sinh bất kỳ phép tính số thực (float) nào trong vòng lặp tìm kiếm Alpha-Beta.
+  - Được khởi tạo lười (lazy initialization) một lần duy nhất qua `OnceLock<NnueWeights>` (`NNUE_INSTANCE`).
+  - Nhúng trực tiếp trong file nhị phân WebAssembly, giúp nạp tức thì trong Web Worker mà không cần fetch thêm qua mạng.
 
 ### 2.5. Cầu nối WebAssembly & Polyfill (`cotuong_core/src/wasm.rs` & `src/wasm/`)
 
@@ -288,7 +288,7 @@ Crate `cotuong_trainer` cung cấp công cụ dòng lệnh tốc độ cao (sử
 | `dataset` | Huấn luyện có giám sát (Supervised Learning) trên kho kỳ phổ đại kiện tướng (`curated_master_games.txt`, `sample_master_games.txt`) với lan truyền ngược (Backpropagation) qua cả 2 nhánh Đỏ/Đen |
 | `teacher` | Chưng cất tri thức (Teacher Knowledge Distillation) bằng cách giao tiếp qua giao thức **UCCI / UCI** (`protocol.rs`) với các Engine mạnh như **Pikafish** hoặc **Fairy-Stockfish** |
 | `sparring` | Tổ chức các trận đấu tập đối kháng tự động giữa mạng NNUE hiện tại với Engine đối thủ để đánh giá tỷ lệ thắng thực chiến |
-| `quantize` | Lượng tử hóa mô hình Float32 (`.f32`) sang các định dạng `model_f32.bin`, `model_int16.nnue` (`default.nnue`), và `model_int8.nnue` |
+| `quantize` | Lượng tử hóa mô hình Float32 (`.f32`) sang Mô Hình NNUE Chuẩn (`default.nnue`) chuẩn SIMD và bản sao lưu `model_f32.bin` |
 
 ---
 
@@ -336,7 +336,7 @@ sequenceDiagram
 | `ControlsArea.tsx` & `PuzzleSetupArea.tsx` | Quản lý 4 chế độ chơi (`Người đấu với Máy`, `Máy đấu với Máy`, `Hai người chơi`, `Giải Cờ Thế`), chọn thế cờ mẫu (`CLASSIC_PUZZLES`), kiểm tra hợp lệ thế cờ (`validateBoardSetup`), hộp thoại Nhập/Xuất FEN, chọn bên đi tiên và độ khó AI. |
 | `ThinkingIndicator.tsx` | Hiển thị lớp phủ HUD trực tiếp ở trung tâm bàn cờ khi AI đang tính toán: đồng hồ đếm thời gian thực, thanh tiến trình, cấp độ khó và thông số độ sâu / số nút duyệt. |
 | `LogPanel.tsx` | Thanh biên bản thu gọn ở dưới bàn cờ; khi nhấn vào sẽ mở ngăn kéo trượt (Slide-Up Drawer) hiển thị chi tiết từng hiệp đấu, quân bị ăn, thống kê AI và nút xuất CSV. |
-| `ConfigModal.tsx` | Cho phép tinh chỉnh độc lập hoặc đồng bộ cấu hình `EngineConfig` cho **AI Đỏ** và **AI Đen** (`tt_size_mb`, `mate_score`, `nnue_weight`, `model_type: "f32" \| "int16" \| "int8"`), áp dụng nhanh 4 Preset và Nhập/Xuất file JSON. |
+| `ConfigModal.tsx` | Cho phép tinh chỉnh độc lập hoặc đồng bộ cấu hình `EngineConfig` cho **AI Đỏ** và **AI Đen** (`tt_size_mb`, `mate_score`, `nnue_weight`), áp dụng nhanh 4 Preset, hiển thị thông số kiến trúc NNUE Chuẩn và Nhập/Xuất file JSON. |
 
 ---
 

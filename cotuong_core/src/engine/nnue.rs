@@ -3,7 +3,6 @@ use std::sync::OnceLock;
 
 pub const NNUE_MAGIC: &[u8; 4] = b"XNNU";
 pub const NNUE_VERSION: u32 = 3;
-pub const INT8_NNUE_MAGIC: &[u8; 8] = b"COTINT8_";
 pub const FLOAT_NNUE_MAGIC: &[u8; 8] = b"COTF32_1";
 
 pub const L1_INPUT_SIZE: usize = 10_530; // 9 king palace squares * 13 piece types * 90 board squares
@@ -26,17 +25,6 @@ pub const FILE_SIZE: usize = 4
     + (L3_OUTPUT_SIZE * 2)
     + 4;
 
-pub const INT8_FILE_SIZE: usize = 8
-    + (L1_INPUT_SIZE * L1_OUTPUT_SIZE)
-    + (L1_OUTPUT_SIZE * 2)
-    + (L1_INPUT_SIZE * PSQT_BUCKETS)
-    + (L2_INPUT_SIZE * L2_OUTPUT_SIZE)
-    + (L2_OUTPUT_SIZE * 4)
-    + (L3_INPUT_SIZE * L3_OUTPUT_SIZE)
-    + (L3_OUTPUT_SIZE * 4)
-    + (L3_OUTPUT_SIZE * 2)
-    + 4;
-
 pub const FLOAT_FILE_SIZE: usize = 8
     + (L1_INPUT_SIZE * L1_OUTPUT_SIZE * 4)
     + (L1_OUTPUT_SIZE * 4)
@@ -49,7 +37,6 @@ pub const FLOAT_FILE_SIZE: usize = 8
     + 4;
 
 const EMBEDDED_WEIGHTS: &[u8] = include_bytes!("../../assets/default.nnue");
-const EMBEDDED_INT8_WEIGHTS: &[u8] = include_bytes!("../../assets/model_int8.nnue");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NnueAccumulator {
@@ -83,12 +70,9 @@ pub struct NnueWeights {
     pub b3: [i32; L3_OUTPUT_SIZE],
     pub w4: [i16; L3_OUTPUT_SIZE],
     pub b4: i32,
-    /// Number of active L1 accumulator dimensions evaluated at runtime (192 for int16, 64 for fast int8)
-    pub l1_active_dims: usize,
 }
 
 static NNUE_INSTANCE: OnceLock<NnueWeights> = OnceLock::new();
-static NNUE_INSTANCE_INT8: OnceLock<NnueWeights> = OnceLock::new();
 
 impl NnueWeights {
     #[must_use]
@@ -96,17 +80,6 @@ impl NnueWeights {
         NNUE_INSTANCE.get_or_init(|| {
             Self::load_from_bytes(EMBEDDED_WEIGHTS).unwrap_or_else(|_| Self::empty())
         })
-    }
-
-    #[must_use]
-    pub fn get_by_type(model_type: &str) -> &'static Self {
-        if model_type == "int8" {
-            NNUE_INSTANCE_INT8.get_or_init(|| {
-                Self::load_from_bytes(EMBEDDED_INT8_WEIGHTS).unwrap_or_else(|_| Self::empty())
-            })
-        } else {
-            Self::get()
-        }
     }
 
     #[must_use]
@@ -159,7 +132,6 @@ impl NnueWeights {
             b3: [0i32; L3_OUTPUT_SIZE],
             w4: [0i16; L3_OUTPUT_SIZE],
             b4: 0,
-            l1_active_dims: L1_OUTPUT_SIZE,
         }
     }
 
@@ -204,169 +176,11 @@ impl NnueWeights {
     }
 
     pub fn load_from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        if bytes.starts_with(INT8_NNUE_MAGIC) {
-            Self::load_int8(bytes)
-        } else if bytes.starts_with(FLOAT_NNUE_MAGIC) {
+        if bytes.starts_with(FLOAT_NNUE_MAGIC) {
             Self::load_float(bytes)
         } else {
-            Self::load_int16(bytes)
+            Self::load_quantized(bytes)
         }
-    }
-
-    fn load_int8(bytes: &[u8]) -> Result<Self, String> {
-        if bytes.len() != INT8_FILE_SIZE {
-            return Err(format!(
-                "Invalid Int8 NNUE file size: expected {}, got {}",
-                INT8_FILE_SIZE,
-                bytes.len()
-            ));
-        }
-
-        let mut offset = 8;
-        let mut w1_vec = vec![[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE];
-        for row in &mut w1_vec {
-            for val in row.iter_mut() {
-                let b = bytes
-                    .get(offset)
-                    .ok_or_else(|| "Unexpected EOF while reading Int8 W1".to_string())?;
-                #[allow(clippy::cast_possible_wrap)]
-                let raw_i8 = *b as i8;
-                *val = i16::from(raw_i8) * 2;
-                offset += 1;
-            }
-        }
-        let w1: Box<[[i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]> = w1_vec
-            .into_boxed_slice()
-            .try_into()
-            .map_err(|_| "Failed to allocate boxed W1 array".to_string())?;
-
-        let mut b1 = [0i16; L1_OUTPUT_SIZE];
-        for val in &mut b1 {
-            let slice = bytes
-                .get(offset..offset + 2)
-                .ok_or_else(|| "Unexpected EOF while reading B1".to_string())?;
-            *val = i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
-            offset += 2;
-        }
-
-        let mut w_psqt_vec = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE];
-        for row in &mut w_psqt_vec {
-            for val in row.iter_mut() {
-                let b = bytes
-                    .get(offset)
-                    .ok_or_else(|| "Unexpected EOF while reading Int8 W_PSQT".to_string())?;
-                #[allow(clippy::cast_possible_wrap)]
-                let raw_i8 = *b as i8;
-                *val = i16::from(raw_i8);
-                offset += 1;
-            }
-        }
-        let w_psqt: Box<[[i16; PSQT_BUCKETS]; L1_INPUT_SIZE]> = w_psqt_vec
-            .into_boxed_slice()
-            .try_into()
-            .map_err(|_| "Failed to allocate boxed W_PSQT array".to_string())?;
-
-        let mut w2_vec = vec![[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
-        for row in &mut w2_vec {
-            for val in row {
-                let b = bytes
-                    .get(offset)
-                    .ok_or_else(|| "Unexpected EOF while reading W2".to_string())?;
-                #[allow(clippy::cast_possible_wrap)]
-                {
-                    *val = *b as i8;
-                }
-                offset += 1;
-            }
-        }
-        let w2: Box<[[i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]> =
-            w2_vec
-                .into_boxed_slice()
-                .try_into()
-                .map_err(|_| "Failed to allocate boxed W2 array".to_string())?;
-        let w2_col = Self::transpose_w2(&w2);
-
-        let mut b2 = [0i32; L2_OUTPUT_SIZE];
-        for val in &mut b2 {
-            let slice = bytes
-                .get(offset..offset + 4)
-                .ok_or_else(|| "Unexpected EOF while reading B2".to_string())?;
-            *val = i32::from_le_bytes([
-                *slice.first().unwrap_or(&0),
-                *slice.get(1).unwrap_or(&0),
-                *slice.get(2).unwrap_or(&0),
-                *slice.get(3).unwrap_or(&0),
-            ]);
-            offset += 4;
-        }
-
-        let mut w3_vec = vec![[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
-        for row in &mut w3_vec {
-            for val in row {
-                let b = bytes
-                    .get(offset)
-                    .ok_or_else(|| "Unexpected EOF while reading W3".to_string())?;
-                #[allow(clippy::cast_possible_wrap)]
-                {
-                    *val = *b as i8;
-                }
-                offset += 1;
-            }
-        }
-        let w3: Box<[[i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]> =
-            w3_vec
-                .into_boxed_slice()
-                .try_into()
-                .map_err(|_| "Failed to allocate boxed W3 array".to_string())?;
-        let w3_col = Self::transpose_w3(&w3);
-
-        let mut b3 = [0i32; L3_OUTPUT_SIZE];
-        for val in &mut b3 {
-            let slice = bytes
-                .get(offset..offset + 4)
-                .ok_or_else(|| "Unexpected EOF while reading B3".to_string())?;
-            *val = i32::from_le_bytes([
-                *slice.first().unwrap_or(&0),
-                *slice.get(1).unwrap_or(&0),
-                *slice.get(2).unwrap_or(&0),
-                *slice.get(3).unwrap_or(&0),
-            ]);
-            offset += 4;
-        }
-
-        let mut w4 = [0i16; L3_OUTPUT_SIZE];
-        for val in &mut w4 {
-            let slice = bytes
-                .get(offset..offset + 2)
-                .ok_or_else(|| "Unexpected EOF while reading W4".to_string())?;
-            *val = i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
-            offset += 2;
-        }
-
-        let slice = bytes
-            .get(offset..offset + 4)
-            .ok_or_else(|| "Unexpected EOF while reading B4".to_string())?;
-        let b4 = i32::from_le_bytes([
-            *slice.first().unwrap_or(&0),
-            *slice.get(1).unwrap_or(&0),
-            *slice.get(2).unwrap_or(&0),
-            *slice.get(3).unwrap_or(&0),
-        ]);
-
-        Ok(Self {
-            w1,
-            b1,
-            w_psqt,
-            w2,
-            w2_col,
-            b2,
-            w3,
-            w3_col,
-            b3,
-            w4,
-            b4,
-            l1_active_dims: 64,
-        })
     }
 
     fn load_float(bytes: &[u8]) -> Result<Self, String> {
@@ -575,11 +389,10 @@ impl NnueWeights {
             b3,
             w4,
             b4,
-            l1_active_dims: L1_OUTPUT_SIZE,
         })
     }
 
-    fn load_int16(bytes: &[u8]) -> Result<Self, String> {
+    fn load_quantized(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != FILE_SIZE {
             return Err(format!(
                 "Invalid NNUE file size: expected {}, got {}",
@@ -749,7 +562,6 @@ impl NnueWeights {
             b3,
             w4,
             b4,
-            l1_active_dims: L1_OUTPUT_SIZE,
         })
     }
 }
@@ -886,12 +698,8 @@ impl NnueAccumulator {
         if let Some(red_feat) =
             halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
         {
-            let active_dims = weights.l1_active_dims;
-            if let (Some(w_row), Some(acc_slice)) = (
-                weights.w1.get(red_feat).and_then(|r| r.get(..active_dims)),
-                self.red.get_mut(..active_dims),
-            ) {
-                for (a, &w) in acc_slice.iter_mut().zip(w_row.iter()) {
+            if let Some(w_row) = weights.w1.get(red_feat) {
+                for (a, &w) in self.red.iter_mut().zip(w_row.iter()) {
                     *a = a.saturating_add(w);
                 }
             }
@@ -914,12 +722,8 @@ impl NnueAccumulator {
         if let Some(red_feat) =
             halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
         {
-            let active_dims = weights.l1_active_dims;
-            if let (Some(w_row), Some(acc_slice)) = (
-                weights.w1.get(red_feat).and_then(|r| r.get(..active_dims)),
-                self.red.get_mut(..active_dims),
-            ) {
-                for (a, &w) in acc_slice.iter_mut().zip(w_row.iter()) {
+            if let Some(w_row) = weights.w1.get(red_feat) {
+                for (a, &w) in self.red.iter_mut().zip(w_row.iter()) {
                     *a = a.saturating_sub(w);
                 }
             }
@@ -942,15 +746,8 @@ impl NnueAccumulator {
         if let Some(black_feat) =
             halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
         {
-            let active_dims = weights.l1_active_dims;
-            if let (Some(w_row), Some(acc_slice)) = (
-                weights
-                    .w1
-                    .get(black_feat)
-                    .and_then(|r| r.get(..active_dims)),
-                self.black.get_mut(..active_dims),
-            ) {
-                for (a, &w) in acc_slice.iter_mut().zip(w_row.iter()) {
+            if let Some(w_row) = weights.w1.get(black_feat) {
+                for (a, &w) in self.black.iter_mut().zip(w_row.iter()) {
                     *a = a.saturating_add(w);
                 }
             }
@@ -973,15 +770,8 @@ impl NnueAccumulator {
         if let Some(black_feat) =
             halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
         {
-            let active_dims = weights.l1_active_dims;
-            if let (Some(w_row), Some(acc_slice)) = (
-                weights
-                    .w1
-                    .get(black_feat)
-                    .and_then(|r| r.get(..active_dims)),
-                self.black.get_mut(..active_dims),
-            ) {
-                for (a, &w) in acc_slice.iter_mut().zip(w_row.iter()) {
+            if let Some(w_row) = weights.w1.get(black_feat) {
+                for (a, &w) in self.black.iter_mut().zip(w_row.iter()) {
                     *a = a.saturating_sub(w);
                 }
             }
@@ -1010,14 +800,9 @@ impl NnueAccumulator {
             return;
         };
 
-        let active_dims = weights.l1_active_dims;
-        if let (Some(add_row), Some(sub_row), Some(acc_slice)) = (
-            weights.w1.get(add_feat).and_then(|r| r.get(..active_dims)),
-            weights.w1.get(sub_feat).and_then(|r| r.get(..active_dims)),
-            self.red.get_mut(..active_dims),
-        ) {
-            for ((a, &w_add), &w_sub) in
-                acc_slice.iter_mut().zip(add_row.iter()).zip(sub_row.iter())
+        if let (Some(add_row), Some(sub_row)) = (weights.w1.get(add_feat), weights.w1.get(sub_feat))
+        {
+            for ((a, &w_add), &w_sub) in self.red.iter_mut().zip(add_row.iter()).zip(sub_row.iter())
             {
                 *a = a.saturating_add(w_add).saturating_sub(w_sub);
             }
@@ -1052,14 +837,13 @@ impl NnueAccumulator {
             return;
         };
 
-        let active_dims = weights.l1_active_dims;
-        if let (Some(add_row), Some(sub_row), Some(acc_slice)) = (
-            weights.w1.get(add_feat).and_then(|r| r.get(..active_dims)),
-            weights.w1.get(sub_feat).and_then(|r| r.get(..active_dims)),
-            self.black.get_mut(..active_dims),
-        ) {
-            for ((a, &w_add), &w_sub) in
-                acc_slice.iter_mut().zip(add_row.iter()).zip(sub_row.iter())
+        if let (Some(add_row), Some(sub_row)) = (weights.w1.get(add_feat), weights.w1.get(sub_feat))
+        {
+            for ((a, &w_add), &w_sub) in self
+                .black
+                .iter_mut()
+                .zip(add_row.iter())
+                .zip(sub_row.iter())
             {
                 *a = a.saturating_add(w_add).saturating_sub(w_sub);
             }
@@ -1109,14 +893,13 @@ impl NnueAccumulator {
             return;
         };
 
-        let active_dims = weights.l1_active_dims;
-        if let (Some(add_row), Some(sub_row), Some(cap_row), Some(acc_slice)) = (
-            weights.w1.get(add_feat).and_then(|r| r.get(..active_dims)),
-            weights.w1.get(sub_feat).and_then(|r| r.get(..active_dims)),
-            weights.w1.get(cap_feat).and_then(|r| r.get(..active_dims)),
-            self.red.get_mut(..active_dims),
+        if let (Some(add_row), Some(sub_row), Some(cap_row)) = (
+            weights.w1.get(add_feat),
+            weights.w1.get(sub_feat),
+            weights.w1.get(cap_feat),
         ) {
-            for (((a, &w_add), &w_sub), &w_cap) in acc_slice
+            for (((a, &w_add), &w_sub), &w_cap) in self
+                .red
                 .iter_mut()
                 .zip(add_row.iter())
                 .zip(sub_row.iter())
@@ -1177,14 +960,13 @@ impl NnueAccumulator {
             return;
         };
 
-        let active_dims = weights.l1_active_dims;
-        if let (Some(add_row), Some(sub_row), Some(cap_row), Some(acc_slice)) = (
-            weights.w1.get(add_feat).and_then(|r| r.get(..active_dims)),
-            weights.w1.get(sub_feat).and_then(|r| r.get(..active_dims)),
-            weights.w1.get(cap_feat).and_then(|r| r.get(..active_dims)),
-            self.black.get_mut(..active_dims),
+        if let (Some(add_row), Some(sub_row), Some(cap_row)) = (
+            weights.w1.get(add_feat),
+            weights.w1.get(sub_feat),
+            weights.w1.get(cap_feat),
         ) {
-            for (((a, &w_add), &w_sub), &w_cap) in acc_slice
+            for (((a, &w_add), &w_sub), &w_cap) in self
+                .black
                 .iter_mut()
                 .zip(add_row.iter())
                 .zip(sub_row.iter())
@@ -1254,9 +1036,8 @@ pub fn evaluate_dual_forward(
 ) -> (i32, i32) {
     let mut red_acts = [(0u16, 0i16); L1_OUTPUT_SIZE];
     let mut red_count = 0;
-    let active_dims = weights.l1_active_dims;
 
-    for (i, &val) in red_acc.iter().take(active_dims).enumerate() {
+    for (i, &val) in red_acc.iter().enumerate() {
         if val >= 16 {
             let clamped = i32::from(val.min(256));
             #[allow(clippy::cast_possible_truncation)]
@@ -1273,7 +1054,7 @@ pub fn evaluate_dual_forward(
 
     let mut black_acts = [(0u16, 0i16); L1_OUTPUT_SIZE];
     let mut black_count = 0;
-    for (i, &val) in black_acc.iter().take(active_dims).enumerate() {
+    for (i, &val) in black_acc.iter().enumerate() {
         if val >= 16 {
             let clamped = i32::from(val.min(256));
             #[allow(clippy::cast_possible_truncation)]
@@ -1423,29 +1204,21 @@ mod tests {
     }
 
     #[test]
-    fn test_load_all_three_model_variants() {
+    fn test_load_standard_nnue_model() {
+        if let Ok(bytes) = std::fs::read("assets/default.nnue") {
+            let loaded = NnueWeights::load_from_bytes(&bytes);
+            assert!(
+                loaded.is_ok(),
+                "Failed to load default.nnue: {:?}",
+                loaded.err()
+            );
+        }
         if let Ok(bytes) = std::fs::read("assets/model_f32.bin") {
             let loaded_f32 = NnueWeights::load_from_bytes(&bytes);
             assert!(
                 loaded_f32.is_ok(),
                 "Failed to load model_f32.bin: {:?}",
                 loaded_f32.err()
-            );
-        }
-        if let Ok(bytes) = std::fs::read("assets/model_int16.nnue") {
-            let loaded_i16 = NnueWeights::load_from_bytes(&bytes);
-            assert!(
-                loaded_i16.is_ok(),
-                "Failed to load model_int16.nnue: {:?}",
-                loaded_i16.err()
-            );
-        }
-        if let Ok(bytes) = std::fs::read("assets/model_int8.nnue") {
-            let loaded_i8 = NnueWeights::load_from_bytes(&bytes);
-            assert!(
-                loaded_i8.is_ok(),
-                "Failed to load model_int8.nnue: {:?}",
-                loaded_i8.err()
             );
         }
     }

@@ -65,13 +65,10 @@ export interface SearchResult {
   stats: SearchStats;
 }
 
-export type ModelType = 'int16' | 'int8';
-
 export interface EngineConfig {
   mate_score: number;
   tt_size_mb: number;
   nnue_weight: number;
-  model_type?: ModelType;
   [key: string]: number | string | undefined;
 }
 
@@ -79,6 +76,5 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   mate_score: 300000,
   tt_size_mb: 256,
   nnue_weight: 100,
-  model_type: 'int16',
 };
 

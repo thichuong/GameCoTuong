@@ -1,6 +1,6 @@
 ---
 name: xiangqi_engine_tuning
-description: Guidelines for modifying the Xiangqi AI engine and NNUE trainer – search algorithms, Dual-Head HalfKP NNUE v3 evaluation, f32/int16/int8 model variants, transposition table, and cotuong_trainer pipeline.
+description: Guidelines for modifying the Xiangqi AI engine and NNUE trainer – search algorithms, Dual-Head HalfKP NNUE v3 evaluation, standard SIMD model format, transposition table, and cotuong_trainer pipeline.
 ---
 
 # Xiangqi Engine Tuning & NNUE Skill
@@ -11,9 +11,9 @@ This skill covers modifications to files in `cotuong_core/src/engine/`, `cotuong
 - `cotuong_core/src/engine/mod.rs` – Traits (`Evaluator`, `Searcher`) and structs (`Move`, `SearchLimit`, `SearchStats`)
 - `cotuong_core/src/engine/search.rs` – `AlphaBetaEngine` (Iterative Deepening Negamax + PVS + pruning)
 - `cotuong_core/src/engine/eval.rs` – `SimpleEvaluator` (evaluates board via `NnueWeights` and scales by `nnue_weight`)
-- `cotuong_core/src/engine/nnue.rs` – `NnueWeights`, `NnueAccumulator`, Dual-Head HalfKP v3 architecture (`f32`, `int16`, `int8` loaders and SIMD-friendly forward pass)
+- `cotuong_core/src/engine/nnue.rs` – `NnueWeights`, `NnueAccumulator`, Dual-Head HalfKP v3 architecture (standard integer SIMD forward pass)
 - `cotuong_core/src/engine/movegen.rs` – `EngineMoveGen` (engine-specific move generation with scoring)
-- `cotuong_core/src/engine/config.rs` – `EngineConfig` (`mate_score`, `tt_size_mb`, `nnue_weight`, `model_type`)
+- `cotuong_core/src/engine/config.rs` – `EngineConfig` (`mate_score`, `tt_size_mb`, `nnue_weight`)
 - `cotuong_core/src/engine/tt.rs` – `TranspositionTable` (Zobrist hash table with configurable MB size)
 - `cotuong_core/src/engine/move_list.rs` – `MoveList` (stack-allocated `[Move; 128]`)
 - `cotuong_core/src/engine/zobrist.rs` – `ZobristKeys` (XorShift64 position hashing)
@@ -38,10 +38,8 @@ This skill covers modifications to files in `cotuong_core/src/engine/`, `cotuong
 - **Deep SCReLU Positional Head**:
   - `L1 (2×192 = 384)` → SCReLU activation (`clamp(0, 256)^2 >> 8`) with sparse zero-skipping over column-major `w2_col` → `L2 (32)` → `L3 (32)` → `Output (1)`.
   - Evaluates both Red and Black perspectives simultaneously in `evaluate_dual_forward()`.
-- **3 Embedded Model Variants (`cotuong_core/assets/`)**:
-  - `"int16"` (`default.nnue` / `model_int16.nnue`, magic `XNNU` v3, ~4.0 MB): Default SIMD-friendly 16-bit/8-bit quantized network.
-  - `"int8"` (`model_int8.nnue`, magic `COTINT8_`, ~2.0 MB): Compact 8-bit quantized network for low-RAM devices.
-  - `"f32"` (`model_f32.bin`, magic `COTF32_1`, ~8.1 MB): Unquantized 32-bit float weights converted on load.
+- **Standard Quantized NNUE (`cotuong_core/assets/default.nnue`)**:
+  - `default.nnue` (magic `XNNU` v3, ~4.0 MB): Standard SIMD quantized network (W1 is `i16`, L2/L3 are `i8`, L4 is `i16`, pure integer arithmetic), embedded directly into the WebAssembly Core Engine.
 
 ### EngineConfig Parameters (`cotuong_core/src/engine/config.rs`)
 | Parameter | Type | Default | Description |
@@ -49,7 +47,6 @@ This skill covers modifications to files in `cotuong_core/src/engine/`, `cotuong
 | `mate_score` | `i32` | `300_000` | Base checkmate score (`mate_score - ply`) |
 | `tt_size_mb` | `usize` | `256` | Transposition Table size in megabytes (`16..=512` in UI) |
 | `nnue_weight` | `i32` | `100` | Percentage scaling factor (`50..=150`) applied to raw NNUE evaluation |
-| `model_type` | `String` | `"int16"` | Precision variant selector: `"f32"`, `"int16"`, or `"int8"` |
 
 ## Rules
 

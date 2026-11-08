@@ -34,7 +34,7 @@ impl SimpleEvaluator {
     pub fn weights(&self) -> &NnueWeights {
         match &self.weights {
             Some(w) => w.as_ref(),
-            None => NnueWeights::get_by_type(&self.config.model_type),
+            None => NnueWeights::get(),
         }
     }
 }
@@ -44,7 +44,7 @@ impl Evaluator for SimpleEvaluator {
     fn evaluate(&self, board: &Board) -> i32 {
         let nnue_weights = match &self.weights {
             Some(w) => w.as_ref(),
-            None => NnueWeights::get_by_type(&self.config.model_type),
+            None => NnueWeights::get(),
         };
         let raw = evaluate_nnue_with_weights(board, nnue_weights);
         (raw * self.config.nnue_weight) / 100

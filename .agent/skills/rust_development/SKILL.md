@@ -44,6 +44,6 @@ description: Senior-level guidelines for high-performance Rust & WebAssembly dev
 ## 6. Module Architecture Guidelines
 - **Core Logic (`cotuong_core/src/logic/`)**: Pure Xiangqi rules, board state, FEN parsing, opening book, and legal move generation (`MoveGenerator`).
 - **AI Engine & NNUE (`cotuong_core/src/engine/`)**: Search (`AlphaBetaEngine`), evaluation (`SimpleEvaluator`), Dual-Head HalfKP NNUE v3 (`nnue.rs`), scored move generation (`EngineMoveGen`), transposition table (`tt.rs`), and Zobrist hashing (`zobrist.rs`).
-- **NNUE Trainer (`cotuong_trainer/src/`)**: Supervised learning from master game records (`dataset.rs`), UCCI/UCI teacher distillation & sparring (`protocol.rs`), and multi-precision quantization (`f32`, `int16`, `int8` in `main.rs`).
+- **NNUE Trainer (`cotuong_trainer/src/`)**: Supervised learning from master game records (`dataset.rs`), UCCI/UCI teacher distillation & sparring (`protocol.rs`), and standard SIMD NNUE quantization in `main.rs`.
 - **WASM Bridge & Polyfill (`cotuong_core/src/wasm.rs` & `src/wasm/`)**: `#[wasm_bindgen]` wrappers (`WasmGameState`, `WasmEngine`) and TypeScript polyfill (`enginePolyfill.ts`).
 - **React Frontend (`src/`)**: Modular UI components (`src/components/`), Web Worker (`src/workers/ai.worker.ts`), utilities (`src/utils/`), and strong TypeScript interfaces (`src/types/game.ts`).

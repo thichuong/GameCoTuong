@@ -26,9 +26,9 @@
 | 🎮 **4 Chế độ chơi** | **Người đấu với Máy** (chọn cầm quân Đỏ đi tiên hoặc Đen đi hậu), **Máy đấu với Máy** (AI vs AI có nút Bắt đầu/Tạm dừng), **Hai người chơi** trên cùng thiết bị, và **Giải Cờ Thế (Puzzle Mode)** |
 | 🧩 **Xếp & Giải Cờ Thế** | Tự do kéo-thả hoặc nhấp chọn quân từ khay vào bàn cờ, di chuyển quân trên bàn, click chuột phải để xóa quân, nạp **Thế cờ mẫu kinh điển**, kiểm tra hợp lệ thế cờ theo thời gian thực và Nhập/Xuất chuỗi **FEN** |
 | 🧠 **AI Alpha-Beta + Dual-Head HalfKP NNUE v3** | Kết hợp tìm kiếm Negamax PVS, Iterative Deepening, Transposition Table, Null-Move Pruning, LMR, Sách khai cuộc cùng mạng nơ-ron **HalfKP NNUE v3** (`10,530 → 192×2 → 32 → 32 → 1` + 8-Bucket Phase PSQT) |
-| 🎛️ **3 Biến thể Trọng số NNUE** | Chuyển đổi tức thì giữa **Float32 (`model_f32.bin` ~8.1MB)** chính xác tuyệt đối, **Int16 (`model_int16.nnue` ~4.0MB)** chuẩn SIMD cân bằng, và **Int8 (`model_int8.nnue` ~2.0MB)** siêu nén tiết kiệm RAM |
+| 🧠 **Mô Hình NNUE Chuẩn SIMD** | Tối ưu hóa chuẩn Stockfish / Pikafish NNUE (`default.nnue` ~4.0MB), tính toán thuần số nguyên, nhúng trực tiếp trong WebAssembly Engine |
 | 🎯 **5 Cấp độ khó** | Từ **Cấp 1 · Nhập môn (1s)** đến **Cấp 5 · Đại sư (20s)** điều chỉnh thời gian suy nghĩ tối đa mỗi nước của AI |
-| ⚙️ **Tùy biến AI Đỏ & Đen độc lập** | Tinh chỉnh riêng hoặc đồng bộ cho từng bên (`tt_size_mb`, `mate_score`, `nnue_weight`, `model_type`) kèm 4 Preset định sẵn và Nhập/Xuất file `.json` |
+| ⚙️ **Tùy biến AI Đỏ & Đen độc lập** | Tinh chỉnh riêng hoặc đồng bộ cho từng bên (`tt_size_mb`, `mate_score`, `nnue_weight`) kèm 4 Preset định sẵn và Nhập/Xuất file `.json` |
 | 🎨 **Bàn cờ Canvas 1:1 & Khay Quân Thích ứng** | Vẽ trên HTML5 Canvas chuẩn HiDPI/Retina, tự động giữ tỉ lệ vuông `1:1`, xoay chiều bàn cờ theo phe người chơi, hiển thị khay quân ăn được và ưu thế vật chất theo bố cục **Tự động / Hai bên / Trên dưới** |
 | 📊 **HUD Tiến trình AI & Biên bản Ngăn kéo** | Lớp phủ HUD trực quan ngay trên bàn cờ khi AI đang tính nước; thanh biên bản gọn gàng phía dưới bàn cờ mở lên dạng ngăn kéo trượt (Slide-Up Drawer) |
 | 🏋️ **Pipeline Huấn luyện NNUE (`cotuong_trainer`)** | Crate huấn luyện riêng bằng Rust hỗ trợ học giám sát từ kỳ phổ, chưng cất tri thức (Teacher Distillation) với Pikafish/Fairy-Stockfish (UCCI/UCI), đấu tập đối kháng và lượng tử hóa đa định dạng |
@@ -88,15 +88,15 @@ Dự án là một Rust Workspace gồm 2 crates (`cotuong_core` và `cotuong_tr
 ```
 GameCoTuong/
 ├── cotuong_core/                  # 🦀 Rust Core Library (Game Logic + AI Engine + NNUE + WASM)
-│   ├── assets/                    # Trọng số mạng nơ-ron nhúng sẵn (default.nnue, model_f32.bin, model_int16.nnue, model_int8.nnue)
+│   ├── assets/                    # Trọng số mạng nơ-ron nhúng sẵn (default.nnue, model_f32.bin)
 │   ├── src/
 │   │   ├── lib.rs                 # Điểm xuất module: engine, logic, wasm
 │   │   ├── wasm.rs                # Cầu nối #[wasm_bindgen]: WasmGameState & WasmEngine
 │   │   ├── engine/                # Bộ tìm kiếm AI & Mạng lượng giá NNUE
-│   │   │   ├── config.rs          # EngineConfig (mate_score, tt_size_mb, nnue_weight, model_type)
+│   │   │   ├── config.rs          # EngineConfig (mate_score, tt_size_mb, nnue_weight)
 │   │   │   ├── search.rs          # AlphaBetaEngine (Negamax, PVS, Iterative Deepening, LMR, NMP)
 │   │   │   ├── eval.rs            # SimpleEvaluator (điều phối trọng số NNUE & hệ số khuếch đại)
-│   │   │   ├── nnue.rs            # Mạng Dual-Head HalfKP NNUE v3 (f32/int16/int8, Incremental Accumulator)
+│   │   │   ├── nnue.rs            # Mạng Dual-Head HalfKP NNUE v3 (SIMD Incremental Accumulator)
 │   │   │   ├── movegen.rs         # EngineMoveGen (sinh nước đi kèm điểm Move Ordering)
 │   │   │   ├── tt.rs              # Transposition Table (bảng băm thế cờ)
 │   │   │   ├── zobrist.rs         # Zobrist Hashing 64-bit
@@ -162,14 +162,13 @@ Nhấn nút **"Cấu hình AI"** trên thanh công cụ để mở bảng tinh c
 | `tt_size_mb` | `usize` | `256` | `16 – 512 MB` | Dung lượng bảng băm Zobrist (Transposition Table) lưu trữ thế cờ đã duyệt và nhánh cắt tỉa |
 | `mate_score` | `i32` | `300,000` | `50,000 – 500,000` | Điểm cơ sở khi phát hiện chiếu bí (`mate_score - ply`, càng sát nước thắng điểm càng cao) |
 | `nnue_weight` | `i32` | `100` | `50% – 150%` | Hệ số khuếch đại độ nhạy điểm số của mạng nơ-ron HalfKP NNUE v3 theo công thức `(raw * nnue_weight) / 100` |
-| `model_type` | `"f32" \| "int16" \| "int8"` | `"int16"` | 3 loại model | Chọn biến thể trọng số mạng nơ-ron (`f32` nguyên bản ~8.1MB, `int16` chuẩn SIMD ~4.0MB, `int8` siêu nén ~2.0MB) |
 
 ### 2. Các Preset Định sẵn
 
-- **Tiêu Chuẩn (Mặc định)**: `tt_size_mb: 256`, `mate_score: 300000`, `nnue_weight: 100`, `model_type: "int16"`.
-- **Tấn Công / Chuẩn Xác Cao**: `tt_size_mb: 256`, `mate_score: 400000`, `nnue_weight: 120`, `model_type: "f32"`.
-- **Tiết Kiệm RAM**: `tt_size_mb: 64`, `mate_score: 200000`, `nnue_weight: 90`, `model_type: "int8"`.
-- **Sát Cục / Giải Cờ Thế**: `tt_size_mb: 512`, `mate_score: 500000`, `nnue_weight: 110`, `model_type: "int16"`.
+- **Tiêu Chuẩn (Mặc định)**: `tt_size_mb: 256`, `mate_score: 300000`, `nnue_weight: 100`.
+- **Tấn Công / Chuẩn Xác Cao**: `tt_size_mb: 256`, `mate_score: 400000`, `nnue_weight: 120`.
+- **Tiết Kiệm RAM**: `tt_size_mb: 64`, `mate_score: 200000`, `nnue_weight: 90` (tối ưu bộ nhớ bảng băm cho máy yếu/thiết bị di động).
+- **Sát Cục / Giải Cờ Thế**: `tt_size_mb: 512`, `mate_score: 500000`, `nnue_weight: 110`.
 
 ### 3. Định dạng JSON Nhập / Xuất
 
@@ -177,8 +176,7 @@ Nhấn nút **"Cấu hình AI"** trên thanh công cụ để mở bảng tinh c
 {
   "mate_score": 300000,
   "tt_size_mb": 256,
-  "nnue_weight": 100,
-  "model_type": "int16"
+  "nnue_weight": 100
 }
 ```
 
@@ -196,7 +194,7 @@ npm run train
 ./train.sh --epochs 10 --lr 0.05 --dataset cotuong_trainer/data/curated_master_games.txt
 ```
 
-Ngoài ra, bạn có thể mở file [`train_ai.ipynb`](train_ai.ipynb) trên **Google Colab** để huấn luyện với GPU/CPU nhiều nhân và tải về các file trọng số `default.nnue`, `model_int16.nnue`, `model_int8.nnue`, `model_f32.bin`.
+Ngoài ra, bạn có thể mở file [`train_ai.ipynb`](train_ai.ipynb) trên **Google Colab** để huấn luyện với GPU/CPU nhiều nhân và xuất trực tiếp file trọng số chuẩn `default.nnue` và `model_f32.bin`.
 
 ---
 

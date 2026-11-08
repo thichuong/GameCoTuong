@@ -20,4 +20,5 @@ test('EngineConfig serializes cleanly to JSON for cotuong_core Rust deserializer
   assert.equal(parsed.pruning_method, undefined);
   assert.equal(parsed.pruning_multiplier, undefined);
   assert.equal(parsed.eval_mode, undefined);
+  assert.equal(parsed.model_type, undefined);
 });

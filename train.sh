@@ -7,7 +7,7 @@
 #    1. Huấn luyện Giám sát từ Kỳ Phổ Mẫu (Float 32-bit chính xác cao)
 #    2. Chưng cất Tri thức cùng Sư phụ (Pikafish / Fairy-Stockfish nếu có)
 #    3. Đấu tập Đối kháng (Sparring) để đánh giá năng lực thực chiến
-#    4. LƯỢNG TỬ HÓA KẾT QUẢ CUỐI CÙNG sang int16/int8 (cotuong_core/assets/default.nnue)
+#    4. LƯỢNG TỬ HÓA KẾT QUẢ CUỐI CÙNG sang chuẩn NNUE SIMD (cotuong_core/assets/default.nnue)
 #    5. Kiểm thử toàn diện & Biên dịch gói WebAssembly (cotuong_core.wasm)
 # ==============================================================================
 
@@ -194,7 +194,7 @@ echo ""
 # ------------------------------------------------------------------------------
 # BƯỚC 4: LƯỢNG TỬ HÓA KẾT QUẢ CUỐI CÙNG (Gọi hàm riêng --mode quantize)
 # ------------------------------------------------------------------------------
-echo "▶ [4/5] 🎯 LƯỢNG TỬ HÓA KẾT QUẢ CUỐI CÙNG: Float f32 -> Int16/Int8 NNUE..."
+echo "▶ [4/5] 🎯 LƯỢNG TỬ HÓA KẾT QUẢ CUỐI CÙNG: Float f32 -> Standard SIMD NNUE..."
 cargo run --release -p cotuong_trainer -- \
   --mode quantize \
   --input "$FLOAT_MODEL" \
