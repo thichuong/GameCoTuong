@@ -756,6 +756,7 @@ impl FloatNnue {
             b3,
             w4,
             b4,
+            l1_active_dims: L1_OUTPUT_SIZE,
         }
     }
 

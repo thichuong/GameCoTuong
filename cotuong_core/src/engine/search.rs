@@ -3,7 +3,7 @@ use crate::engine::eval::SimpleEvaluator;
 use crate::engine::movegen::EngineMoveGen;
 use crate::engine::tt::{TTEntry, TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
-use crate::logic::board::{Board, BoardCoordinate, Color};
+use crate::logic::board::{Board, BoardCoordinate, Color, Piece};
 use crate::logic::game::GameState;
 use crate::logic::rules::{is_flying_general, is_in_check};
 use std::sync::Arc;
@@ -11,6 +11,8 @@ use std::sync::Arc;
 const MATE_THRESHOLD: i32 = 15_000;
 const INF_SCORE: i32 = 500_000;
 pub const MAX_PLY: u8 = 96;
+
+type PendingNnueMove = (usize, usize, Piece, Option<Piece>);
 
 pub struct AlphaBetaEngine {
     config: Arc<EngineConfig>,
@@ -291,6 +293,7 @@ impl AlphaBetaEngine {
                 depth.saturating_sub(r),
                 turn.opposite(),
                 ply.saturating_add(1),
+                None,
             );
             board.apply_null_move();
 
@@ -313,6 +316,43 @@ impl AlphaBetaEngine {
     fn quiescence(
         &mut self,
         board: &mut Board,
+        alpha: i32,
+        beta: i32,
+        turn: Color,
+        ply: u8,
+        pending_move: Option<PendingNnueMove>,
+    ) -> Option<i32> {
+        self.nodes_searched += 1;
+        if self.check_time() {
+            return None;
+        }
+
+        let saved_acc = if let Some((from_sq, to_sq, piece, captured)) = pending_move {
+            let acc = board.nnue_acc;
+            board.update_nnue_for_move_with_weights(
+                from_sq,
+                to_sq,
+                piece,
+                captured,
+                self.evaluator.weights(),
+            );
+            Some(acc)
+        } else {
+            None
+        };
+
+        let res = self.quiescence_inner(board, alpha, beta, turn, ply);
+
+        if let Some(acc) = saved_acc {
+            board.nnue_acc = acc;
+        }
+        res
+    }
+
+    #[inline]
+    fn quiescence_inner(
+        &mut self,
+        board: &mut Board,
         mut alpha: i32,
         beta: i32,
         turn: Color,
@@ -320,11 +360,6 @@ impl AlphaBetaEngine {
     ) -> Option<i32> {
         if ply >= MAX_PLY {
             return Some(self.eval_for_turn(board, turn));
-        }
-
-        self.nodes_searched += 1;
-        if self.check_time() {
-            return None;
         }
 
         let in_check = is_in_check(board, turn);
@@ -340,39 +375,39 @@ impl AlphaBetaEngine {
         }
 
         let movegen = EngineMoveGen::new();
-        let moves = if in_check {
+        let mut moves = if in_check {
             movegen.generate_moves(board, turn, None)
         } else {
             movegen.generate_captures(board, turn)
         };
 
         let mut legal_moves_count = 0;
-        for mv in moves.iter() {
-            let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(mv) else {
+        let mut move_idx = 0;
+        while let Some(mv) = moves.pick_next_best(move_idx) {
+            move_idx += 1;
+            let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(&mv) else {
                 continue;
             };
 
             if is_in_check(board, turn) || is_flying_general(board) {
-                board.undo_move_board_only(mv, piece, captured);
+                board.undo_move_board_only(&mv, piece, captured);
                 continue;
             }
 
             legal_moves_count += 1;
-            let saved_acc = board.nnue_acc;
-            board.update_nnue_for_move_with_weights(
-                from_sq,
-                to_sq,
-                piece,
-                captured,
-                self.evaluator.weights(),
-            );
 
             let score_opt = self
-                .quiescence(board, -beta, -alpha, turn.opposite(), ply.saturating_add(1))
+                .quiescence(
+                    board,
+                    -beta,
+                    -alpha,
+                    turn.opposite(),
+                    ply.saturating_add(1),
+                    Some((from_sq, to_sq, piece, captured)),
+                )
                 .map(|v| -v);
 
-            board.undo_move_board_only(mv, piece, captured);
-            board.nnue_acc = saved_acc;
+            board.undo_move_board_only(&mv, piece, captured);
 
             let score = score_opt?;
 
@@ -391,18 +426,36 @@ impl AlphaBetaEngine {
         Some(alpha)
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_arguments)]
     fn alpha_beta(
         &mut self,
         board: &mut Board,
         mut alpha: i32,
         mut beta: i32,
-        mut depth: u8,
+        depth: u8,
         turn: Color,
         ply: u8,
+        pending_move: Option<PendingNnueMove>,
     ) -> Option<i32> {
         if ply >= MAX_PLY {
-            return Some(self.eval_for_turn(board, turn));
+            let saved_acc = if let Some((from_sq, to_sq, piece, captured)) = pending_move {
+                let acc = board.nnue_acc;
+                board.update_nnue_for_move_with_weights(
+                    from_sq,
+                    to_sq,
+                    piece,
+                    captured,
+                    self.evaluator.weights(),
+                );
+                Some(acc)
+            } else {
+                None
+            };
+            let eval = self.eval_for_turn(board, turn);
+            if let Some(acc) = saved_acc {
+                board.nnue_acc = acc;
+            }
+            return Some(eval);
         }
 
         self.nodes_searched += 1;
@@ -413,7 +466,7 @@ impl AlphaBetaEngine {
 
         let is_pv = beta - alpha > 1;
 
-        // 1. Mate Distance Pruning
+        // 1. Mate Distance Pruning (before NNUE update)
         if ply > 0 {
             let mat = self.config.mate_score - i32::from(ply);
             alpha = alpha.max(-mat);
@@ -428,42 +481,72 @@ impl AlphaBetaEngine {
             return Some(rep_score);
         }
 
-        self.history_stack.push(hash);
-
-        // 2. Transposition Table Probe
+        // 2. Transposition Table Probe (before NNUE update!)
         let tt_entry = self.tt.probe(hash);
         if let Some(entry) = tt_entry {
             if entry.depth >= depth && (!is_pv || entry.flag == TTFlag::Exact) {
                 match entry.flag {
-                    TTFlag::Exact => {
-                        self.history_stack.pop();
-                        return Some(entry.score);
-                    }
-                    TTFlag::LowerBound if entry.score >= beta => {
-                        self.history_stack.pop();
-                        return Some(entry.score);
-                    }
-                    TTFlag::UpperBound if entry.score <= alpha => {
-                        self.history_stack.pop();
-                        return Some(entry.score);
-                    }
+                    TTFlag::Exact => return Some(entry.score),
+                    TTFlag::LowerBound if entry.score >= beta => return Some(entry.score),
+                    TTFlag::UpperBound if entry.score <= alpha => return Some(entry.score),
                     TTFlag::LowerBound => alpha = alpha.max(entry.score),
                     TTFlag::UpperBound => beta = beta.min(entry.score),
                 }
                 if alpha >= beta {
-                    self.history_stack.pop();
                     return Some(entry.score);
                 }
             }
         }
 
-        // Quiescence Search at depth 0
+        // Quiescence Search at depth 0 (forwards pending_move lazily)
         if depth == 0 {
-            let eval = self.quiescence(board, alpha, beta, turn, ply);
+            self.history_stack.push(hash);
+            let eval = self.quiescence(board, alpha, beta, turn, ply, pending_move);
             self.history_stack.pop();
             return eval;
         }
 
+        self.history_stack.push(hash);
+
+        // Materialize lazy NNUE accumulator update only when node actually needs evaluation/expansion
+        let saved_acc = if let Some((from_sq, to_sq, piece, captured)) = pending_move {
+            let acc = board.nnue_acc;
+            board.update_nnue_for_move_with_weights(
+                from_sq,
+                to_sq,
+                piece,
+                captured,
+                self.evaluator.weights(),
+            );
+            Some(acc)
+        } else {
+            None
+        };
+
+        let res =
+            self.alpha_beta_inner(board, alpha, beta, depth, turn, ply, hash, is_pv, tt_entry);
+
+        if let Some(acc) = saved_acc {
+            board.nnue_acc = acc;
+        }
+        self.history_stack.pop();
+        res
+    }
+
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+    #[inline]
+    fn alpha_beta_inner(
+        &mut self,
+        board: &mut Board,
+        mut alpha: i32,
+        beta: i32,
+        mut depth: u8,
+        turn: Color,
+        ply: u8,
+        hash: u64,
+        is_pv: bool,
+        tt_entry: Option<TTEntry>,
+    ) -> Option<i32> {
         let in_check = is_in_check(board, turn);
         self.in_check_stack[(ply as usize).min(95)] = in_check;
 
@@ -476,14 +559,12 @@ impl AlphaBetaEngine {
             if depth <= 6 && beta.abs() < MATE_THRESHOLD {
                 let rfp_margin = 90 * i32::from(depth);
                 if eval - rfp_margin >= beta {
-                    self.history_stack.pop();
                     return Some((eval + beta) / 2);
                 }
             }
 
             // Null Move Pruning
             if let Some(res) = self.null_move_pruning(board, eval, beta, depth, turn, ply) {
-                self.history_stack.pop();
                 return res;
             }
         }
@@ -499,7 +580,7 @@ impl AlphaBetaEngine {
         let killers = self.killer_moves[p_idx];
 
         let movegen = EngineMoveGen::new();
-        let moves = movegen.generate_moves_with_ordering(
+        let mut moves = movegen.generate_moves_with_ordering(
             board,
             turn,
             best_move_tt,
@@ -512,31 +593,24 @@ impl AlphaBetaEngine {
         let mut tt_flag = TTFlag::UpperBound;
         let mut legal_moves_count = 0usize;
 
-        let full_depth = depth.saturating_sub(1) + if in_check { 1 } else { 0 };
+        let full_depth = depth.saturating_sub(1) + u8::from(in_check);
 
-        for mv in moves.iter() {
-            let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(mv) else {
+        let mut move_idx = 0;
+        while let Some(mv) = moves.pick_next_best(move_idx) {
+            move_idx += 1;
+            let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(&mv) else {
                 continue;
             };
 
             // Fast legal validation: self-check and flying general
             if is_in_check(board, turn) || is_flying_general(board) {
-                board.undo_move_board_only(mv, piece, captured);
+                board.undo_move_board_only(&mv, piece, captured);
                 continue;
             }
 
             legal_moves_count += 1;
             let is_capture = captured.is_some();
-
-            // Lazy NNUE update: save accumulator on stack, update for this move
-            let saved_acc = board.nnue_acc;
-            board.update_nnue_for_move_with_weights(
-                from_sq,
-                to_sq,
-                piece,
-                captured,
-                self.evaluator.weights(),
-            );
+            let pending = Some((from_sq, to_sq, piece, captured));
 
             // Late Move Reductions (LMR)
             let mut reduction = 0u8;
@@ -554,8 +628,16 @@ impl AlphaBetaEngine {
 
             let next_ply = ply.saturating_add(1);
             let score_opt = if legal_moves_count == 1 || full_depth == 0 {
-                self.alpha_beta(board, -beta, -alpha, full_depth, turn.opposite(), next_ply)
-                    .map(|v| -v)
+                self.alpha_beta(
+                    board,
+                    -beta,
+                    -alpha,
+                    full_depth,
+                    turn.opposite(),
+                    next_ply,
+                    pending,
+                )
+                .map(|v| -v)
             } else {
                 let reduced_depth = full_depth.saturating_sub(reduction);
                 let mut val = if reduction > 0 && reduced_depth > 0 {
@@ -566,6 +648,7 @@ impl AlphaBetaEngine {
                         reduced_depth,
                         turn.opposite(),
                         next_ply,
+                        pending,
                     )
                     .map(|v| -v)
                 } else {
@@ -581,6 +664,7 @@ impl AlphaBetaEngine {
                             full_depth,
                             turn.opposite(),
                             next_ply,
+                            pending,
                         )
                         .map(|v| -v);
                 }
@@ -588,24 +672,28 @@ impl AlphaBetaEngine {
                 if let Some(s) = val {
                     if s > alpha && s < beta {
                         val = self
-                            .alpha_beta(board, -beta, -alpha, full_depth, turn.opposite(), next_ply)
+                            .alpha_beta(
+                                board,
+                                -beta,
+                                -alpha,
+                                full_depth,
+                                turn.opposite(),
+                                next_ply,
+                                pending,
+                            )
                             .map(|v| -v);
                     }
                 }
                 val
             };
 
-            board.undo_move_board_only(mv, piece, captured);
-            board.nnue_acc = saved_acc;
+            board.undo_move_board_only(&mv, piece, captured);
 
-            let Some(score) = score_opt else {
-                self.history_stack.pop();
-                return None;
-            };
+            let score = score_opt?;
 
             if score > best_score {
                 best_score = score;
-                best_move_this_node = Some(*mv);
+                best_move_this_node = Some(mv);
             }
             if score > alpha {
                 alpha = score;
@@ -615,9 +703,9 @@ impl AlphaBetaEngine {
             if alpha >= beta {
                 tt_flag = TTFlag::LowerBound;
                 if !is_capture {
-                    if self.killer_moves[p_idx][0] != Some(*mv) {
+                    if self.killer_moves[p_idx][0] != Some(mv) {
                         self.killer_moves[p_idx][1] = self.killer_moves[p_idx][0];
-                        self.killer_moves[p_idx][0] = Some(*mv);
+                        self.killer_moves[p_idx][0] = Some(mv);
                     }
                     if let Some(row) = self.history_table.get_mut(from_sq) {
                         if let Some(val) = row.get_mut(to_sq) {
@@ -631,14 +719,12 @@ impl AlphaBetaEngine {
         }
 
         if legal_moves_count == 0 {
-            self.history_stack.pop();
             return Some(-self.calculate_mate_score(ply));
         }
 
         self.tt
             .store(hash, best_move_this_node, best_score, depth, tt_flag);
 
-        self.history_stack.pop();
         Some(best_score)
     }
 }
@@ -655,7 +741,11 @@ impl Searcher for AlphaBetaEngine {
         self.start_time = Self::now();
         self.history_stack.clear();
         self.killer_moves = [[None; 2]; 64];
-        *self.history_table = [[0; 90]; 90];
+        for row in self.history_table.iter_mut() {
+            for val in row.iter_mut() {
+                *val >>= 1;
+            }
+        }
 
         let (max_depth, time_limit) = match limit {
             SearchLimit::Depth(d) => (d.min(63), None),
@@ -761,6 +851,7 @@ impl Searcher for AlphaBetaEngine {
                             && rm.to_col == mv.to_col
                     })
                 });
+                moves.sort_by(|a, b| b.score.cmp(&a.score));
 
                 if moves.is_empty() {
                     break;
@@ -777,20 +868,20 @@ impl Searcher for AlphaBetaEngine {
                     else {
                         continue;
                     };
-                    let saved_acc = board.nnue_acc;
-                    board.update_nnue_for_move_with_weights(
-                        from_sq,
-                        to_sq,
-                        piece,
-                        captured,
-                        self.evaluator.weights(),
-                    );
+                    let pending = Some((from_sq, to_sq, piece, captured));
 
                     let score_opt = if moves_searched == 0 {
-                        self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), 1)
+                        self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), 1, pending)
                     } else {
-                        let mut val =
-                            self.alpha_beta(board, -alpha - 1, -alpha, d - 1, turn.opposite(), 1);
+                        let mut val = self.alpha_beta(
+                            board,
+                            -alpha - 1,
+                            -alpha,
+                            d - 1,
+                            turn.opposite(),
+                            1,
+                            pending,
+                        );
                         if let Some(v) = val {
                             let s = -v;
                             if s > alpha && s < beta {
@@ -801,6 +892,7 @@ impl Searcher for AlphaBetaEngine {
                                     d - 1,
                                     turn.opposite(),
                                     1,
+                                    pending,
                                 );
                             }
                         }
@@ -808,7 +900,6 @@ impl Searcher for AlphaBetaEngine {
                     };
 
                     board.undo_move_board_only(mv, piece, captured);
-                    board.nnue_acc = saved_acc;
 
                     if let Some(s) = score_opt {
                         let score = -s;

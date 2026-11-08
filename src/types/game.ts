@@ -65,7 +65,7 @@ export interface SearchResult {
   stats: SearchStats;
 }
 
-export type ModelType = 'f32' | 'int16' | 'int8';
+export type ModelType = 'int16' | 'int8';
 
 export interface EngineConfig {
   mate_score: number;

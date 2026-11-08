@@ -522,33 +522,34 @@ impl Board {
                 self.nnue_acc.refresh_red(&self.grid, new_k_red, weights);
                 if let Some(cap) = captured {
                     self.nnue_acc
-                        .remove_piece_black(cap, to_sq, k_black, weights);
+                        .move_piece_capture_black(piece, from_sq, to_sq, cap, k_black, weights);
+                } else {
+                    self.nnue_acc
+                        .move_piece_quiet_black(piece, from_sq, to_sq, k_black, weights);
                 }
-                self.nnue_acc
-                    .remove_piece_black(piece, from_sq, k_black, weights);
-                self.nnue_acc
-                    .add_piece_black(piece, to_sq, k_black, weights);
             } else {
                 let flipped_to = 89_usize.saturating_sub(to_sq);
                 let new_k_black = crate::engine::nnue::palace_index(flipped_to);
                 self.nnue_acc
                     .refresh_black(&self.grid, new_k_black, weights);
                 if let Some(cap) = captured {
-                    self.nnue_acc.remove_piece_red(cap, to_sq, k_red, weights);
+                    self.nnue_acc
+                        .move_piece_capture_red(piece, from_sq, to_sq, cap, k_red, weights);
+                } else {
+                    self.nnue_acc
+                        .move_piece_quiet_red(piece, from_sq, to_sq, k_red, weights);
                 }
-                self.nnue_acc
-                    .remove_piece_red(piece, from_sq, k_red, weights);
-                self.nnue_acc.add_piece_red(piece, to_sq, k_red, weights);
             }
+        } else if let Some(cap) = captured {
+            self.nnue_acc
+                .move_piece_capture_red(piece, from_sq, to_sq, cap, k_red, weights);
+            self.nnue_acc
+                .move_piece_capture_black(piece, from_sq, to_sq, cap, k_black, weights);
         } else {
-            if let Some(cap) = captured {
-                self.nnue_acc
-                    .remove_piece(cap, to_sq, k_red, k_black, weights);
-            }
             self.nnue_acc
-                .remove_piece(piece, from_sq, k_red, k_black, weights);
+                .move_piece_quiet_red(piece, from_sq, to_sq, k_red, weights);
             self.nnue_acc
-                .add_piece(piece, to_sq, k_red, k_black, weights);
+                .move_piece_quiet_black(piece, from_sq, to_sq, k_black, weights);
         }
     }
 

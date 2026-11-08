@@ -131,4 +131,53 @@ mod tests {
             panic!("Search returned None");
         }
     }
+
+    #[test]
+    fn bench_model_int16_vs_int8_comparison() {
+        println!("=== Comparing Model Int16 vs Int8 Search Performance ===");
+        let board = Board::new();
+        let game_state = GameState {
+            board,
+            turn: Color::Red,
+            ..Default::default()
+        };
+
+        // 1. Benchmark Int16 (default active dims 192)
+        let config_int16 = Arc::new(EngineConfig {
+            model_type: "int16".to_string(),
+            ..Default::default()
+        });
+        let mut engine_int16 = AlphaBetaEngine::new(config_int16);
+        engine_int16.search(&game_state, SearchLimit::Depth(2), &[]);
+        let start_i16 = std::time::Instant::now();
+        let res_i16 = engine_int16.search(&game_state, SearchLimit::Depth(6), &[]);
+        let dur_i16 = start_i16.elapsed();
+        let (_, stats_i16) = res_i16.expect("Int16 search succeeded");
+        let nps_i16 = (stats_i16.nodes as f64 / dur_i16.as_secs_f64()) as u64;
+        println!(
+            "Model INT16 (Depth 6): nodes={}, time={:?}, NPS={}",
+            stats_i16.nodes, dur_i16, nps_i16
+        );
+
+        // 2. Benchmark Int8 (active dims 64)
+        let config_int8 = Arc::new(EngineConfig {
+            model_type: "int8".to_string(),
+            ..Default::default()
+        });
+        let mut engine_int8 = AlphaBetaEngine::new(config_int8);
+        engine_int8.search(&game_state, SearchLimit::Depth(2), &[]);
+        let start_i8 = std::time::Instant::now();
+        let res_i8 = engine_int8.search(&game_state, SearchLimit::Depth(6), &[]);
+        let dur_i8 = start_i8.elapsed();
+        let (_, stats_i8) = res_i8.expect("Int8 search succeeded");
+        let nps_i8 = (stats_i8.nodes as f64 / dur_i8.as_secs_f64()) as u64;
+        println!(
+            "Model INT8  (Depth 6): nodes={}, time={:?}, NPS={}",
+            stats_i8.nodes, dur_i8, nps_i8
+        );
+        println!(
+            "Speedup ratio (Int8 NPS / Int16 NPS): {:.2}x",
+            nps_i8 as f64 / nps_i16 as f64
+        );
+    }
 }

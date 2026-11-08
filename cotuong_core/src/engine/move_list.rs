@@ -69,6 +69,30 @@ impl MoveList {
             slice.sort_unstable_by(|a, b| compare(a, b));
         }
     }
+
+    /// Incrementally selects the highest-scoring move from `start_idx..self.count`,
+    /// swaps it into `start_idx`, and returns it. Avoids sorting the entire list
+    /// when a beta-cutoff occurs early.
+    #[inline]
+    pub fn pick_next_best(&mut self, start_idx: usize) -> Option<Move> {
+        let slice = self.moves.get_mut(start_idx..self.count)?;
+        let first = slice.first()?;
+        let mut best_offset = 0;
+        let mut best_score = first.score;
+
+        for (idx, mv) in slice.iter().enumerate().skip(1) {
+            if mv.score > best_score {
+                best_score = mv.score;
+                best_offset = idx;
+            }
+        }
+
+        if best_offset != 0 {
+            slice.swap(0, best_offset);
+        }
+
+        slice.first().copied()
+    }
     #[allow(clippy::indexing_slicing)]
     pub fn retain<F>(&mut self, mut f: F)
     where

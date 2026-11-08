@@ -13,7 +13,6 @@ import {
   BrainCircuit,
   FileCode2,
   Layers,
-  Sparkles,
   Zap,
   Link2,
 } from 'lucide-react';
@@ -49,12 +48,12 @@ const PRESETS: Preset[] = [
   },
   {
     name: 'Tấn Công / Chuẩn Xác Cao',
-    desc: 'Tăng điểm chiếu bí, khuếch đại thế công mạng và dùng trọng số Float32 nguyên bản.',
+    desc: 'Tăng điểm chiếu bí, khuếch đại thế công mạng và dùng độ sâu tính toán tối đa.',
     config: {
       mate_score: 400000,
       tt_size_mb: 256,
       nnue_weight: 120,
-      model_type: 'f32',
+      model_type: 'int16',
     },
   },
   {
@@ -171,7 +170,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         }
 
         // Validate and extract only engine config fields recognized by cotuong_core
-        const validModelTypes: ModelType[] = ['f32', 'int16', 'int8'];
+        const validModelTypes: ModelType[] = ['int16', 'int8'];
         const parsedModelType =
           typeof rawParsed.model_type === 'string' &&
           validModelTypes.includes(rawParsed.model_type as ModelType)
@@ -599,10 +598,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-stone-200">
-                        Định Dạng Trọng Số & Lượng Tử Hóa (3 Loại Model)
+                        Định Dạng Trọng Số Lượng Tử Hóa (Quantized Models)
                       </span>
                       <code className="text-[11px] font-mono text-cyan-300 bg-stone-900 px-1.5 py-0.5 rounded border border-stone-700/60">
-                        model_type: "f32" | "int16" | "int8"
+                        model_type: "int16" | "int8"
                       </code>
                     </div>
                     <p className="text-[11px] text-stone-400 mt-0.5">
@@ -612,40 +611,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-                {/* 1. Không lượng tử (Float32) */}
-                <button
-                  type="button"
-                  onClick={() => updateParam('model_type', 'f32')}
-                  className={`text-left p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
-                    currentConfig.model_type === 'f32'
-                      ? 'bg-cyan-950/40 border-cyan-500/80 shadow-md ring-1 ring-cyan-500/50'
-                      : 'bg-[#1A1613] border-stone-800 hover:border-stone-700 hover:bg-[#201B17]'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                        <span className="text-xs font-bold text-stone-200">
-                          Không Lượng Tử
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
-                        Float 32
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-stone-400 mt-1.5 leading-relaxed">
-                      Độ chính xác cao tuyệt đối, giữ nguyên vẹn tín hiệu huấn luyện.
-                    </p>
-                  </div>
-                  <div className="mt-3 pt-2 border-t border-stone-800/80 flex items-center justify-between text-[10px] font-mono text-stone-400">
-                    <span>model_f32.bin</span>
-                    <span className="text-cyan-300 font-bold">~8.1 MB</span>
-                  </div>
-                </button>
-
-                {/* 2. Lượng tử hóa Int16 (Chuẩn) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                {/* 1. Lượng tử hóa Int16 (Chuẩn) */}
                 <button
                   type="button"
                   onClick={() => updateParam('model_type', 'int16')}
@@ -677,7 +644,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   </div>
                 </button>
 
-                {/* 3. Lượng tử hóa Int8 (Siêu Nén) */}
+                {/* 2. Lượng tử hóa Int8 (Siêu Nhanh / Tiết Kiệm RAM) */}
                 <button
                   type="button"
                   onClick={() => updateParam('model_type', 'int8')}
@@ -692,15 +659,15 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                       <div className="flex items-center gap-1.5">
                         <Zap className="w-3.5 h-3.5 text-emerald-400" />
                         <span className="text-xs font-bold text-stone-200">
-                          Int8 (Siêu Nén)
+                          Int8 (Siêu Nhanh / Tiết Kiệm RAM)
                         </span>
                       </div>
                       <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
-                        Tiết kiệm RAM
+                        NPS Tối Đa
                       </span>
                     </div>
                     <p className="text-[11px] text-stone-400 mt-1.5 leading-relaxed">
-                      Nén cực đại, giảm 50% kích thước, tối ưu hóa cho thiết bị di động.
+                      Nén cực đại, giảm 50% kích thước, tăng tốc hơn 2x cho thiết bị di động.
                     </p>
                   </div>
                   <div className="mt-3 pt-2 border-t border-stone-800/80 flex items-center justify-between text-[10px] font-mono text-stone-400">

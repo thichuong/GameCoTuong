@@ -114,7 +114,6 @@ impl EngineMoveGen {
             }
         }
 
-        moves.sort_by(|a, b| b.score.cmp(&a.score));
         moves
     }
 

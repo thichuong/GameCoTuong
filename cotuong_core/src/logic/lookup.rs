@@ -5,24 +5,74 @@ use std::sync::OnceLock;
 const MAX_DIM: usize = 10;
 const OCC_SIZE: usize = 1024;
 
+#[derive(Clone, Copy, Debug)]
+pub struct FixedMoves<T: Copy, const N: usize> {
+    items: [T; N],
+    len: usize,
+}
+
+impl<T: Copy, const N: usize> FixedMoves<T, N> {
+    #[inline]
+    #[must_use]
+    pub const fn new(default_val: T) -> Self {
+        Self {
+            items: [default_val; N],
+            len: 0,
+        }
+    }
+
+    #[inline]
+    pub fn push(&mut self, item: T) {
+        if let Some(slot) = self.items.get_mut(self.len) {
+            *slot = item;
+            self.len += 1;
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn as_slice(&self) -> &[T] {
+        self.items.get(..self.len).unwrap_or(&[])
+    }
+}
+
+impl<T: Copy, const N: usize> std::ops::Deref for FixedMoves<T, N> {
+    type Target = [T];
+
+    #[inline]
+    fn deref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<'a, T: Copy, const N: usize> IntoIterator for &'a FixedMoves<T, N> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
+    }
+}
+
 pub struct AttackTables {
     pub rook_table: [[u16; OCC_SIZE]; MAX_DIM],
     pub cannon_table: [[u16; OCC_SIZE]; MAX_DIM],
-    // Lookup tables for non-sliding pieces
-    // Horse: (target_sq, leg_sq)
-    pub horse_moves: [Vec<(usize, usize)>; 90],
-    // Elephant: (target_sq, eye_sq)
-    pub elephant_moves: [Vec<(usize, usize)>; 90],
-    // Advisor: target_sq
-    pub advisor_moves: [Vec<usize>; 90],
-    // General: target_sq
-    pub general_moves: [Vec<usize>; 90],
-    // Soldier: [color_idx][sq] -> target_sq
-    pub soldier_moves: [[Vec<usize>; 90]; 2],
+    // Stack/flat lookup tables for non-sliding pieces (zero heap indirection)
+    // Horse: (target_sq, leg_sq) - max 8 moves
+    pub horse_moves: [FixedMoves<(usize, usize), 8>; 90],
+    // Elephant: (target_sq, eye_sq) - max 4 moves
+    pub elephant_moves: [FixedMoves<(usize, usize), 4>; 90],
+    // Advisor: target_sq - max 4 moves
+    pub advisor_moves: [FixedMoves<usize, 4>; 90],
+    // General: target_sq - max 4 moves
+    pub general_moves: [FixedMoves<usize, 4>; 90],
+    // Soldier: [color_idx][sq] -> target_sq - max 3 moves
+    pub soldier_moves: [[FixedMoves<usize, 3>; 90]; 2],
     // Precomputed bitboards for fast check detection
     pub rank_masks: [u128; 10],
     pub file_masks: [u128; 9],
-    pub horse_attacks_to_king: [Vec<(usize, usize)>; 90],
+    pub horse_attacks_to_king: [FixedMoves<(usize, usize), 8>; 90],
     pub horse_attack_mask: [u128; 90],
     pub soldier_attack_mask: [[u128; 90]; 2],
 }
@@ -40,14 +90,11 @@ impl AttackTables {
             }
         }
 
-        let mut horse_moves: [Vec<(usize, usize)>; 90] = core::array::from_fn(|_| Vec::new());
-        let mut elephant_moves: [Vec<(usize, usize)>; 90] = core::array::from_fn(|_| Vec::new());
-        let mut advisor_moves: [Vec<usize>; 90] = core::array::from_fn(|_| Vec::new());
-        let mut general_moves: [Vec<usize>; 90] = core::array::from_fn(|_| Vec::new());
-        let mut soldier_moves: [[Vec<usize>; 90]; 2] = [
-            core::array::from_fn(|_| Vec::new()),
-            core::array::from_fn(|_| Vec::new()),
-        ];
+        let mut horse_moves = [FixedMoves::new((0, 0)); 90];
+        let mut elephant_moves = [FixedMoves::new((0, 0)); 90];
+        let mut advisor_moves = [FixedMoves::new(0); 90];
+        let mut general_moves = [FixedMoves::new(0); 90];
+        let mut soldier_moves = [[FixedMoves::new(0); 90]; 2];
 
         for i in 0..90 {
             horse_moves[i] = compute_horse_moves(i);
@@ -72,8 +119,7 @@ impl AttackTables {
             *mask = m;
         }
 
-        let mut horse_attacks_to_king: [Vec<(usize, usize)>; 90] =
-            core::array::from_fn(|_| Vec::new());
+        let mut horse_attacks_to_king = [FixedMoves::new((0, 0)); 90];
         let mut horse_attack_mask = [0u128; 90];
         let horse_check_offsets = [
             (-2isize, -1isize, -1isize, -1isize),
@@ -90,7 +136,7 @@ impl AttackTables {
             let gr = (sq / 9) as isize;
             let gc = (sq % 9) as isize;
             let mut mask = 0u128;
-            let mut list = Vec::new();
+            let mut list = FixedMoves::new((0, 0));
 
             for &(dr, dc, lr, lc) in &horse_check_offsets {
                 let tr = gr + dr;
@@ -244,7 +290,7 @@ fn to_sq(r: isize, c: isize) -> Option<usize> {
     }
 }
 
-fn compute_horse_moves(sq: usize) -> Vec<(usize, usize)> {
+fn compute_horse_moves(sq: usize) -> FixedMoves<(usize, usize), 8> {
     let (r, c) = to_coord(sq);
     let offsets = [
         (-2, -1, -1, 0),
@@ -256,7 +302,7 @@ fn compute_horse_moves(sq: usize) -> Vec<(usize, usize)> {
         (1, -2, 0, -1),
         (1, 2, 0, 1),
     ];
-    let mut moves = Vec::new();
+    let mut moves = FixedMoves::new((0, 0));
     for (dr, dc, lr, lc) in offsets {
         if let Some(target) = to_sq(r + dr, c + dc) {
             if let Some(leg) = to_sq(r + lr, c + lc) {
@@ -267,7 +313,7 @@ fn compute_horse_moves(sq: usize) -> Vec<(usize, usize)> {
     moves
 }
 
-fn compute_elephant_moves(sq: usize) -> Vec<(usize, usize)> {
+fn compute_elephant_moves(sq: usize) -> FixedMoves<(usize, usize), 4> {
     let (r, c) = to_coord(sq);
     let offsets = [
         (-2, -2, -1, -1),
@@ -275,7 +321,7 @@ fn compute_elephant_moves(sq: usize) -> Vec<(usize, usize)> {
         (2, -2, 1, -1),
         (2, 2, 1, 1),
     ];
-    let mut moves = Vec::new();
+    let mut moves = FixedMoves::new((0, 0));
     for (dr, dc, er, ec) in offsets {
         if let Some(target) = to_sq(r + dr, c + dc) {
             // River check handled safely: just check if target row is on correct side?
@@ -293,10 +339,10 @@ fn compute_elephant_moves(sq: usize) -> Vec<(usize, usize)> {
     moves
 }
 
-fn compute_advisor_moves(sq: usize) -> Vec<usize> {
+fn compute_advisor_moves(sq: usize) -> FixedMoves<usize, 4> {
     let (r, c) = to_coord(sq);
     let offsets = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
-    let mut moves = Vec::new();
+    let mut moves = FixedMoves::new(0);
     for (dr, dc) in offsets {
         if let Some(target) = to_sq(r + dr, c + dc) {
             let tr = r + dr;
@@ -311,10 +357,10 @@ fn compute_advisor_moves(sq: usize) -> Vec<usize> {
     moves
 }
 
-fn compute_general_moves(sq: usize) -> Vec<usize> {
+fn compute_general_moves(sq: usize) -> FixedMoves<usize, 4> {
     let (r, c) = to_coord(sq);
     let offsets = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-    let mut moves = Vec::new();
+    let mut moves = FixedMoves::new(0);
     for (dr, dc) in offsets {
         if let Some(target) = to_sq(r + dr, c + dc) {
             let tr = r + dr;
@@ -329,10 +375,10 @@ fn compute_general_moves(sq: usize) -> Vec<usize> {
     moves
 }
 
-fn compute_soldier_moves(sq: usize, color_idx: usize) -> Vec<usize> {
+fn compute_soldier_moves(sq: usize, color_idx: usize) -> FixedMoves<usize, 3> {
     let (r, c) = to_coord(sq);
     let forward = if color_idx == 0 { 1 } else { -1 };
-    let mut moves = Vec::new();
+    let mut moves = FixedMoves::new(0);
 
     // Forward
     if let Some(target) = to_sq(r + forward, c) {

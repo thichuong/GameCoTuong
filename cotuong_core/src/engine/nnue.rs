@@ -50,7 +50,6 @@ pub const FLOAT_FILE_SIZE: usize = 8
 
 const EMBEDDED_WEIGHTS: &[u8] = include_bytes!("../../assets/default.nnue");
 const EMBEDDED_INT8_WEIGHTS: &[u8] = include_bytes!("../../assets/model_int8.nnue");
-const EMBEDDED_F32_WEIGHTS: &[u8] = include_bytes!("../../assets/model_f32.bin");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NnueAccumulator {
@@ -84,11 +83,12 @@ pub struct NnueWeights {
     pub b3: [i32; L3_OUTPUT_SIZE],
     pub w4: [i16; L3_OUTPUT_SIZE],
     pub b4: i32,
+    /// Number of active L1 accumulator dimensions evaluated at runtime (192 for int16, 64 for fast int8)
+    pub l1_active_dims: usize,
 }
 
 static NNUE_INSTANCE: OnceLock<NnueWeights> = OnceLock::new();
 static NNUE_INSTANCE_INT8: OnceLock<NnueWeights> = OnceLock::new();
-static NNUE_INSTANCE_F32: OnceLock<NnueWeights> = OnceLock::new();
 
 impl NnueWeights {
     #[must_use]
@@ -100,14 +100,12 @@ impl NnueWeights {
 
     #[must_use]
     pub fn get_by_type(model_type: &str) -> &'static Self {
-        match model_type {
-            "int8" => NNUE_INSTANCE_INT8.get_or_init(|| {
+        if model_type == "int8" {
+            NNUE_INSTANCE_INT8.get_or_init(|| {
                 Self::load_from_bytes(EMBEDDED_INT8_WEIGHTS).unwrap_or_else(|_| Self::empty())
-            }),
-            "f32" => NNUE_INSTANCE_F32.get_or_init(|| {
-                Self::load_from_bytes(EMBEDDED_F32_WEIGHTS).unwrap_or_else(|_| Self::empty())
-            }),
-            _ => Self::get(),
+            })
+        } else {
+            Self::get()
         }
     }
 
@@ -161,6 +159,7 @@ impl NnueWeights {
             b3: [0i32; L3_OUTPUT_SIZE],
             w4: [0i16; L3_OUTPUT_SIZE],
             b4: 0,
+            l1_active_dims: L1_OUTPUT_SIZE,
         }
     }
 
@@ -226,14 +225,13 @@ impl NnueWeights {
         let mut offset = 8;
         let mut w1_vec = vec![[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE];
         for row in &mut w1_vec {
-            for val in row {
+            for val in row.iter_mut() {
                 let b = bytes
                     .get(offset)
                     .ok_or_else(|| "Unexpected EOF while reading Int8 W1".to_string())?;
                 #[allow(clippy::cast_possible_wrap)]
-                {
-                    *val = (*b as i8 as i16) * 2;
-                }
+                let raw_i8 = *b as i8;
+                *val = i16::from(raw_i8) * 2;
                 offset += 1;
             }
         }
@@ -253,14 +251,13 @@ impl NnueWeights {
 
         let mut w_psqt_vec = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE];
         for row in &mut w_psqt_vec {
-            for val in row {
+            for val in row.iter_mut() {
                 let b = bytes
                     .get(offset)
                     .ok_or_else(|| "Unexpected EOF while reading Int8 W_PSQT".to_string())?;
                 #[allow(clippy::cast_possible_wrap)]
-                {
-                    *val = *b as i8 as i16;
-                }
+                let raw_i8 = *b as i8;
+                *val = i16::from(raw_i8);
                 offset += 1;
             }
         }
@@ -368,6 +365,7 @@ impl NnueWeights {
             b3,
             w4,
             b4,
+            l1_active_dims: 64,
         })
     }
 
@@ -577,6 +575,7 @@ impl NnueWeights {
             b3,
             w4,
             b4,
+            l1_active_dims: L1_OUTPUT_SIZE,
         })
     }
 
@@ -750,6 +749,7 @@ impl NnueWeights {
             b3,
             w4,
             b4,
+            l1_active_dims: L1_OUTPUT_SIZE,
         })
     }
 }
@@ -886,8 +886,12 @@ impl NnueAccumulator {
         if let Some(red_feat) =
             halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
         {
-            if let Some(row) = weights.w1.get(red_feat) {
-                for (a, &w) in self.red.iter_mut().zip(row.iter()) {
+            let active_dims = weights.l1_active_dims;
+            if let (Some(w_row), Some(acc_slice)) = (
+                weights.w1.get(red_feat).and_then(|r| r.get(..active_dims)),
+                self.red.get_mut(..active_dims),
+            ) {
+                for (a, &w) in acc_slice.iter_mut().zip(w_row.iter()) {
                     *a = a.saturating_add(w);
                 }
             }
@@ -910,8 +914,12 @@ impl NnueAccumulator {
         if let Some(red_feat) =
             halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
         {
-            if let Some(row) = weights.w1.get(red_feat) {
-                for (a, &w) in self.red.iter_mut().zip(row.iter()) {
+            let active_dims = weights.l1_active_dims;
+            if let (Some(w_row), Some(acc_slice)) = (
+                weights.w1.get(red_feat).and_then(|r| r.get(..active_dims)),
+                self.red.get_mut(..active_dims),
+            ) {
+                for (a, &w) in acc_slice.iter_mut().zip(w_row.iter()) {
                     *a = a.saturating_sub(w);
                 }
             }
@@ -934,8 +942,15 @@ impl NnueAccumulator {
         if let Some(black_feat) =
             halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
         {
-            if let Some(row) = weights.w1.get(black_feat) {
-                for (a, &w) in self.black.iter_mut().zip(row.iter()) {
+            let active_dims = weights.l1_active_dims;
+            if let (Some(w_row), Some(acc_slice)) = (
+                weights
+                    .w1
+                    .get(black_feat)
+                    .and_then(|r| r.get(..active_dims)),
+                self.black.get_mut(..active_dims),
+            ) {
+                for (a, &w) in acc_slice.iter_mut().zip(w_row.iter()) {
                     *a = a.saturating_add(w);
                 }
             }
@@ -958,8 +973,15 @@ impl NnueAccumulator {
         if let Some(black_feat) =
             halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
         {
-            if let Some(row) = weights.w1.get(black_feat) {
-                for (a, &w) in self.black.iter_mut().zip(row.iter()) {
+            let active_dims = weights.l1_active_dims;
+            if let (Some(w_row), Some(acc_slice)) = (
+                weights
+                    .w1
+                    .get(black_feat)
+                    .and_then(|r| r.get(..active_dims)),
+                self.black.get_mut(..active_dims),
+            ) {
+                for (a, &w) in acc_slice.iter_mut().zip(w_row.iter()) {
                     *a = a.saturating_sub(w);
                 }
             }
@@ -967,6 +989,229 @@ impl NnueAccumulator {
                 for (p, &w) in self.psqt_black.iter_mut().zip(psqt_row.iter()) {
                     *p = p.saturating_sub(i32::from(w));
                 }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn move_piece_quiet_red(
+        &mut self,
+        piece: Piece,
+        from_sq: usize,
+        to_sq: usize,
+        k_red: usize,
+        weights: &NnueWeights,
+    ) {
+        let is_black = piece.color == Color::Black;
+        let (Some(sub_feat), Some(add_feat)) = (
+            halfkp_feature_idx_red(k_red, is_black, piece.piece_type, from_sq),
+            halfkp_feature_idx_red(k_red, is_black, piece.piece_type, to_sq),
+        ) else {
+            return;
+        };
+
+        let active_dims = weights.l1_active_dims;
+        if let (Some(add_row), Some(sub_row), Some(acc_slice)) = (
+            weights.w1.get(add_feat).and_then(|r| r.get(..active_dims)),
+            weights.w1.get(sub_feat).and_then(|r| r.get(..active_dims)),
+            self.red.get_mut(..active_dims),
+        ) {
+            for ((a, &w_add), &w_sub) in
+                acc_slice.iter_mut().zip(add_row.iter()).zip(sub_row.iter())
+            {
+                *a = a.saturating_add(w_add).saturating_sub(w_sub);
+            }
+        }
+        if let (Some(add_p), Some(sub_p)) =
+            (weights.w_psqt.get(add_feat), weights.w_psqt.get(sub_feat))
+        {
+            for ((p, &w_add), &w_sub) in
+                self.psqt_red.iter_mut().zip(add_p.iter()).zip(sub_p.iter())
+            {
+                *p = p
+                    .saturating_add(i32::from(w_add))
+                    .saturating_sub(i32::from(w_sub));
+            }
+        }
+    }
+
+    #[inline]
+    pub fn move_piece_quiet_black(
+        &mut self,
+        piece: Piece,
+        from_sq: usize,
+        to_sq: usize,
+        k_black: usize,
+        weights: &NnueWeights,
+    ) {
+        let is_red = piece.color == Color::Red;
+        let (Some(sub_feat), Some(add_feat)) = (
+            halfkp_feature_idx_black(k_black, is_red, piece.piece_type, from_sq),
+            halfkp_feature_idx_black(k_black, is_red, piece.piece_type, to_sq),
+        ) else {
+            return;
+        };
+
+        let active_dims = weights.l1_active_dims;
+        if let (Some(add_row), Some(sub_row), Some(acc_slice)) = (
+            weights.w1.get(add_feat).and_then(|r| r.get(..active_dims)),
+            weights.w1.get(sub_feat).and_then(|r| r.get(..active_dims)),
+            self.black.get_mut(..active_dims),
+        ) {
+            for ((a, &w_add), &w_sub) in
+                acc_slice.iter_mut().zip(add_row.iter()).zip(sub_row.iter())
+            {
+                *a = a.saturating_add(w_add).saturating_sub(w_sub);
+            }
+        }
+        if let (Some(add_p), Some(sub_p)) =
+            (weights.w_psqt.get(add_feat), weights.w_psqt.get(sub_feat))
+        {
+            for ((p, &w_add), &w_sub) in self
+                .psqt_black
+                .iter_mut()
+                .zip(add_p.iter())
+                .zip(sub_p.iter())
+            {
+                *p = p
+                    .saturating_add(i32::from(w_add))
+                    .saturating_sub(i32::from(w_sub));
+            }
+        }
+    }
+
+    #[inline]
+    pub fn move_piece_capture_red(
+        &mut self,
+        piece: Piece,
+        from_sq: usize,
+        to_sq: usize,
+        captured: Piece,
+        k_red: usize,
+        weights: &NnueWeights,
+    ) {
+        let is_black = piece.color == Color::Black;
+        let (Some(sub_feat), Some(add_feat)) = (
+            halfkp_feature_idx_red(k_red, is_black, piece.piece_type, from_sq),
+            halfkp_feature_idx_red(k_red, is_black, piece.piece_type, to_sq),
+        ) else {
+            self.remove_piece_red(captured, to_sq, k_red, weights);
+            return;
+        };
+
+        let Some(cap_feat) = halfkp_feature_idx_red(
+            k_red,
+            captured.color == Color::Black,
+            captured.piece_type,
+            to_sq,
+        ) else {
+            self.move_piece_quiet_red(piece, from_sq, to_sq, k_red, weights);
+            return;
+        };
+
+        let active_dims = weights.l1_active_dims;
+        if let (Some(add_row), Some(sub_row), Some(cap_row), Some(acc_slice)) = (
+            weights.w1.get(add_feat).and_then(|r| r.get(..active_dims)),
+            weights.w1.get(sub_feat).and_then(|r| r.get(..active_dims)),
+            weights.w1.get(cap_feat).and_then(|r| r.get(..active_dims)),
+            self.red.get_mut(..active_dims),
+        ) {
+            for (((a, &w_add), &w_sub), &w_cap) in acc_slice
+                .iter_mut()
+                .zip(add_row.iter())
+                .zip(sub_row.iter())
+                .zip(cap_row.iter())
+            {
+                *a = a
+                    .saturating_sub(w_cap)
+                    .saturating_sub(w_sub)
+                    .saturating_add(w_add);
+            }
+        }
+        if let (Some(add_p), Some(sub_p), Some(cap_p)) = (
+            weights.w_psqt.get(add_feat),
+            weights.w_psqt.get(sub_feat),
+            weights.w_psqt.get(cap_feat),
+        ) {
+            for (((p, &w_add), &w_sub), &w_cap) in self
+                .psqt_red
+                .iter_mut()
+                .zip(add_p.iter())
+                .zip(sub_p.iter())
+                .zip(cap_p.iter())
+            {
+                *p = p
+                    .saturating_sub(i32::from(w_cap))
+                    .saturating_sub(i32::from(w_sub))
+                    .saturating_add(i32::from(w_add));
+            }
+        }
+    }
+
+    #[inline]
+    pub fn move_piece_capture_black(
+        &mut self,
+        piece: Piece,
+        from_sq: usize,
+        to_sq: usize,
+        captured: Piece,
+        k_black: usize,
+        weights: &NnueWeights,
+    ) {
+        let is_red = piece.color == Color::Red;
+        let (Some(sub_feat), Some(add_feat)) = (
+            halfkp_feature_idx_black(k_black, is_red, piece.piece_type, from_sq),
+            halfkp_feature_idx_black(k_black, is_red, piece.piece_type, to_sq),
+        ) else {
+            self.remove_piece_black(captured, to_sq, k_black, weights);
+            return;
+        };
+
+        let Some(cap_feat) = halfkp_feature_idx_black(
+            k_black,
+            captured.color == Color::Red,
+            captured.piece_type,
+            to_sq,
+        ) else {
+            self.move_piece_quiet_black(piece, from_sq, to_sq, k_black, weights);
+            return;
+        };
+
+        let active_dims = weights.l1_active_dims;
+        if let (Some(add_row), Some(sub_row), Some(cap_row), Some(acc_slice)) = (
+            weights.w1.get(add_feat).and_then(|r| r.get(..active_dims)),
+            weights.w1.get(sub_feat).and_then(|r| r.get(..active_dims)),
+            weights.w1.get(cap_feat).and_then(|r| r.get(..active_dims)),
+            self.black.get_mut(..active_dims),
+        ) {
+            for (((a, &w_add), &w_sub), &w_cap) in acc_slice
+                .iter_mut()
+                .zip(add_row.iter())
+                .zip(sub_row.iter())
+                .zip(cap_row.iter())
+            {
+                *a = a
+                    .saturating_sub(w_cap)
+                    .saturating_sub(w_sub)
+                    .saturating_add(w_add);
+            }
+        }
+        if let (Some(add_p), Some(sub_p), Some(cap_p)) = (
+            weights.w_psqt.get(add_feat),
+            weights.w_psqt.get(sub_feat),
+            weights.w_psqt.get(cap_feat),
+        ) {
+            for (((p, &w_add), &w_sub), &w_cap) in self
+                .psqt_black
+                .iter_mut()
+                .zip(add_p.iter())
+                .zip(sub_p.iter())
+                .zip(cap_p.iter())
+            {
+                *p = p
+                    .saturating_sub(i32::from(w_cap))
+                    .saturating_sub(i32::from(w_sub))
+                    .saturating_add(i32::from(w_add));
             }
         }
     }
@@ -999,7 +1244,7 @@ impl NnueAccumulator {
 }
 
 /// Evaluates both Red and Black forward passes simultaneously with shared SCReLU activations,
-/// zero-skipping, and auto-vectorized SIMD accumulation.
+/// zero-skipping, and register-friendly separated L2 accumulation.
 #[inline]
 #[must_use]
 pub fn evaluate_dual_forward(
@@ -1007,62 +1252,79 @@ pub fn evaluate_dual_forward(
     black_acc: &[i16; L1_OUTPUT_SIZE],
     weights: &NnueWeights,
 ) -> (i32, i32) {
-    let mut red_acts = [(0usize, 0i32); L1_OUTPUT_SIZE];
+    let mut red_acts = [(0u16, 0i16); L1_OUTPUT_SIZE];
     let mut red_count = 0;
-    for (i, &val) in red_acc.iter().enumerate() {
-        if val > 0 {
+    let active_dims = weights.l1_active_dims;
+
+    for (i, &val) in red_acc.iter().take(active_dims).enumerate() {
+        if val >= 16 {
             let clamped = i32::from(val.min(256));
-            let act = (clamped * clamped) >> 8;
-            if act != 0 {
-                if let Some(slot) = red_acts.get_mut(red_count) {
-                    *slot = (i, act);
-                    red_count += 1;
+            #[allow(clippy::cast_possible_truncation)]
+            let act = ((clamped * clamped) >> 8) as i16;
+            if let Some(slot) = red_acts.get_mut(red_count) {
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *slot = (i as u16, act);
                 }
+                red_count += 1;
             }
         }
     }
 
-    let mut black_acts = [(0usize, 0i32); L1_OUTPUT_SIZE];
+    let mut black_acts = [(0u16, 0i16); L1_OUTPUT_SIZE];
     let mut black_count = 0;
-    for (i, &val) in black_acc.iter().enumerate() {
-        if val > 0 {
+    for (i, &val) in black_acc.iter().take(active_dims).enumerate() {
+        if val >= 16 {
             let clamped = i32::from(val.min(256));
-            let act = (clamped * clamped) >> 8;
-            if act != 0 {
-                if let Some(slot) = black_acts.get_mut(black_count) {
-                    *slot = (i, act);
-                    black_count += 1;
+            #[allow(clippy::cast_possible_truncation)]
+            let act = ((clamped * clamped) >> 8) as i16;
+            if let Some(slot) = black_acts.get_mut(black_count) {
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *slot = (i as u16, act);
                 }
+                black_count += 1;
             }
         }
     }
 
-    // 1. Layer 1 -> Layer 2 (384 -> 32)
+    let red_slice = red_acts.get(..red_count).unwrap_or(&[]);
+    let black_slice = black_acts.get(..black_count).unwrap_or(&[]);
+
+    // 1a. Layer 1 -> Layer 2 for Red perspective (sequential column access, fits in SIMD registers)
     let mut l2_red = weights.b2;
-    let mut l2_black = weights.b2;
-
-    for &(i, act) in red_acts.get(..red_count).unwrap_or(&[]) {
-        if let Some(col) = weights.w2_col.get(i) {
+    for &(i, act) in red_slice {
+        let act32 = i32::from(act);
+        if let Some(col) = weights.w2_col.get(usize::from(i)) {
             for (out, &w) in l2_red.iter_mut().zip(col.iter()) {
-                *out += act * i32::from(w);
+                *out += act32 * i32::from(w);
             }
         }
-        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + i) {
-            for (out, &w) in l2_black.iter_mut().zip(col.iter()) {
-                *out += act * i32::from(w);
+    }
+    for &(i, act) in black_slice {
+        let act32 = i32::from(act);
+        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + usize::from(i)) {
+            for (out, &w) in l2_red.iter_mut().zip(col.iter()) {
+                *out += act32 * i32::from(w);
             }
         }
     }
 
-    for &(i, act) in black_acts.get(..black_count).unwrap_or(&[]) {
-        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + i) {
-            for (out, &w) in l2_red.iter_mut().zip(col.iter()) {
-                *out += act * i32::from(w);
+    // 1b. Layer 1 -> Layer 2 for Black perspective (sequential column access, fits in SIMD registers)
+    let mut l2_black = weights.b2;
+    for &(i, act) in black_slice {
+        let act32 = i32::from(act);
+        if let Some(col) = weights.w2_col.get(usize::from(i)) {
+            for (out, &w) in l2_black.iter_mut().zip(col.iter()) {
+                *out += act32 * i32::from(w);
             }
         }
-        if let Some(col) = weights.w2_col.get(i) {
+    }
+    for &(i, act) in red_slice {
+        let act32 = i32::from(act);
+        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + usize::from(i)) {
             for (out, &w) in l2_black.iter_mut().zip(col.iter()) {
-                *out += act * i32::from(w);
+                *out += act32 * i32::from(w);
             }
         }
     }
@@ -1096,17 +1358,13 @@ pub fn evaluate_dual_forward(
     let mut final_red = weights.b4;
     for (&sum, &w) in l3_red.iter().zip(weights.w4.iter()) {
         let act = (sum >> 6).clamp(0, 128);
-        if act != 0 {
-            final_red += act * i32::from(w);
-        }
+        final_red += act * i32::from(w);
     }
 
     let mut final_black = weights.b4;
     for (&sum, &w) in l3_black.iter().zip(weights.w4.iter()) {
         let act = (sum >> 6).clamp(0, 128);
-        if act != 0 {
-            final_black += act * i32::from(w);
-        }
+        final_black += act * i32::from(w);
     }
 
     (final_red / 2048, final_black / 2048)
