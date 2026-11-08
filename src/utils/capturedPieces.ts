@@ -57,6 +57,16 @@ export const PIECE_SYMBOLS: Record<PieceType, { red: string; black: string }> = 
   Soldier: { red: '兵', black: '卒' },
 };
 
+export const STANDARD_PIECE_COUNTS: Record<PieceType, number> = {
+  General: 1,
+  Advisor: 2,
+  Elephant: 2,
+  Horse: 2,
+  Cannon: 2,
+  Chariot: 2,
+  Soldier: 5,
+};
+
 // Piece ordering for standard display hierarchy (Xe > Phao > Ma > Tuong > Si > Tot)
 const PIECE_ORDER: PieceType[] = [
   'Chariot',
@@ -67,6 +77,31 @@ const PIECE_ORDER: PieceType[] = [
   'Soldier',
   'General',
 ];
+
+function groupPiecesList(pieces: Piece[], color: PieceColor): GroupedPiece[] {
+  const counts = new Map<PieceType, number>();
+  for (const p of pieces) {
+    counts.set(p.type, (counts.get(p.type) || 0) + 1);
+  }
+
+  const grouped: GroupedPiece[] = [];
+  for (const type of PIECE_ORDER) {
+    const count = counts.get(type);
+    if (count && count > 0) {
+      const baseValue = PIECE_VALUES[type];
+      grouped.push({
+        type,
+        color,
+        count,
+        symbol: PIECE_SYMBOLS[type][color],
+        nameVi: PIECE_NAMES_VI[type][color],
+        baseValue,
+        totalValue: baseValue * count,
+      });
+    }
+  }
+  return grouped;
+}
 
 /**
  * Extracts and categorizes all captured pieces from the game history
@@ -85,38 +120,64 @@ export function extractCapturedPieces(history: HistoryRecord[]): CapturedPiecesS
     }
   }
 
-  const groupPieces = (pieces: Piece[], color: PieceColor): GroupedPiece[] => {
-    const counts = new Map<PieceType, number>();
-    for (const p of pieces) {
-      counts.set(p.type, (counts.get(p.type) || 0) + 1);
-    }
-
-    const grouped: GroupedPiece[] = [];
-    for (const type of PIECE_ORDER) {
-      const count = counts.get(type);
-      if (count && count > 0) {
-        const baseValue = PIECE_VALUES[type];
-        grouped.push({
-          type,
-          color,
-          count,
-          symbol: PIECE_SYMBOLS[type][color],
-          nameVi: PIECE_NAMES_VI[type][color],
-          baseValue,
-          totalValue: baseValue * count,
-        });
-      }
-    }
-    return grouped;
-  };
-
-  const groupedRedCaptured = groupPieces(redCaptured, 'red');
-  const groupedBlackCaptured = groupPieces(blackCaptured, 'black');
+  const groupedRedCaptured = groupPiecesList(redCaptured, 'red');
+  const groupedBlackCaptured = groupPiecesList(blackCaptured, 'black');
 
   const redCapturedValue = groupedRedCaptured.reduce((sum, g) => sum + g.totalValue, 0);
   const blackCapturedValue = groupedBlackCaptured.reduce((sum, g) => sum + g.totalValue, 0);
 
   // When Black pieces are captured, Red gains material advantage
+  const advantageForRed = blackCapturedValue - redCapturedValue;
+
+  return {
+    redCaptured,
+    blackCaptured,
+    groupedRedCaptured,
+    groupedBlackCaptured,
+    redCapturedValue,
+    blackCapturedValue,
+    advantageForRed,
+  };
+}
+
+/**
+ * Computes off-board pieces relative to the standard 32-piece Xiangqi set.
+ * Missing Black pieces appear in Red's captured list; missing Red pieces appear in Black's captured list.
+ */
+export function extractOffBoardPieces(
+  board: { piece: Piece | null }[]
+): CapturedPiecesSummary {
+  const redOnBoard = new Map<PieceType, number>();
+  const blackOnBoard = new Map<PieceType, number>();
+
+  for (const sq of board) {
+    if (sq.piece) {
+      const map = sq.piece.color === 'red' ? redOnBoard : blackOnBoard;
+      map.set(sq.piece.type, (map.get(sq.piece.type) || 0) + 1);
+    }
+  }
+
+  const redCaptured: Piece[] = [];
+  const blackCaptured: Piece[] = [];
+
+  for (const type of PIECE_ORDER) {
+    const maxCount = STANDARD_PIECE_COUNTS[type];
+    const redMissing = Math.max(0, maxCount - (redOnBoard.get(type) || 0));
+    const blackMissing = Math.max(0, maxCount - (blackOnBoard.get(type) || 0));
+
+    for (let i = 0; i < redMissing; i++) {
+      redCaptured.push({ type, color: 'red' });
+    }
+    for (let i = 0; i < blackMissing; i++) {
+      blackCaptured.push({ type, color: 'black' });
+    }
+  }
+
+  const groupedRedCaptured = groupPiecesList(redCaptured, 'red');
+  const groupedBlackCaptured = groupPiecesList(blackCaptured, 'black');
+
+  const redCapturedValue = groupedRedCaptured.reduce((sum, g) => sum + g.totalValue, 0);
+  const blackCapturedValue = groupedBlackCaptured.reduce((sum, g) => sum + g.totalValue, 0);
   const advantageForRed = blackCapturedValue - redCapturedValue;
 
   return {

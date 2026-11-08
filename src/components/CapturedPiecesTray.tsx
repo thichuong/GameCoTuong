@@ -1,5 +1,5 @@
 import React from 'react';
-import type { GameMode, PieceColor } from '../types/game.js';
+import type { GameMode, Piece, PieceColor } from '../types/game.js';
 import type { GroupedPiece } from '../utils/capturedPieces.js';
 
 interface CapturedPiecesTrayProps {
@@ -21,6 +21,16 @@ interface CapturedPiecesTrayProps {
   difficulty?: number;
   /** Layout orientation: 'sides' (vertical sidebar) or 'stacked' (horizontal bar) */
   orientation: 'sides' | 'stacked';
+  /** Whether the board is currently in Puzzle setup mode (allows dragging pieces onto board) */
+  isSetupMode?: boolean;
+  /** Currently selected piece from tray in setup mode */
+  selectedSetupPiece?: Piece | null;
+  /** Callback when a piece in the tray is clicked in setup mode */
+  onSelectSetupPiece?: (piece: Piece | null) => void;
+  /** Callback when a piece drag starts from the tray in setup mode */
+  onDragStartSetupPiece?: (piece: Piece) => void;
+  /** Callback when a piece drag ends from the tray in setup mode */
+  onDragEndSetupPiece?: () => void;
 }
 
 export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
@@ -34,6 +44,11 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
   playerSide,
   difficulty = 1,
   orientation,
+  isSetupMode = false,
+  selectedSetupPiece = null,
+  onSelectSetupPiece,
+  onDragStartSetupPiece,
+  onDragEndSetupPiece,
 }) => {
   const isRed = side === 'red';
 
@@ -48,7 +63,9 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
   } else if (gameMode === 'ComputerVsComputer') {
     roleLabel = `AI (${isRed ? 'Đỏ' : 'Đen'})`;
   } else if (gameMode === 'Puzzle') {
-    if (side === playerSide) {
+    if (isSetupMode) {
+      roleLabel = isRed ? 'Giữ quân Đen bị ăn' : 'Giữ quân Đỏ bị ăn';
+    } else if (side === playerSide) {
       roleLabel = 'Bạn (Giải thế)';
     } else {
       roleLabel = `Đối thủ · ${isRed ? 'Đỏ' : 'Đen'}`;
@@ -63,19 +80,64 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
   const renderMiniPiece = (piece: GroupedPiece) => {
     // Note: If Red captured a piece, that piece is Black; if Black captured, that piece is Red.
     const isPieceRed = piece.color === 'red';
+    const isSelected =
+      isSetupMode &&
+      selectedSetupPiece?.type === piece.type &&
+      selectedSetupPiece?.color === piece.color;
+
+    const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+      if (!isSetupMode) return;
+      const payload: Piece = { type: piece.type, color: piece.color };
+      e.dataTransfer.setData('application/xiangqi-piece', JSON.stringify(payload));
+      e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'copyMove';
+      onDragStartSetupPiece?.(payload);
+    };
+
+    const handleDragEnd = () => {
+      if (!isSetupMode) return;
+      onDragEndSetupPiece?.();
+    };
+
+    const handleClick = () => {
+      if (!isSetupMode || !onSelectSetupPiece) return;
+      if (isSelected) {
+        onSelectSetupPiece(null);
+      } else {
+        onSelectSetupPiece({ type: piece.type, color: piece.color });
+      }
+    };
 
     return (
       <div
         key={`${piece.color}-${piece.type}`}
-        className="relative group flex items-center justify-center shrink-0 transition-transform hover:scale-110 cursor-help"
-        title={`${piece.nameVi} (${piece.baseValue}đ) · Số lượng: ${piece.count}`}
+        draggable={isSetupMode}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onClick={handleClick}
+        className={`relative group flex items-center justify-center shrink-0 transition-transform ${
+          isSetupMode
+            ? selectedSetupPiece
+              ? 'hover:scale-115'
+              : 'cursor-grab active:cursor-grabbing hover:scale-115'
+            : 'hover:scale-110 cursor-help'
+        }`}
+        title={
+          isSetupMode
+            ? `Kéo vào bàn cờ hoặc nhấp chọn: ${piece.nameVi} (Còn ${piece.count})`
+            : `${piece.nameVi} (${piece.baseValue}đ) · Số lượng: ${piece.count}`
+        }
       >
         {/* Mini 3D wooden piece */}
         <div
-          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center font-display-serif font-bold text-sm sm:text-base border shadow-md select-none transition-shadow ${
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center font-display-serif font-bold text-sm sm:text-base border shadow-md select-none transition-all ${
             isPieceRed
               ? 'bg-gradient-to-br from-[#FFFDF8] via-[#F8EDDA] to-[#E5CCA5] border-[#B91C1C] text-[#B91C1C] shadow-[0_2px_4px_rgba(185,28,28,0.25)]'
               : 'bg-gradient-to-br from-[#FAF5EC] via-[#ECE0CA] to-[#D5BE97] border-[#262626] text-[#171717] shadow-[0_2px_4px_rgba(0,0,0,0.35)]'
+          } ${
+            isSelected
+              ? 'ring-2 ring-amber-400 scale-110 shadow-[0_0_12px_rgba(245,158,11,0.75)]'
+              : ''
           }`}
         >
           {/* Inner ring */}
@@ -91,7 +153,7 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
         {/* Count Badge for multiple pieces */}
         {piece.count > 1 && (
           <span
-            className={`absolute -top-1 -right-1 px-1 py-0.2 rounded-full text-[10px] font-mono-tabular font-bold leading-tight shadow-sm border ${
+            className={`absolute -top-1 -right-1 px-1 py-0.2 rounded-full text-[10px] font-mono-tabular font-bold leading-tight shadow-sm border pointer-events-none ${
               isPieceRed
                 ? 'bg-[#991B1B] text-white border-red-400/50'
                 : 'bg-stone-800 text-stone-100 border-stone-600'
@@ -155,7 +217,9 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
           {/* Turn / Thinking status banner */}
           <div className="mt-2 flex items-center justify-between text-[11px]">
             <span className="text-stone-400">Trạng thái:</span>
-            {isTurn ? (
+            {isSetupMode ? (
+              <span className="text-amber-300 font-semibold">Xếp cờ thế</span>
+            ) : isTurn ? (
               <span
                 className={`font-semibold flex items-center gap-1 ${
                   isRed ? 'text-red-400' : 'text-amber-300'
@@ -194,8 +258,10 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
 
         {/* Center: Captured Pieces Tray */}
         <div className="my-3 flex-1 flex flex-col justify-start">
-          <div className="flex items-center justify-between text-xs mb-2">
-            <span className="text-stone-300 font-medium">Quân đã ăn:</span>
+          <div className="flex items-center justify-between text-xs mb-1.5">
+            <span className="text-stone-300 font-medium">
+              {isSetupMode ? 'Kéo quân vào bàn:' : 'Quân đã ăn:'}
+            </span>
             <span className="font-mono-tabular text-stone-400 text-[11px]">
               {pieceCount} quân
             </span>
@@ -210,7 +276,7 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
               <div className="w-6 h-6 rounded-full border border-dashed border-stone-700/80 flex items-center justify-center opacity-40">
                 ·
               </div>
-              <span>Chưa ăn quân</span>
+              <span>{isSetupMode ? 'Đã đặt hết lên bàn' : 'Chưa ăn quân'}</span>
             </div>
           )}
         </div>
@@ -282,7 +348,9 @@ export const CapturedPiecesTray: React.FC<CapturedPiecesTrayProps> = ({
         {capturedPieces.length > 0 ? (
           capturedPieces.map((p) => renderMiniPiece(p))
         ) : (
-          <span className="text-[11px] text-stone-500 italic">Chưa ăn quân</span>
+          <span className="text-[11px] text-stone-500 italic">
+            {isSetupMode ? 'Đã đặt hết lên bàn' : 'Chưa ăn quân'}
+          </span>
         )}
       </div>
 

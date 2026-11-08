@@ -298,3 +298,31 @@ export function createEmptyBoard(): Square[] {
   }
   return squares;
 }
+
+/**
+ * Standard 32-piece starting FEN
+ */
+export const STANDARD_BOARD_FEN =
+  'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1';
+
+/**
+ * Default Puzzle setup FEN: Empty board with only the 2 Generals in their palaces
+ */
+export const TWO_GENERALS_FEN = '4k4/9/9/9/9/9/9/9/9/4K4 w - - 0 1';
+
+/**
+ * Create a board with only the 2 Generals at their default palace squares:
+ * Red General at (0, 4) and Black General at (9, 4)
+ */
+export function createTwoGeneralsBoard(): Square[] {
+  const squares = createEmptyBoard();
+  for (const sq of squares) {
+    if (sq.row === 0 && sq.col === 4) {
+      sq.piece = { type: 'General', color: 'red' };
+    } else if (sq.row === 9 && sq.col === 4) {
+      sq.piece = { type: 'General', color: 'black' };
+    }
+  }
+  return squares;
+}
+

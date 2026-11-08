@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractCapturedPieces,
+  extractOffBoardPieces,
   determineLayoutOrientation,
   calculateOptimalBoardSize,
   PIECE_VALUES,
   PIECE_SYMBOLS,
 } from './capturedPieces.js';
+import { createTwoGeneralsBoard } from './fen.js';
 import type { HistoryRecord, Piece } from '../types/game.js';
 
 test('extractCapturedPieces returns empty arrays for empty history', () => {
@@ -18,6 +20,19 @@ test('extractCapturedPieces returns empty arrays for empty history', () => {
   assert.equal(result.redCapturedValue, 0);
   assert.equal(result.blackCapturedValue, 0);
   assert.equal(result.advantageForRed, 0);
+});
+
+test('extractOffBoardPieces returns 15 Red and 15 Black pieces when only 2 Generals are on board', () => {
+  const board = createTwoGeneralsBoard();
+  const summary = extractOffBoardPieces(board);
+
+  // 15 Red pieces off-board (held in Black tray)
+  assert.equal(summary.redCaptured.length, 15);
+  // 15 Black pieces off-board (held in Red tray)
+  assert.equal(summary.blackCaptured.length, 15);
+  // Generals are on board so General is not in captured list
+  assert.ok(summary.groupedRedCaptured.every((g) => g.type !== 'General'));
+  assert.ok(summary.groupedBlackCaptured.every((g) => g.type !== 'General'));
 });
 
 test('extractCapturedPieces categorizes captured red and black pieces accurately', () => {

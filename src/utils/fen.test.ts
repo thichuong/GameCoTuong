@@ -5,6 +5,7 @@ import {
   fenToBoard,
   validateBoardSetup,
   createEmptyBoard,
+  createTwoGeneralsBoard,
   CLASSIC_PUZZLES,
 } from './fen.js';
 import type { Square } from '../types/game.js';
@@ -13,6 +14,17 @@ test('createEmptyBoard creates exactly 90 empty squares', () => {
   const board = createEmptyBoard();
   assert.equal(board.length, 90);
   assert.ok(board.every((sq) => sq.piece === null));
+});
+
+test('createTwoGeneralsBoard creates 90 squares with Red and Black Generals in palaces', () => {
+  const board = createTwoGeneralsBoard();
+  assert.equal(board.length, 90);
+  const nonEmpty = board.filter((sq) => sq.piece !== null);
+  assert.equal(nonEmpty.length, 2);
+  const redGen = board.find((sq) => sq.row === 0 && sq.col === 4);
+  const blackGen = board.find((sq) => sq.row === 9 && sq.col === 4);
+  assert.deepEqual(redGen?.piece, { type: 'General', color: 'red' });
+  assert.deepEqual(blackGen?.piece, { type: 'General', color: 'black' });
 });
 
 test('fenToBoard and boardToFen roundtrip correctly', () => {

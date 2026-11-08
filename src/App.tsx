@@ -16,22 +16,29 @@ import type {
   Square,
 } from './types/game.js';
 import { DEFAULT_ENGINE_CONFIG } from './types/game.js';
-import { BoardCanvas } from './components/BoardCanvas.js';
+import { BoardCanvas, getPieceCursorStyle } from './components/BoardCanvas.js';
 import { ControlsArea } from './components/ControlsArea.js';
-import { PuzzleSetupArea } from './components/PuzzleSetupArea.js';
 import { LogPanel } from './components/LogPanel.js';
 import { ThinkingIndicator } from './components/ThinkingIndicator.js';
 import { ConfigModal } from './components/ConfigModal.js';
 import { CapturedPiecesTray } from './components/CapturedPiecesTray.js';
 import {
   extractCapturedPieces,
+  extractOffBoardPieces,
   determineLayoutOrientation,
   calculateOptimalBoardSize,
+  STANDARD_PIECE_COUNTS,
   type LayoutOrientation,
 } from './utils/capturedPieces.js';
 import { soundManager } from './utils/sound.js';
 import { exportCsv } from './utils/export.js';
-import { boardToFen, fenToBoard, CLASSIC_PUZZLES } from './utils/fen.js';
+import {
+  boardToFen,
+  fenToBoard,
+  createTwoGeneralsBoard,
+  TWO_GENERALS_FEN,
+  STANDARD_BOARD_FEN,
+} from './utils/fen.js';
 import './App.css';
 
 const DIFFICULTY_TIMES: Record<Difficulty, number> = {
@@ -58,7 +65,8 @@ export const App: React.FC = () => {
   const [puzzleStage, setPuzzleStage] = useState<PuzzleStage>('setup');
   const [puzzleSubMode, setPuzzleSubMode] = useState<PuzzleSubMode>('HumanVsComputer');
   const [puzzleFirstTurn, setPuzzleFirstTurn] = useState<PieceColor>('red');
-  const [puzzleSelectedTool, setPuzzleSelectedTool] = useState<Piece | 'erase' | null>(null);
+  const [selectedSetupPiece, setSelectedSetupPiece] = useState<Piece | null>(null);
+  const [draggedTrayPiece, setDraggedTrayPiece] = useState<Piece | null>(null);
   const [initialPuzzleFen, setInitialPuzzleFen] = useState<string | null>(null);
 
   // Board presentation
@@ -121,11 +129,28 @@ export const App: React.FC = () => {
     [windowDims.width, windowDims.height, layoutOrientation]
   );
 
-  // Extract captured pieces summary
+  // Extract captured / off-board pieces summary:
+  // In Puzzle mode, trays always reflect off-board pieces from the standard 32-piece set
   const capturedSummary = useMemo(
-    () => extractCapturedPieces(history),
-    [history]
+    () =>
+      gameMode === 'Puzzle'
+        ? extractOffBoardPieces(board)
+        : extractCapturedPieces(history),
+    [gameMode, board, history]
   );
+
+  // Clear selectedSetupPiece if no more of that piece remain in the off-board tray
+  useEffect(() => {
+    if (!selectedSetupPiece) return;
+    const countOnBoard = board.filter(
+      (sq) =>
+        sq.piece?.type === selectedSetupPiece.type &&
+        sq.piece?.color === selectedSetupPiece.color
+    ).length;
+    if (countOnBoard >= STANDARD_PIECE_COUNTS[selectedSetupPiece.type]) {
+      setSelectedSetupPiece(null);
+    }
+  }, [board, selectedSetupPiece]);
 
   // AI Web Worker
   const workerRef = useRef<Worker | null>(null);
@@ -355,31 +380,65 @@ export const App: React.FC = () => {
     triggerAiMove,
   ]);
 
-  // Handle Board Click in Setup Mode
+  // Drop piece from CapturedPiecesTray onto Board square in Setup Mode
+  const handleDropPieceOnSquare = useCallback(
+    (row: number, col: number, piece: Piece) => {
+      setBoard((prev) => {
+        const currentCount = prev.filter(
+          (s) =>
+            !(s.row === row && s.col === col) &&
+            s.piece?.type === piece.type &&
+            s.piece?.color === piece.color
+        ).length;
+        if (currentCount >= STANDARD_PIECE_COUNTS[piece.type]) {
+          return prev;
+        }
+        return prev.map((sq) =>
+          sq.row === row && sq.col === col
+            ? { ...sq, piece: { type: piece.type, color: piece.color } }
+            : sq
+        );
+      });
+      setSelectedSquare(null);
+      setDraggedTrayPiece(null);
+      soundManager.play('move');
+    },
+    []
+  );
+
+  // Move piece on Board via Left-Click Drag in Setup Mode
+  const handleMoveSetupPiece = useCallback(
+    (fromRow: number, fromCol: number, toRow: number, toCol: number) => {
+      if (fromRow === toRow && fromCol === toCol) return;
+      setBoard((prev) => {
+        const sourceSq = prev.find((s) => s.row === fromRow && s.col === fromCol);
+        const pieceToMove = sourceSq?.piece ?? null;
+        if (!pieceToMove) return prev;
+
+        return prev.map((sq) => {
+          if (sq.row === fromRow && sq.col === fromCol) {
+            return { ...sq, piece: null };
+          }
+          if (sq.row === toRow && sq.col === toCol) {
+            return { ...sq, piece: pieceToMove };
+          }
+          return sq;
+        });
+      });
+      setSelectedSquare(null);
+      soundManager.play('move');
+    },
+    []
+  );
+
+  // Handle Board Click in Setup Mode (supports click-to-place from tray or click-to-move on board)
   const handleSetupSquareClick = useCallback(
     (row: number, col: number) => {
-      if (puzzleSelectedTool === 'erase') {
-        setBoard((prev) =>
-          prev.map((sq) => (sq.row === row && sq.col === col ? { ...sq, piece: null } : sq))
-        );
+      if (selectedSetupPiece) {
+        handleDropPieceOnSquare(row, col, selectedSetupPiece);
         return;
       }
 
-      if (puzzleSelectedTool) {
-        setBoard((prev) =>
-          prev.map((sq) =>
-            sq.row === row && sq.col === col
-              ? {
-                  ...sq,
-                  piece: { type: puzzleSelectedTool.type, color: puzzleSelectedTool.color },
-                }
-              : sq
-          )
-        );
-        return;
-      }
-
-      // No tool selected: select to reposition pieces
       const clickedSq = board.find((s) => s.row === row && s.col === col);
       if (selectedSquare) {
         const [selR, selC] = selectedSquare;
@@ -388,36 +447,64 @@ export const App: React.FC = () => {
           return;
         }
 
-        const sourceSq = board.find((s) => s.row === selR && s.col === selC);
-        const pieceToMove = sourceSq?.piece ?? null;
-
-        setBoard((prev) =>
-          prev.map((sq) => {
-            if (sq.row === selR && sq.col === selC) {
-              return { ...sq, piece: null };
-            }
-            if (sq.row === row && sq.col === col) {
-              return { ...sq, piece: pieceToMove };
-            }
-            return sq;
-          })
-        );
-        setSelectedSquare(null);
+        handleMoveSetupPiece(selR, selC, row, col);
       } else {
         if (clickedSq?.piece) {
           setSelectedSquare([row, col]);
         }
       }
     },
-    [puzzleSelectedTool, board, selectedSquare]
+    [selectedSetupPiece, board, selectedSquare, handleDropPieceOnSquare, handleMoveSetupPiece]
   );
 
-  // Right-click in Setup Mode: erase piece
+  // Select piece from CapturedPiecesTray in Setup Mode
+  const handleSelectSetupPiece = useCallback((piece: Piece | null) => {
+    setSelectedSetupPiece(piece);
+    if (piece) {
+      setSelectedSquare(null);
+    }
+  }, []);
+
+  // Right-click in Setup Mode: erase piece (returns to opponent's captured tray) and clear selection
   const handleSetupSquareRightClick = useCallback((row: number, col: number) => {
     setBoard((prev) =>
       prev.map((sq) => (sq.row === row && sq.col === col ? { ...sq, piece: null } : sq))
     );
     setSelectedSquare(null);
+    setSelectedSetupPiece(null);
+  }, []);
+
+  // Update Puzzle Board (from Preset or FEN modal)
+  const handleUpdatePuzzleBoard = useCallback(
+    (squares: Square[], nextTurn?: PieceColor, recommendedMode?: PuzzleSubMode) => {
+      setBoard(squares);
+      if (nextTurn) {
+        setPuzzleFirstTurn(nextTurn);
+      }
+      if (recommendedMode) {
+        setPuzzleSubMode(recommendedMode);
+      }
+      setSelectedSquare(null);
+      setSelectedSetupPiece(null);
+    },
+    []
+  );
+
+  // Clear Puzzle Board (keep 2 Generals at their default palace positions)
+  const handleClearPuzzleBoard = useCallback(() => {
+    setBoard(createTwoGeneralsBoard());
+    setPuzzleFirstTurn('red');
+    setSelectedSquare(null);
+    setSelectedSetupPiece(null);
+  }, []);
+
+  // Reset Puzzle Board to Standard 32 pieces
+  const handleResetStandardBoard = useCallback(() => {
+    const { squares } = fenToBoard(STANDARD_BOARD_FEN);
+    setBoard(squares);
+    setPuzzleFirstTurn('red');
+    setSelectedSquare(null);
+    setSelectedSetupPiece(null);
   }, []);
 
   // Start Puzzle Solving
@@ -430,6 +517,7 @@ export const App: React.FC = () => {
       setPuzzleStage('playing');
       syncGameState();
       setSelectedSquare(null);
+      setSelectedSetupPiece(null);
       setLegalMoves([]);
       setLastMove(null);
       setLastStats(null);
@@ -467,6 +555,7 @@ export const App: React.FC = () => {
     if (isThinking) return;
     setPuzzleStage('setup');
     setSelectedSquare(null);
+    setSelectedSetupPiece(null);
     setLegalMoves([]);
     setLastMove(null);
     if (initialPuzzleFen) {
@@ -486,21 +575,17 @@ export const App: React.FC = () => {
       if (isThinking) return;
       setGameMode(mode);
       setSelectedSquare(null);
+      setSelectedSetupPiece(null);
       setLegalMoves([]);
       setLastMove(null);
       setLastStats(null);
 
       if (mode === 'Puzzle') {
         setPuzzleStage('setup');
-        const defaultPuzzle = CLASSIC_PUZZLES[0]!;
-        try {
-          const { squares, turn: presetTurn } = fenToBoard(defaultPuzzle.fen);
-          setBoard(squares);
-          setPuzzleFirstTurn(presetTurn);
-          setInitialPuzzleFen(defaultPuzzle.fen);
-        } catch (e) {
-          // fallback
-        }
+        setBoard(createTwoGeneralsBoard());
+        setPuzzleFirstTurn('red');
+        setInitialPuzzleFen(TWO_GENERALS_FEN);
+        setHistory([]);
       } else {
         gameStateRef.current = new WasmGameState();
         syncGameState();
@@ -626,14 +711,30 @@ export const App: React.FC = () => {
     syncGameState();
   };
 
+  const isPuzzleSetup = gameMode === 'Puzzle' && puzzleStage === 'setup';
   const topSide: PieceColor = playerSide === 'red' ? 'black' : 'red';
   const bottomSide: PieceColor = playerSide === 'red' ? 'red' : 'black';
+
+  // Active selected piece (either from tray in setup mode or selected square on board)
+  const activeCursorPiece = useMemo(() => {
+    if (isPuzzleSetup && selectedSetupPiece) return selectedSetupPiece;
+    if (selectedSquare) {
+      const sq = board.find((s) => s.row === selectedSquare[0] && s.col === selectedSquare[1]);
+      return sq?.piece ?? null;
+    }
+    return null;
+  }, [isPuzzleSetup, selectedSetupPiece, selectedSquare, board]);
+
+  const activePieceCursorStyle = useMemo(
+    () => getPieceCursorStyle(activeCursorPiece),
+    [activeCursorPiece]
+  );
 
   const getSideData = (s: PieceColor) => {
     if (s === 'red') {
       return {
         side: 'red' as PieceColor,
-        isTurn: turn === 'red' && status.status === 'Playing',
+        isTurn: !isPuzzleSetup && turn === 'red' && status.status === 'Playing',
         isThinking: isThinking && turn === 'red',
         capturedPieces: capturedSummary.groupedBlackCaptured,
         totalCapturedValue: capturedSummary.blackCapturedValue,
@@ -642,7 +743,7 @@ export const App: React.FC = () => {
     } else {
       return {
         side: 'black' as PieceColor,
-        isTurn: turn === 'black' && status.status === 'Playing',
+        isTurn: !isPuzzleSetup && turn === 'black' && status.status === 'Playing',
         isThinking: isThinking && turn === 'black',
         capturedPieces: capturedSummary.groupedRedCaptured,
         totalCapturedValue: capturedSummary.redCapturedValue,
@@ -655,7 +756,10 @@ export const App: React.FC = () => {
   const bottomData = getSideData(bottomSide);
 
   return (
-    <div className="min-h-screen bg-[#14110F] text-[#F5EFE6] flex flex-col justify-between py-3 sm:py-5">
+    <div
+      style={activePieceCursorStyle ? { cursor: activePieceCursorStyle } : undefined}
+      className="min-h-screen bg-[#14110F] text-[#F5EFE6] flex flex-col justify-between py-3 sm:py-5"
+    >
       {/* Top Bar */}
       <header
         style={{
@@ -725,7 +829,7 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          {isInCheck && status.status === 'Playing' && (
+          {isInCheck && status.status === 'Playing' && !isPuzzleSetup && (
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span className="hidden xs:inline">Chiếu tướng!</span>
@@ -735,27 +839,27 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#1E1915] border border-stone-800">
             <span
               className={`w-5 h-5 rounded-full flex items-center justify-center font-display-serif text-xs font-bold ${
-                (gameMode === 'Puzzle' && puzzleStage === 'setup' ? puzzleFirstTurn : turn) === 'red'
+                (isPuzzleSetup ? puzzleFirstTurn : turn) === 'red'
                   ? 'bg-red-900 text-red-200 border border-red-500/50'
                   : 'bg-stone-800 text-stone-200 border border-stone-600'
               }`}
             >
-              {(gameMode === 'Puzzle' && puzzleStage === 'setup' ? puzzleFirstTurn : turn) === 'red'
+              {(isPuzzleSetup ? puzzleFirstTurn : turn) === 'red'
                 ? '帥'
                 : '將'}
             </span>
             <div className="text-xs">
               <span className="text-stone-400 hidden xs:inline">
-                {gameMode === 'Puzzle' && puzzleStage === 'setup' ? 'Đi tiên: ' : 'Lượt đi: '}
+                {isPuzzleSetup ? 'Đi tiên: ' : 'Lượt đi: '}
               </span>
               <span
                 className={
-                  (gameMode === 'Puzzle' && puzzleStage === 'setup' ? puzzleFirstTurn : turn) === 'red'
+                  (isPuzzleSetup ? puzzleFirstTurn : turn) === 'red'
                     ? 'font-semibold text-red-400'
                     : 'font-semibold text-amber-300'
                 }
               >
-                {(gameMode === 'Puzzle' && puzzleStage === 'setup' ? puzzleFirstTurn : turn) === 'red'
+                {(isPuzzleSetup ? puzzleFirstTurn : turn) === 'red'
                   ? 'Bên Đỏ'
                   : 'Bên Đen'}
               </span>
@@ -775,47 +879,36 @@ export const App: React.FC = () => {
           }}
           className="w-full px-3 sm:px-6 transition-[max-width] duration-150"
         >
-          {gameMode === 'Puzzle' && puzzleStage === 'setup' ? (
-            <PuzzleSetupArea
-              board={board}
-              setBoard={setBoard}
-              firstTurn={puzzleFirstTurn}
-              setFirstTurn={setPuzzleFirstTurn}
-              subMode={puzzleSubMode}
-              setSubMode={setPuzzleSubMode}
-              playerSide={playerSide}
-              setPlayerSide={setPlayerSide}
-              difficulty={difficulty}
-              setDifficulty={setDifficulty}
-              selectedTool={puzzleSelectedTool}
-              setSelectedTool={setPuzzleSelectedTool}
-              onStartSolving={handleStartSolving}
-              onExitPuzzleMode={() => handleGameModeChange('HumanVsComputer')}
-            />
-          ) : (
-            <ControlsArea
-              gameMode={gameMode}
-              setGameMode={handleGameModeChange}
-              playerSide={playerSide}
-              setPlayerSide={setPlayerSide}
-              difficulty={difficulty}
-              setDifficulty={setDifficulty}
-              isPaused={isPaused}
-              setIsPaused={setIsPaused}
-              onNewGame={handleNewGame}
-              onUndo={handleUndo}
-              onExportCsv={() => exportCsv(history)}
-              onOpenConfig={() => setIsConfigOpen(true)}
-              onToggleLog={() => setIsLogOpen((prev) => !prev)}
-              moveCount={history.length}
-              isThinking={isThinking}
-              canUndo={history.length > 0}
-              puzzleStage={puzzleStage}
-              puzzleSubMode={puzzleSubMode}
-              onEditPuzzlePosition={handleEditPuzzlePosition}
-              onRestartPuzzle={handleRestartPuzzle}
-            />
-          )}
+          <ControlsArea
+            gameMode={gameMode}
+            setGameMode={handleGameModeChange}
+            playerSide={playerSide}
+            setPlayerSide={setPlayerSide}
+            difficulty={difficulty}
+            setDifficulty={setDifficulty}
+            isPaused={isPaused}
+            setIsPaused={setIsPaused}
+            onNewGame={handleNewGame}
+            onUndo={handleUndo}
+            onExportCsv={() => exportCsv(history)}
+            onOpenConfig={() => setIsConfigOpen(true)}
+            onToggleLog={() => setIsLogOpen((prev) => !prev)}
+            moveCount={history.length}
+            isThinking={isThinking}
+            canUndo={history.length > 0}
+            puzzleStage={puzzleStage}
+            puzzleSubMode={puzzleSubMode}
+            setPuzzleSubMode={setPuzzleSubMode}
+            puzzleFirstTurn={puzzleFirstTurn}
+            setPuzzleFirstTurn={setPuzzleFirstTurn}
+            board={board}
+            onUpdatePuzzleBoard={handleUpdatePuzzleBoard}
+            onClearPuzzleBoard={handleClearPuzzleBoard}
+            onResetStandardBoard={handleResetStandardBoard}
+            onStartSolving={handleStartSolving}
+            onEditPuzzlePosition={handleEditPuzzlePosition}
+            onRestartPuzzle={handleRestartPuzzle}
+          />
         </div>
 
         {/* Board & Captured Pieces Container: Responsive Sides or Stacked Layout */}
@@ -838,6 +931,11 @@ export const App: React.FC = () => {
                 playerSide={playerSide}
                 difficulty={difficulty}
                 orientation="sides"
+                isSetupMode={isPuzzleSetup}
+                selectedSetupPiece={selectedSetupPiece}
+                onSelectSetupPiece={handleSelectSetupPiece}
+                onDragStartSetupPiece={setDraggedTrayPiece}
+                onDragEndSetupPiece={() => setDraggedTrayPiece(null)}
               />
             </div>
 
@@ -847,13 +945,17 @@ export const App: React.FC = () => {
                 board={board}
                 playerSide={playerSide}
                 selectedSquare={selectedSquare}
+                selectedSetupPiece={selectedSetupPiece}
                 legalMoves={legalMoves}
                 lastMove={lastMove}
                 onSquareClick={handleSquareClick}
                 onSquareRightClick={handleSetupSquareRightClick}
-                disabled={isThinking || (status.status !== 'Playing' && !(gameMode === 'Puzzle' && puzzleStage === 'setup'))}
+                onDropPieceOnSquare={handleDropPieceOnSquare}
+                onMoveSetupPiece={handleMoveSetupPiece}
+                externalDraggedPiece={draggedTrayPiece}
+                disabled={isThinking || (status.status !== 'Playing' && !isPuzzleSetup)}
                 size={boardSize}
-                isSetupMode={gameMode === 'Puzzle' && puzzleStage === 'setup'}
+                isSetupMode={isPuzzleSetup}
               >
                 <ThinkingIndicator
                   isThinking={isThinking}
@@ -861,7 +963,7 @@ export const App: React.FC = () => {
                   difficulty={difficulty}
                   lastStats={lastStats}
                 />
-                {status.status !== 'Playing' && !(gameMode === 'Puzzle' && puzzleStage === 'setup') && (
+                {status.status !== 'Playing' && !isPuzzleSetup && (
                   <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs rounded-2xl animate-board-overlay">
                     <div className="w-full max-w-[320px] rounded-2xl bg-[#1A1512] border border-amber-500/40 shadow-2xl p-5 text-center">
                       {status.status === 'Checkmate' ? (
@@ -939,6 +1041,11 @@ export const App: React.FC = () => {
                 playerSide={playerSide}
                 difficulty={difficulty}
                 orientation="sides"
+                isSetupMode={isPuzzleSetup}
+                selectedSetupPiece={selectedSetupPiece}
+                onSelectSetupPiece={handleSelectSetupPiece}
+                onDragStartSetupPiece={setDraggedTrayPiece}
+                onDragEndSetupPiece={() => setDraggedTrayPiece(null)}
               />
             </div>
           </div>
@@ -961,6 +1068,11 @@ export const App: React.FC = () => {
                 playerSide={playerSide}
                 difficulty={difficulty}
                 orientation="stacked"
+                isSetupMode={isPuzzleSetup}
+                selectedSetupPiece={selectedSetupPiece}
+                onSelectSetupPiece={handleSelectSetupPiece}
+                onDragStartSetupPiece={setDraggedTrayPiece}
+                onDragEndSetupPiece={() => setDraggedTrayPiece(null)}
               />
             </div>
 
@@ -970,13 +1082,17 @@ export const App: React.FC = () => {
                 board={board}
                 playerSide={playerSide}
                 selectedSquare={selectedSquare}
+                selectedSetupPiece={selectedSetupPiece}
                 legalMoves={legalMoves}
                 lastMove={lastMove}
                 onSquareClick={handleSquareClick}
                 onSquareRightClick={handleSetupSquareRightClick}
-                disabled={isThinking || (status.status !== 'Playing' && !(gameMode === 'Puzzle' && puzzleStage === 'setup'))}
+                onDropPieceOnSquare={handleDropPieceOnSquare}
+                onMoveSetupPiece={handleMoveSetupPiece}
+                externalDraggedPiece={draggedTrayPiece}
+                disabled={isThinking || (status.status !== 'Playing' && !isPuzzleSetup)}
                 size={boardSize}
-                isSetupMode={gameMode === 'Puzzle' && puzzleStage === 'setup'}
+                isSetupMode={isPuzzleSetup}
               >
                 <ThinkingIndicator
                   isThinking={isThinking}
@@ -985,7 +1101,7 @@ export const App: React.FC = () => {
                   lastStats={lastStats}
                 />
 
-                {status.status !== 'Playing' && !(gameMode === 'Puzzle' && puzzleStage === 'setup') && (
+                {status.status !== 'Playing' && !isPuzzleSetup && (
                   <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs rounded-2xl animate-board-overlay">
                     <div className="w-full max-w-[320px] rounded-2xl bg-[#1A1512] border border-amber-500/40 shadow-2xl p-5 text-center">
                       {status.status === 'Checkmate' ? (
@@ -1063,6 +1179,11 @@ export const App: React.FC = () => {
                 playerSide={playerSide}
                 difficulty={difficulty}
                 orientation="stacked"
+                isSetupMode={isPuzzleSetup}
+                selectedSetupPiece={selectedSetupPiece}
+                onSelectSetupPiece={handleSelectSetupPiece}
+                onDragStartSetupPiece={setDraggedTrayPiece}
+                onDragEndSetupPiece={() => setDraggedTrayPiece(null)}
               />
             </div>
           </div>
