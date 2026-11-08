@@ -7,6 +7,7 @@ use crate::logic::lookup::AttackTables;
 pub const SCORE_HASH_MOVE: i32 = 1_000_000;
 pub const SCORE_CAPTURE_BASE: i32 = 100_000;
 pub const SCORE_KILLER_1: i32 = 90_000;
+pub const SCORE_COUNTERMOVE: i32 = 85_000;
 pub const SCORE_KILLER_2: i32 = 80_000;
 
 pub struct MoveGenContext<'a> {
@@ -15,6 +16,7 @@ pub struct MoveGenContext<'a> {
     pub moves: &'a mut MoveList,
     pub best_move: Option<Move>,
     pub killers: &'a [Option<Move>],
+    pub countermove: Option<Move>,
     pub history: Option<&'a [[i32; 90]; 90]>,
     pub only_captures: bool,
     pub enemy_bb: u128,
@@ -33,7 +35,7 @@ impl EngineMoveGen {
 
     #[inline]
     pub fn generate_moves(&self, board: &Board, turn: Color, best_move: Option<Move>) -> MoveList {
-        self.generate_moves_internal(board, turn, best_move, &[], None, false)
+        self.generate_moves_internal(board, turn, best_move, &[], None, None, false)
     }
 
     #[inline]
@@ -43,22 +45,25 @@ impl EngineMoveGen {
         turn: Color,
         best_move: Option<Move>,
         killers: &[Option<Move>],
+        countermove: Option<Move>,
         history: Option<&[[i32; 90]; 90]>,
     ) -> MoveList {
-        self.generate_moves_internal(board, turn, best_move, killers, history, false)
+        self.generate_moves_internal(board, turn, best_move, killers, countermove, history, false)
     }
 
     #[inline]
     pub fn generate_captures(&self, board: &Board, turn: Color) -> MoveList {
-        self.generate_moves_internal(board, turn, None, &[], None, true)
+        self.generate_moves_internal(board, turn, None, &[], None, None, true)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn generate_moves_internal(
         &self,
         board: &Board,
         turn: Color,
         best_move: Option<Move>,
         killers: &[Option<Move>],
+        countermove: Option<Move>,
         history: Option<&[[i32; 90]; 90]>,
         only_captures: bool,
     ) -> MoveList {
@@ -72,6 +77,7 @@ impl EngineMoveGen {
             moves: &mut moves,
             best_move,
             killers,
+            countermove,
             history,
             only_captures,
             enemy_bb,
@@ -159,6 +165,13 @@ impl EngineMoveGen {
                 && km.to_col as usize == tc
         });
 
+        let is_countermove = ctx.countermove.is_some_and(|cm| {
+            cm.from_row as usize == r
+                && cm.from_col as usize == c
+                && cm.to_row as usize == tr
+                && cm.to_col as usize == tc
+        });
+
         let score = if is_hash_move {
             SCORE_HASH_MOVE
         } else if let Some(t) = target {
@@ -167,6 +180,8 @@ impl EngineMoveGen {
             SCORE_CAPTURE_BASE + victim_val * 10 - ctx.attacker_val
         } else if is_killer_1 {
             SCORE_KILLER_1
+        } else if is_countermove {
+            SCORE_COUNTERMOVE
         } else if is_killer_2 {
             SCORE_KILLER_2
         } else if let Some(hist) = ctx.history {

@@ -137,7 +137,10 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({
             <Layers className="w-3.5 h-3.5 text-amber-400/80" />
             {lastStats ? (
               <span>
-                Độ sâu {lastStats.depth} · {(lastStats.nodes / 1000).toFixed(1)}k nodes
+                Độ sâu {lastStats.depth} · {(lastStats.nodes / 1000).toFixed(1)}k nodes ·{' '}
+                {lastStats.time_ms > 0
+                  ? `${Math.round((lastStats.nodes / lastStats.time_ms) * 1000 / 1000)}k NPS`
+                  : 'N/A'}
               </span>
             ) : (
               <span>Alpha-Beta WASM</span>

@@ -165,6 +165,28 @@ pub fn is_in_check(board: &Board, color: Color) -> bool {
     false
 }
 
+/// Fast heuristic check to determine if a move could possibly cause a Flying General situation.
+/// In Xiangqi, a move can only cause Flying General if:
+/// 1. The moving piece is a General; OR
+/// 2. Both Generals are already aligned on the same column AND the moving piece starts from that column.
+#[inline]
+pub fn could_cause_flying_general(board: &Board, piece_type: PieceType, from_sq: usize) -> bool {
+    if piece_type == PieceType::General {
+        return true;
+    }
+    let red_gen_bb = board.bitboards.first().copied().unwrap_or(0);
+    let black_gen_bb = board.bitboards.get(7).copied().unwrap_or(0);
+    if red_gen_bb == 0 || black_gen_bb == 0 {
+        return false;
+    }
+    let red_col = (red_gen_bb.trailing_zeros() as usize) % 9;
+    let black_col = (black_gen_bb.trailing_zeros() as usize) % 9;
+    if red_col != black_col {
+        return false;
+    }
+    (from_sq % 9) == red_col
+}
+
 #[inline]
 pub fn is_flying_general(board: &Board) -> bool {
     let red_gen_bb = board.bitboards[0];

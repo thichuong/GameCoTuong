@@ -4,8 +4,9 @@ use crate::engine::movegen::EngineMoveGen;
 use crate::engine::tt::{TTEntry, TTFlag, TranspositionTable};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, BoardCoordinate, Color, Piece};
+use crate::logic::eval_constants::get_piece_value;
 use crate::logic::game::GameState;
-use crate::logic::rules::{is_flying_general, is_in_check};
+use crate::logic::rules::{could_cause_flying_general, is_flying_general, is_in_check};
 use std::sync::Arc;
 
 const MATE_THRESHOLD: i32 = 15_000;
@@ -23,6 +24,7 @@ pub struct AlphaBetaEngine {
     in_check_stack: [bool; 96],
     killer_moves: [[Option<Move>; 2]; 64],
     history_table: Box<[[i32; 90]; 90]>,
+    countermoves: Box<[[Option<Move>; 90]; 90]>,
     nodes_searched: u32,
     start_time: f64,
     time_limit: Option<f64>,
@@ -47,6 +49,7 @@ impl AlphaBetaEngine {
             in_check_stack: [false; 96],
             killer_moves: [[None; 2]; 64],
             history_table: Box::new([[0; 90]; 90]),
+            countermoves: Box::new([[None; 90]; 90]),
             nodes_searched: 0,
             start_time: 0.0,
             time_limit: None,
@@ -294,6 +297,7 @@ impl AlphaBetaEngine {
                 turn.opposite(),
                 ply.saturating_add(1),
                 None,
+                None,
             );
             board.apply_null_move();
 
@@ -362,17 +366,30 @@ impl AlphaBetaEngine {
             return Some(self.eval_for_turn(board, turn));
         }
 
-        let in_check = is_in_check(board, turn);
-        self.in_check_stack[(ply as usize).min(95)] = in_check;
-        if !in_check {
-            let stand_pat = self.eval_for_turn(board, turn);
-            if stand_pat >= beta {
-                return Some(beta);
-            }
-            if stand_pat > alpha {
-                alpha = stand_pat;
+        let hash = board.zobrist_hash;
+        if let Some(entry) = self.tt.probe(hash) {
+            match entry.flag {
+                TTFlag::Exact => return Some(entry.score),
+                TTFlag::LowerBound if entry.score >= beta => return Some(entry.score),
+                TTFlag::UpperBound if entry.score <= alpha => return Some(entry.score),
+                _ => {}
             }
         }
+
+        let in_check = is_in_check(board, turn);
+        self.in_check_stack[(ply as usize).min(95)] = in_check;
+        let stand_pat = if !in_check {
+            let sp = self.eval_for_turn(board, turn);
+            if sp >= beta {
+                return Some(beta);
+            }
+            if sp > alpha {
+                alpha = sp;
+            }
+            sp
+        } else {
+            -INF_SCORE
+        };
 
         let movegen = EngineMoveGen::new();
         let mut moves = if in_check {
@@ -389,7 +406,24 @@ impl AlphaBetaEngine {
                 continue;
             };
 
-            if is_in_check(board, turn) || is_flying_general(board) {
+            // Delta pruning: In non-check positions, if stand_pat + captured piece value + safety_margin < alpha,
+            // even capturing this piece cannot improve alpha.
+            if !in_check {
+                let cap_val = captured.map_or(0, |c| get_piece_value(c.piece_type));
+                if stand_pat + cap_val + 150 < alpha {
+                    board.undo_move_board_only(&mv, piece, captured);
+                    continue;
+                }
+            }
+
+            // Fast legal validation: self-check and conditional flying general check
+            let is_flying = if could_cause_flying_general(board, piece.piece_type, from_sq) {
+                is_flying_general(board)
+            } else {
+                false
+            };
+
+            if is_in_check(board, turn) || is_flying {
                 board.undo_move_board_only(&mv, piece, captured);
                 continue;
             }
@@ -412,6 +446,7 @@ impl AlphaBetaEngine {
             let score = score_opt?;
 
             if score >= beta {
+                self.tt.store(hash, None, beta, 0, TTFlag::LowerBound);
                 return Some(beta);
             }
             if score > alpha {
@@ -422,6 +457,13 @@ impl AlphaBetaEngine {
         if in_check && legal_moves_count == 0 {
             return Some(-self.calculate_mate_score(ply));
         }
+
+        let flag = if alpha >= beta {
+            TTFlag::LowerBound
+        } else {
+            TTFlag::UpperBound
+        };
+        self.tt.store(hash, None, alpha, 0, flag);
 
         Some(alpha)
     }
@@ -436,6 +478,7 @@ impl AlphaBetaEngine {
         turn: Color,
         ply: u8,
         pending_move: Option<PendingNnueMove>,
+        prev_move: Option<Move>,
     ) -> Option<i32> {
         if ply >= MAX_PLY {
             let saved_acc = if let Some((from_sq, to_sq, piece, captured)) = pending_move {
@@ -523,8 +566,9 @@ impl AlphaBetaEngine {
             None
         };
 
-        let res =
-            self.alpha_beta_inner(board, alpha, beta, depth, turn, ply, hash, is_pv, tt_entry);
+        let res = self.alpha_beta_inner(
+            board, alpha, beta, depth, turn, ply, hash, is_pv, tt_entry, prev_move,
+        );
 
         if let Some(acc) = saved_acc {
             board.nnue_acc = acc;
@@ -546,6 +590,7 @@ impl AlphaBetaEngine {
         hash: u64,
         is_pv: bool,
         tt_entry: Option<TTEntry>,
+        prev_move: Option<Move>,
     ) -> Option<i32> {
         let in_check = is_in_check(board, turn);
         self.in_check_stack[(ply as usize).min(95)] = in_check;
@@ -579,12 +624,23 @@ impl AlphaBetaEngine {
         let p_idx = (ply as usize).min(63);
         let killers = self.killer_moves[p_idx];
 
+        let countermove = prev_move.and_then(|pm| {
+            let p_from = Board::square_index(pm.from_row as usize, pm.from_col as usize);
+            let p_to = Board::square_index(pm.to_row as usize, pm.to_col as usize);
+            self.countermoves
+                .get(p_from)
+                .and_then(|r| r.get(p_to))
+                .copied()
+                .flatten()
+        });
+
         let movegen = EngineMoveGen::new();
         let mut moves = movegen.generate_moves_with_ordering(
             board,
             turn,
             best_move_tt,
             &killers,
+            countermove,
             Some(&*self.history_table),
         );
 
@@ -594,6 +650,8 @@ impl AlphaBetaEngine {
         let mut legal_moves_count = 0usize;
 
         let full_depth = depth.saturating_sub(1) + u8::from(in_check);
+        let mut quiet_moves_tried = [(0usize, 0usize); 64];
+        let mut quiet_count = 0usize;
 
         let mut move_idx = 0;
         while let Some(mv) = moves.pick_next_best(move_idx) {
@@ -602,14 +660,26 @@ impl AlphaBetaEngine {
                 continue;
             };
 
-            // Fast legal validation: self-check and flying general
-            if is_in_check(board, turn) || is_flying_general(board) {
+            // Fast legal validation: self-check and conditional flying general check
+            let is_flying = if could_cause_flying_general(board, piece.piece_type, from_sq) {
+                is_flying_general(board)
+            } else {
+                false
+            };
+
+            if is_in_check(board, turn) || is_flying {
                 board.undo_move_board_only(&mv, piece, captured);
                 continue;
             }
 
             legal_moves_count += 1;
             let is_capture = captured.is_some();
+            if !is_capture && quiet_count < 64 {
+                if let Some(slot) = quiet_moves_tried.get_mut(quiet_count) {
+                    *slot = (from_sq, to_sq);
+                    quiet_count += 1;
+                }
+            }
             let pending = Some((from_sq, to_sq, piece, captured));
 
             // Late Move Reductions (LMR)
@@ -636,6 +706,7 @@ impl AlphaBetaEngine {
                     turn.opposite(),
                     next_ply,
                     pending,
+                    Some(mv),
                 )
                 .map(|v| -v)
             } else {
@@ -649,6 +720,7 @@ impl AlphaBetaEngine {
                         turn.opposite(),
                         next_ply,
                         pending,
+                        Some(mv),
                     )
                     .map(|v| -v)
                 } else {
@@ -665,6 +737,7 @@ impl AlphaBetaEngine {
                             turn.opposite(),
                             next_ply,
                             pending,
+                            Some(mv),
                         )
                         .map(|v| -v);
                 }
@@ -680,6 +753,7 @@ impl AlphaBetaEngine {
                                 turn.opposite(),
                                 next_ply,
                                 pending,
+                                Some(mv),
                             )
                             .map(|v| -v);
                     }
@@ -707,10 +781,32 @@ impl AlphaBetaEngine {
                         self.killer_moves[p_idx][1] = self.killer_moves[p_idx][0];
                         self.killer_moves[p_idx][0] = Some(mv);
                     }
+                    let bonus = i32::from(depth) * i32::from(depth);
                     if let Some(row) = self.history_table.get_mut(from_sq) {
                         if let Some(val) = row.get_mut(to_sq) {
-                            let bonus = i32::from(depth) * i32::from(depth);
                             *val = (*val + bonus).min(50_000);
+                        }
+                    }
+                    // History Malus: penalize quiet moves tried earlier at this node that failed
+                    let penalty = bonus / 2;
+                    for &(q_from, q_to) in
+                        quiet_moves_tried.iter().take(quiet_count.saturating_sub(1))
+                    {
+                        if let Some(row) = self.history_table.get_mut(q_from) {
+                            if let Some(val) = row.get_mut(q_to) {
+                                *val = (*val - penalty).max(-50_000);
+                            }
+                        }
+                    }
+                    // Countermove update
+                    if let Some(prev) = prev_move {
+                        let p_from =
+                            Board::square_index(prev.from_row as usize, prev.from_col as usize);
+                        let p_to = Board::square_index(prev.to_row as usize, prev.to_col as usize);
+                        if let Some(row) = self.countermoves.get_mut(p_from) {
+                            if let Some(slot) = row.get_mut(p_to) {
+                                *slot = Some(mv);
+                            }
                         }
                     }
                 }
@@ -741,6 +837,11 @@ impl Searcher for AlphaBetaEngine {
         self.start_time = Self::now();
         self.history_stack.clear();
         self.killer_moves = [[None; 2]; 64];
+        for row in self.countermoves.iter_mut() {
+            for slot in row.iter_mut() {
+                *slot = None;
+            }
+        }
         for row in self.history_table.iter_mut() {
             for val in row.iter_mut() {
                 *val >>= 1;
@@ -755,7 +856,7 @@ impl Searcher for AlphaBetaEngine {
             SearchLimit::DepthOrTime { depth, time_ms } => (depth.min(63), Some(time_ms as f64)),
         };
         self.time_limit = time_limit;
-        let soft_limit = time_limit.map(|t| t * 0.6);
+        let soft_limit = time_limit.map(|t| t * 0.75);
 
         let mut board = game_state.board.clone();
         board.refresh_nnue_with_weights(self.evaluator.weights());
@@ -839,6 +940,7 @@ impl Searcher for AlphaBetaEngine {
                     turn,
                     tt_move,
                     &self.killer_moves[0],
+                    None,
                     Some(&*self.history_table),
                 );
 
@@ -871,7 +973,16 @@ impl Searcher for AlphaBetaEngine {
                     let pending = Some((from_sq, to_sq, piece, captured));
 
                     let score_opt = if moves_searched == 0 {
-                        self.alpha_beta(board, -beta, -alpha, d - 1, turn.opposite(), 1, pending)
+                        self.alpha_beta(
+                            board,
+                            -beta,
+                            -alpha,
+                            d - 1,
+                            turn.opposite(),
+                            1,
+                            pending,
+                            Some(*mv),
+                        )
                     } else {
                         let mut val = self.alpha_beta(
                             board,
@@ -881,6 +992,7 @@ impl Searcher for AlphaBetaEngine {
                             turn.opposite(),
                             1,
                             pending,
+                            Some(*mv),
                         );
                         if let Some(v) = val {
                             let s = -v;
@@ -893,6 +1005,7 @@ impl Searcher for AlphaBetaEngine {
                                     turn.opposite(),
                                     1,
                                     pending,
+                                    Some(*mv),
                                 );
                             }
                         }

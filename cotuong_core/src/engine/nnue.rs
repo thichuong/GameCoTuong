@@ -1291,7 +1291,7 @@ pub fn evaluate_dual_forward(
     let red_slice = red_acts.get(..red_count).unwrap_or(&[]);
     let black_slice = black_acts.get(..black_count).unwrap_or(&[]);
 
-    // 1a. Layer 1 -> Layer 2 for Red perspective (sequential column access, fits in SIMD registers)
+    // 1a. Layer 1 -> Layer 2 for Red perspective (sequential column access, fits in registers)
     let mut l2_red = weights.b2;
     for &(i, act) in red_slice {
         let act32 = i32::from(act);
@@ -1310,7 +1310,7 @@ pub fn evaluate_dual_forward(
         }
     }
 
-    // 1b. Layer 1 -> Layer 2 for Black perspective (sequential column access, fits in SIMD registers)
+    // 1b. Layer 1 -> Layer 2 for Black perspective (sequential column access, fits in registers)
     let mut l2_black = weights.b2;
     for &(i, act) in black_slice {
         let act32 = i32::from(act);

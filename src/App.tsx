@@ -269,8 +269,10 @@ export const App: React.FC = () => {
             move.to_col
           ) as { success: boolean; captured: unknown; in_check: boolean };
 
+          const nps = stats.time_ms > 0 ? Math.round((stats.nodes / stats.time_ms) * 1000) : 0;
+          const npsStr = nps >= 1000 ? `${(nps / 1000).toFixed(1)}k` : `${nps}`;
           state.annotate_last_move(
-            `🤖 Độ sâu: ${stats.depth}, Nodes: ${stats.nodes}, Thời gian: ${stats.time_ms}ms`
+            `🤖 Độ sâu: ${stats.depth}, Nodes: ${stats.nodes}, Thời gian: ${stats.time_ms}ms (${npsStr} NPS)`
           );
 
           setLastStats(stats);
