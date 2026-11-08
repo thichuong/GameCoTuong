@@ -82,6 +82,23 @@ impl AlphaBetaEngine {
         self.config = config;
     }
 
+    /// Clears the transposition table and resets search heuristics.
+    /// Call this when starting a brand new game or loading an unrelated puzzle FEN.
+    pub fn clear_tt(&mut self) {
+        self.tt.clear();
+        self.killer_moves = [[None; 2]; 64];
+        for row in self.countermoves.iter_mut() {
+            for slot in row.iter_mut() {
+                *slot = None;
+            }
+        }
+        for row in self.history_table.iter_mut() {
+            for val in row.iter_mut() {
+                *val = 0;
+            }
+        }
+    }
+
     fn precompute_lmr() -> [[u8; 64]; 64] {
         let mut table = [[0; 64]; 64];
         for (depth, row) in table.iter_mut().enumerate() {
@@ -367,7 +384,7 @@ impl AlphaBetaEngine {
         }
 
         let hash = board.zobrist_hash;
-        if let Some(entry) = self.tt.probe(hash) {
+        if let Some(entry) = self.tt.probe(hash, ply) {
             match entry.flag {
                 TTFlag::Exact => return Some(entry.score),
                 TTFlag::LowerBound if entry.score >= beta => return Some(entry.score),
@@ -446,7 +463,7 @@ impl AlphaBetaEngine {
             let score = score_opt?;
 
             if score >= beta {
-                self.tt.store(hash, None, beta, 0, TTFlag::LowerBound);
+                self.tt.store(hash, None, beta, 0, TTFlag::LowerBound, ply);
                 return Some(beta);
             }
             if score > alpha {
@@ -463,7 +480,7 @@ impl AlphaBetaEngine {
         } else {
             TTFlag::UpperBound
         };
-        self.tt.store(hash, None, alpha, 0, flag);
+        self.tt.store(hash, None, alpha, 0, flag, ply);
 
         Some(alpha)
     }
@@ -525,7 +542,7 @@ impl AlphaBetaEngine {
         }
 
         // 2. Transposition Table Probe (before NNUE update!)
-        let tt_entry = self.tt.probe(hash);
+        let tt_entry = self.tt.probe(hash, ply);
         if let Some(entry) = tt_entry {
             if entry.depth >= depth && (!is_pv || entry.flag == TTFlag::Exact) {
                 match entry.flag {
@@ -819,7 +836,7 @@ impl AlphaBetaEngine {
         }
 
         self.tt
-            .store(hash, best_move_this_node, best_score, depth, tt_flag);
+            .store(hash, best_move_this_node, best_score, depth, tt_flag, ply);
 
         Some(best_score)
     }
@@ -835,13 +852,9 @@ impl Searcher for AlphaBetaEngine {
     ) -> Option<(Move, SearchStats)> {
         self.nodes_searched = 0;
         self.start_time = Self::now();
+        self.tt.new_search();
         self.history_stack.clear();
         self.killer_moves = [[None; 2]; 64];
-        for row in self.countermoves.iter_mut() {
-            for slot in row.iter_mut() {
-                *slot = None;
-            }
-        }
         for row in self.history_table.iter_mut() {
             for val in row.iter_mut() {
                 *val >>= 1;
@@ -906,6 +919,24 @@ impl Searcher for AlphaBetaEngine {
         let mut final_depth = 0;
         let mut previous_score: Option<i32> = None;
 
+        // Subtree reuse: Check if this root position was already analyzed in a previous search
+        if let Some(entry) = self.tt.probe(board.zobrist_hash, 0) {
+            if let Some(cached_mv) = entry.best_move {
+                if root_moves.iter().any(|rm| {
+                    rm.from_row == cached_mv.from_row
+                        && rm.from_col == cached_mv.from_col
+                        && rm.to_row == cached_mv.to_row
+                        && rm.to_col == cached_mv.to_col
+                }) {
+                    best_move = Some(cached_mv);
+                    final_depth = entry.depth;
+                }
+            }
+            if entry.score.abs() < MATE_THRESHOLD {
+                previous_score = Some(entry.score);
+            }
+        }
+
         for d in 1..=max_depth {
             if let Some(sl) = soft_limit {
                 let elapsed = Self::now() - self.start_time;
@@ -919,7 +950,7 @@ impl Searcher for AlphaBetaEngine {
             let mut delta = 35;
 
             if let Some(score) = previous_score {
-                if d >= 4 && score.abs() < MATE_THRESHOLD {
+                if d >= 2 && score.abs() < MATE_THRESHOLD {
                     alpha = (score - delta).max(-INF_SCORE);
                     beta = (score + delta).min(INF_SCORE);
                 }
@@ -1064,6 +1095,7 @@ impl Searcher for AlphaBetaEngine {
                         best_score_this_iteration,
                         d,
                         TTFlag::Exact,
+                        0,
                     );
                 }
                 break;

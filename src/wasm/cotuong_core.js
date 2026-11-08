@@ -15,6 +15,12 @@ export class WasmEngine {
         wasm.__wbg_wasmengine_free(ptr, 0);
     }
     /**
+     * Clear the transposition table and reset node memory
+     */
+    clear_tt() {
+        wasm.wasmengine_clear_tt(this.__wbg_ptr);
+    }
+    /**
      * Initialize AI search engine with optional JSON config
      * @param {string | null} [config_json]
      */

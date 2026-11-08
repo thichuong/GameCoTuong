@@ -910,6 +910,10 @@ export class PolyfillEngine {
     }
   }
 
+  clear_tt(): void {
+    // Polyfill transposition table clear
+  }
+
   search(
     gameState: PolyfillGameState,
     timeLimitMs: bigint | number,

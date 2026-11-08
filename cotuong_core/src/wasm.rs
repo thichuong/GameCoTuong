@@ -380,6 +380,11 @@ impl WasmEngine {
         Ok(())
     }
 
+    /// Clear the transposition table and reset node memory
+    pub fn clear_tt(&mut self) {
+        self.engine.clear_tt();
+    }
+
     /// Run AI search on the given game state
     pub fn search(
         &mut self,

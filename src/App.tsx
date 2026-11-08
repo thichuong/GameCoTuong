@@ -167,6 +167,11 @@ export const App: React.FC = () => {
     setHistory(state.get_history() as HistoryRecord[]);
   }, []);
 
+  // Clear AI engine transposition table & memory when explicitly starting a fresh game or puzzle
+  const clearEngineMemory = useCallback(() => {
+    workerRef.current?.postMessage({ type: 'CLEAR_TT' });
+  }, []);
+
   // Initialize WASM and Worker
   useEffect(() => {
     let worker: Worker | null = null;
@@ -512,6 +517,7 @@ export const App: React.FC = () => {
   // Start Puzzle Solving
   const handleStartSolving = useCallback(() => {
     try {
+      clearEngineMemory();
       const fen = boardToFen(board, puzzleFirstTurn);
       const newState = WasmGameState.from_fen(fen);
       gameStateRef.current = newState;
@@ -530,12 +536,13 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Failed to start puzzle solving:', err);
     }
-  }, [board, puzzleFirstTurn, puzzleSubMode, syncGameState]);
+  }, [board, clearEngineMemory, puzzleFirstTurn, puzzleSubMode, syncGameState]);
 
   // Restart Puzzle from Beginning
   const handleRestartPuzzle = useCallback(() => {
     if (isThinking || !initialPuzzleFen) return;
     try {
+      clearEngineMemory();
       const newState = WasmGameState.from_fen(initialPuzzleFen);
       gameStateRef.current = newState;
       syncGameState();
@@ -550,7 +557,7 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Failed to restart puzzle:', err);
     }
-  }, [initialPuzzleFen, isThinking, puzzleSubMode, syncGameState]);
+  }, [clearEngineMemory, initialPuzzleFen, isThinking, puzzleSubMode, syncGameState]);
 
   // Edit Puzzle Position (back to setup)
   const handleEditPuzzlePosition = useCallback(() => {
@@ -575,6 +582,7 @@ export const App: React.FC = () => {
   const handleGameModeChange = useCallback(
     (mode: GameMode) => {
       if (isThinking) return;
+      clearEngineMemory();
       setGameMode(mode);
       setSelectedSquare(null);
       setSelectedSetupPiece(null);
@@ -598,7 +606,7 @@ export const App: React.FC = () => {
         }
       }
     },
-    [isThinking, syncGameState]
+    [clearEngineMemory, isThinking, syncGameState]
   );
 
   // Handle Board Click
@@ -674,6 +682,7 @@ export const App: React.FC = () => {
   // New Game
   const handleNewGame = () => {
     if (isThinking) return;
+    clearEngineMemory();
     if (gameMode === 'Puzzle') {
       handleRestartPuzzle();
       return;

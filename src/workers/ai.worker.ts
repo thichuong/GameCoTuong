@@ -22,6 +22,13 @@ async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
 self.onmessage = async (e: MessageEvent) => {
   const { type, stateJson, fen, timeLimitMs, maxDepth, configJson } = e.data;
 
+  if (type === 'CLEAR_TT') {
+    if (engine) {
+      engine.clear_tt();
+    }
+    return;
+  }
+
   if (type === 'SEARCH') {
     try {
       const eng = await ensureInitialized(configJson);

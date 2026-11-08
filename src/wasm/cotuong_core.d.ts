@@ -8,6 +8,10 @@ export class WasmEngine {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Clear the transposition table and reset node memory
+     */
+    clear_tt(): void;
+    /**
      * Initialize AI search engine with optional JSON config
      */
     constructor(config_json?: string | null);
@@ -108,6 +112,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmengine_free: (a: number, b: number) => void;
     readonly __wbg_wasmgamestate_free: (a: number, b: number) => void;
+    readonly wasmengine_clear_tt: (a: number) => void;
     readonly wasmengine_new: (a: number, b: number) => [number, number, number];
     readonly wasmengine_search: (a: number, b: number, c: bigint, d: number) => [number, number, number];
     readonly wasmengine_update_config: (a: number, b: number, c: number) => [number, number];

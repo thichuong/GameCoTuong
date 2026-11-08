@@ -180,4 +180,62 @@ mod tests {
             nps_i8 as f64 / nps_i16 as f64
         );
     }
+
+    #[test]
+    fn test_subtree_reuse_efficiency() {
+        println!("--- Benchmarking Subtree & TT Reuse Efficiency ---");
+        let config = Arc::new(EngineConfig::default());
+        let mut engine = AlphaBetaEngine::new(config.clone());
+        let mut game_state = GameState::new();
+
+        // 1. First move search from opening position at Depth 5
+        let (mv1, _stats1) = engine
+            .search(&game_state, SearchLimit::Depth(5), &[])
+            .expect("First move search");
+
+        let from1 = BoardCoordinate::new(mv1.from_row as usize, mv1.from_col as usize).unwrap();
+        let to1 = BoardCoordinate::new(mv1.to_row as usize, mv1.to_col as usize).unwrap();
+        game_state.make_move(from1, to1).expect("Make first move");
+
+        // 2. Opponent makes a move (e.g. Knight to central file or first legal move)
+        let opp_moves = game_state.get_strictly_legal_moves();
+        assert!(!opp_moves.is_empty(), "Opponent must have legal moves");
+        let opp_mv = opp_moves[0];
+        let from2 =
+            BoardCoordinate::new(opp_mv.from_row as usize, opp_mv.from_col as usize).unwrap();
+        let to2 = BoardCoordinate::new(opp_mv.to_row as usize, opp_mv.to_col as usize).unwrap();
+        game_state
+            .make_move(from2, to2)
+            .expect("Make opponent move");
+
+        // 3. Search next turn WITH reused subtree in TT
+        let (_mv_reuse, stats_reuse) = engine
+            .search(&game_state, SearchLimit::Depth(5), &[])
+            .expect("Search with reused subtree");
+
+        // 4. Search next turn WITHOUT reused subtree (cold start after clear_tt)
+        let mut engine_fresh = AlphaBetaEngine::new(config);
+        engine_fresh.clear_tt();
+        let (_mv_fresh, stats_fresh) = engine_fresh
+            .search(&game_state, SearchLimit::Depth(5), &[])
+            .expect("Search with fresh TT");
+
+        println!(
+            "Subtree Reuse: nodes searched = {} vs Fresh Search: nodes searched = {}",
+            stats_reuse.nodes, stats_fresh.nodes
+        );
+
+        let node_saving_pct = (1.0 - (stats_reuse.nodes as f64 / stats_fresh.nodes as f64)) * 100.0;
+        println!(
+            "Node search reduction from subtree reuse: {:.2}%",
+            node_saving_pct
+        );
+
+        assert!(
+            stats_reuse.nodes <= stats_fresh.nodes,
+            "Reused subtree must search fewer or equal nodes than starting from scratch! (reused: {}, fresh: {})",
+            stats_reuse.nodes,
+            stats_fresh.nodes
+        );
+    }
 }
