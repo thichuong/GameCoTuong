@@ -1,75 +1,77 @@
 ---
 name: xiangqi_engine_tuning
-description: Guidelines for modifying the Xiangqi AI engine – search algorithms, evaluation tuning, and transposition table. Covers AlphaBetaEngine, SimpleEvaluator, and performance-critical hot paths.
+description: Guidelines for modifying the Xiangqi AI engine and NNUE trainer – search algorithms, Dual-Head HalfKP NNUE v3 evaluation, f32/int16/int8 model variants, transposition table, and cotuong_trainer pipeline.
 ---
 
-# Xiangqi Engine Tuning Skill
+# Xiangqi Engine Tuning & NNUE Skill
 
 ## Scope
 
-This skill covers modifications to files in `cotuong_core/src/engine/` and its configuration UI:
+This skill covers modifications to files in `cotuong_core/src/engine/`, `cotuong_trainer/`, and the configuration UI:
 - `cotuong_core/src/engine/mod.rs` – Traits (`Evaluator`, `Searcher`) and structs (`Move`, `SearchLimit`, `SearchStats`)
-- `cotuong_core/src/engine/search.rs` – `AlphaBetaEngine` (Iterative Deepening Negamax + pruning)
-- `cotuong_core/src/engine/eval.rs` – `SimpleEvaluator` (material, PST, mobility, king safety, structure)
+- `cotuong_core/src/engine/search.rs` – `AlphaBetaEngine` (Iterative Deepening Negamax + PVS + pruning)
+- `cotuong_core/src/engine/eval.rs` – `SimpleEvaluator` (evaluates board via `NnueWeights` and scales by `nnue_weight`)
+- `cotuong_core/src/engine/nnue.rs` – `NnueWeights`, `NnueAccumulator`, Dual-Head HalfKP v3 architecture (`f32`, `int16`, `int8` loaders and SIMD-friendly forward pass)
 - `cotuong_core/src/engine/movegen.rs` – `EngineMoveGen` (engine-specific move generation with scoring)
-- `cotuong_core/src/engine/config.rs` – `EngineConfig` (tunable parameters & JSON deserialization)
-- `cotuong_core/src/engine/tt.rs` – `TranspositionTable` (Zobrist hash table)
+- `cotuong_core/src/engine/config.rs` – `EngineConfig` (`mate_score`, `tt_size_mb`, `nnue_weight`, `model_type`)
+- `cotuong_core/src/engine/tt.rs` – `TranspositionTable` (Zobrist hash table with configurable MB size)
 - `cotuong_core/src/engine/move_list.rs` – `MoveList` (stack-allocated `[Move; 128]`)
 - `cotuong_core/src/engine/zobrist.rs` – `ZobristKeys` (XorShift64 position hashing)
-- `cotuong_core/src/wasm.rs` – `WasmEngine` wrapper exposing search and config updates to JS/WASM
-- `src/components/ConfigModal.tsx` & `src/types/game.ts` – Frontend UI for tuning Red/Black AI configs
+- `cotuong_trainer/src/` – `main.rs`, `dataset.rs`, `protocol.rs` (NNUE training, UCCI/UCI teacher distillation, sparring, and quantization)
+- `src/components/ConfigModal.tsx` & `src/types/game.ts` – Frontend UI for tuning Red/Black `EngineConfig`
 
 ## Architecture Context
 
-### Search Pipeline
+### Search Pipeline (`cotuong_core/src/engine/search.rs`)
 1. `search()` → Iterative Deepening (depth 1 → `max_depth`, with Aspiration Windows)
 2. `alpha_beta()` → Negamax with α-β pruning & PVS (Principal Variation Search)
-   - TT probe → Razoring → Futility Pruning → Null-Move Pruning (NMP) → ProbCut → Singular Extension → Late Move Reductions (LMR) / Dynamic Limiting
-3. `quiescence()` → Captures-only search to mitigate the horizon effect
-4. Move ordering: TT move → Captures (MVV-LVA) → Killer moves → Countermove → History heuristic
+   - Three-fold repetition detection → TT probe → Razoring / Reverse Futility Pruning → Null-Move Pruning (NMP) → Late Move Reductions (LMR) → Check Extensions
+3. `quiescence()` → Captures and check-evasion search to mitigate the horizon effect
+4. Move ordering: TT move → Captures (MVV-LVA) → Killer moves (2 slots/ply) → History heuristic
 
-### Engine Move Generation (`movegen.rs`)
-- **`EngineMoveGen`**: Dedicated engine move generator with inline move scoring (separate from `logic/generator.rs`).
-- Uses `AttackTables` for fast bitboard/lookup generation + `EngineConfig` for scoring weights.
-- **`MoveGenContext`**: Holds board state, `MoveList`, config, killer moves, countermove, and history table reference during generation.
-- Methods: `generate_moves()` (all pseudo-legal/legal moves with scores), `generate_captures()` (captures only for quiescence).
-- Piece-specific generators: `gen_rook_moves`, `gen_cannon_moves`, `gen_horse_moves`, `gen_elephant_moves`, `gen_advisor_moves`, `gen_king_moves`, `gen_pawn_moves`.
+### Dual-Head HalfKP NNUE v3 (`cotuong_core/src/engine/nnue.rs`)
+- **Feature Set (`L1_INPUT_SIZE = 10,530`)**: `9 king palace squares × 13 piece types (6 friendly non-king + 7 enemy) × 90 board squares`.
+- **Incremental Accumulator (`NnueAccumulator` on `Board`)**:
+  - `red: [i16; 192]`, `black: [i16; 192]`
+  - `psqt_red: [i32; 8]`, `psqt_black: [i32; 8]` (8 game-phase material & positional buckets)
+  - Updated incrementally in $O(1)$ on `Board::apply_move()` and `Board::undo_move()`.
+- **Deep SCReLU Positional Head**:
+  - `L1 (2×192 = 384)` → SCReLU activation (`clamp(0, 256)^2 >> 8`) with sparse zero-skipping over column-major `w2_col` → `L2 (32)` → `L3 (32)` → `Output (1)`.
+  - Evaluates both Red and Black perspectives simultaneously in `evaluate_dual_forward()`.
+- **3 Embedded Model Variants (`cotuong_core/assets/`)**:
+  - `"int16"` (`default.nnue` / `model_int16.nnue`, magic `XNNU` v3, ~4.0 MB): Default SIMD-friendly 16-bit/8-bit quantized network.
+  - `"int8"` (`model_int8.nnue`, magic `COTINT8_`, ~2.0 MB): Compact 8-bit quantized network for low-RAM devices.
+  - `"f32"` (`model_f32.bin`, magic `COTF32_1`, ~8.1 MB): Unquantized 32-bit float weights converted on load.
 
-### Key Data Structures
-- `MoveList`: `[Move; 128]` on stack – **NEVER** use `Vec<Move>` in the search loop
-- `TranspositionTable`: Power-of-2 hash table with `TTEntry { key, best_move, score, depth, flag }`
-- `AlphaBetaEngine` fields: `killer_moves`, `history_table`, `countermove_table`, `lmr_table`, `mate_scores`, `move_limits`
-- All precomputed tables are initialized in `new()` via `precompute_*` methods
-
-### Evaluation Components (`eval.rs` & `eval_constants.rs`)
-- Base Material & Piece-Square Tables (PST): Updated incrementally in `Board.incremental_score`
-- Custom Piece Value Scaling: Applied dynamically when `EngineConfig` piece values differ from defaults
-- Mobility: Capped move counting for Chariot (Rook), Horse, Cannon, and Soldier (Pawn)
-- King Safety: Exposed general penalty, cannon threat with 0 or 1 screen (mount) along the general's file/rank
-- Defensive Structure: Bonus for connected Advisors and Elephants
-- Hanging Piece Penalty: Penalty for undefended attacked pieces
+### EngineConfig Parameters (`cotuong_core/src/engine/config.rs`)
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `mate_score` | `i32` | `300_000` | Base checkmate score (`mate_score - ply`) |
+| `tt_size_mb` | `usize` | `256` | Transposition Table size in megabytes (`16..=512` in UI) |
+| `nnue_weight` | `i32` | `100` | Percentage scaling factor (`50..=150`) applied to raw NNUE evaluation |
+| `model_type` | `String` | `"int16"` | Precision variant selector: `"f32"`, `"int16"`, or `"int8"` |
 
 ## Rules
 
 ### Performance (Critical)
-1. **Zero allocation in hot paths**: `alpha_beta()`, `quiescence()`, and `EngineMoveGen` must NEVER allocate heap memory.
+1. **Zero allocation in hot paths**: `alpha_beta()`, `quiescence()`, `evaluate_dual_forward()`, and `EngineMoveGen` must NEVER allocate heap memory.
 2. **Use `MoveList`** (stack-allocated `[Move; 128]`) instead of `Vec<Move>` inside the engine.
-3. **Incremental updates**: Board Zobrist hash and material+PST scores are updated incrementally in `Board::apply_move()` and `Board::undo_move()`. Never recompute from scratch during search.
-4. **Check time sparingly**: `check_time()` checks elapsed time every 4096 nodes (`self.stats.nodes & 4095 == 0`) to avoid timer call overhead.
+3. **Incremental updates**: Board Zobrist hash and `NnueAccumulator` (`red`, `black`, `psqt_red`, `psqt_black`) are updated incrementally in `Board::apply_move()` and `Board::undo_move()`. Never recompute from scratch during search unless a King moves.
 
 ### Testing & Verification
-1. Run `cargo test -p cotuong_core` after any engine change (includes `mate_test` and `tests/mate_solving.rs`).
+1. Run `cargo test --workspace` after any engine or trainer change.
 2. Run `cargo test --release -p cotuong_core -- engine::bench_test --nocapture` to check NPS (nodes-per-second).
-3. Always verify both native and WASM targets:
+3. Always verify both native and WASM targets plus TypeScript tests:
    - `cargo fmt --check`
    - `cargo clippy --workspace --all-targets -- -D warnings`
    - `cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings`
+   - `npm test`
 
 ## Common Tasks
 
 ### Adding a new tunable EngineConfig parameter
 1. Add the field and default value to `EngineConfig` in `cotuong_core/src/engine/config.rs`
 2. Wire the parameter into `AlphaBetaEngine` (`search.rs`), `SimpleEvaluator` (`eval.rs`), or `EngineMoveGen` (`movegen.rs`)
-3. Add the field to `EngineConfig` and `DEFAULT_ENGINE_CONFIG` in `src/types/game.ts`
-4. Add a `Slider` or selector control in `src/components/ConfigModal.tsx` if user-facing
+3. Add the field to `EngineConfig` and `DEFAULT_ENGINE_CONFIG` in `src/types/game.ts` and update `src/types/config.test.ts`
+4. Add UI controls in `src/components/ConfigModal.tsx`
 5. Rebuild WASM (`npm run build:wasm`) and run `./test_all.sh`
