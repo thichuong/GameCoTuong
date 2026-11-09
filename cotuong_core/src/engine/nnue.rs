@@ -1025,8 +1025,146 @@ impl NnueAccumulator {
     }
 }
 
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[inline]
+#[target_feature(enable = "avx2")]
+unsafe fn accumulate_column_32_avx2(acc: &mut [i32; 32], col: &[i8; 32], act: i16) {
+    use core::arch::x86_64::{
+        _mm256_add_epi32, _mm256_castsi256_si128, _mm256_cvtepi16_epi32, _mm256_cvtepi8_epi16,
+        _mm256_extracti128_si256, _mm256_loadu_si256, _mm256_mullo_epi16, _mm256_set1_epi16,
+        _mm256_storeu_si256,
+    };
+    let col_raw = _mm256_loadu_si256(col.as_ptr().cast());
+    let v_act = _mm256_set1_epi16(act);
+
+    let lo128 = _mm256_castsi256_si128(col_raw);
+    let hi128 = _mm256_extracti128_si256(col_raw, 1);
+
+    let lo16 = _mm256_cvtepi8_epi16(lo128);
+    let hi16 = _mm256_cvtepi8_epi16(hi128);
+
+    let prod_lo16 = _mm256_mullo_epi16(lo16, v_act);
+    let prod_hi16 = _mm256_mullo_epi16(hi16, v_act);
+
+    let p0 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(prod_lo16));
+    let p1 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(prod_lo16, 1));
+    let p2 = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(prod_hi16));
+    let p3 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(prod_hi16, 1));
+
+    let acc_ptr = acc.as_mut_ptr();
+    let a0 = _mm256_loadu_si256(acc_ptr.cast());
+    let a1 = _mm256_loadu_si256(acc_ptr.add(8).cast());
+    let a2 = _mm256_loadu_si256(acc_ptr.add(16).cast());
+    let a3 = _mm256_loadu_si256(acc_ptr.add(24).cast());
+
+    _mm256_storeu_si256(acc_ptr.cast(), _mm256_add_epi32(a0, p0));
+    _mm256_storeu_si256(acc_ptr.add(8).cast(), _mm256_add_epi32(a1, p1));
+    _mm256_storeu_si256(acc_ptr.add(16).cast(), _mm256_add_epi32(a2, p2));
+    _mm256_storeu_si256(acc_ptr.add(24).cast(), _mm256_add_epi32(a3, p3));
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[inline]
+#[allow(dead_code)]
+unsafe fn accumulate_column_32_wasm(acc: &mut [i32; 32], col: &[i8; 32], act: i16) {
+    use core::arch::wasm32::{
+        i16x8_extend_high_i8x16, i16x8_extend_low_i8x16, i16x8_mul, i16x8_splat, i32x4_add,
+        i32x4_extend_high_i16x8, i32x4_extend_low_i16x8, v128_load, v128_store,
+    };
+    let col_ptr = col.as_ptr();
+    let acc_ptr = acc.as_mut_ptr();
+    let v_act = i16x8_splat(act);
+
+    let col_lo = v128_load(col_ptr.cast());
+    let lo_i16_0 = i16x8_extend_low_i8x16(col_lo);
+    let lo_i16_1 = i16x8_extend_high_i8x16(col_lo);
+
+    let prod0 = i16x8_mul(lo_i16_0, v_act);
+    let prod1 = i16x8_mul(lo_i16_1, v_act);
+
+    let col_hi = v128_load(col_ptr.add(16).cast());
+    let hi_i16_0 = i16x8_extend_low_i8x16(col_hi);
+    let hi_i16_1 = i16x8_extend_high_i8x16(col_hi);
+
+    let prod2 = i16x8_mul(hi_i16_0, v_act);
+    let prod3 = i16x8_mul(hi_i16_1, v_act);
+
+    let a0 = v128_load(acc_ptr.cast());
+    let a1 = v128_load(acc_ptr.add(4).cast());
+    let a2 = v128_load(acc_ptr.add(8).cast());
+    let a3 = v128_load(acc_ptr.add(12).cast());
+    let a4 = v128_load(acc_ptr.add(16).cast());
+    let a5 = v128_load(acc_ptr.add(20).cast());
+    let a6 = v128_load(acc_ptr.add(24).cast());
+    let a7 = v128_load(acc_ptr.add(28).cast());
+
+    v128_store(acc_ptr.cast(), i32x4_add(a0, i32x4_extend_low_i16x8(prod0)));
+    v128_store(
+        acc_ptr.add(4).cast(),
+        i32x4_add(a1, i32x4_extend_high_i16x8(prod0)),
+    );
+    v128_store(
+        acc_ptr.add(8).cast(),
+        i32x4_add(a2, i32x4_extend_low_i16x8(prod1)),
+    );
+    v128_store(
+        acc_ptr.add(12).cast(),
+        i32x4_add(a3, i32x4_extend_high_i16x8(prod1)),
+    );
+    v128_store(
+        acc_ptr.add(16).cast(),
+        i32x4_add(a4, i32x4_extend_low_i16x8(prod2)),
+    );
+    v128_store(
+        acc_ptr.add(20).cast(),
+        i32x4_add(a5, i32x4_extend_high_i16x8(prod2)),
+    );
+    v128_store(
+        acc_ptr.add(24).cast(),
+        i32x4_add(a6, i32x4_extend_low_i16x8(prod3)),
+    );
+    v128_store(
+        acc_ptr.add(28).cast(),
+        i32x4_add(a7, i32x4_extend_high_i16x8(prod3)),
+    );
+}
+
+#[inline(always)]
+#[allow(dead_code)]
+fn accumulate_column_32_fallback(acc: &mut [i32; 32], col: &[i8; 32], act: i16) {
+    let act32 = i32::from(act);
+    for i in 0..32 {
+        if let (Some(out), Some(&w)) = (acc.get_mut(i), col.get(i)) {
+            *out += act32 * i32::from(w);
+        }
+    }
+}
+
+#[inline(always)]
+fn accumulate_column_32(acc: &mut [i32; 32], col: &[i8; 32], act: i16) {
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    {
+        unsafe {
+            accumulate_column_32_avx2(acc, col, act);
+        }
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        unsafe {
+            accumulate_column_32_wasm(acc, col, act);
+        }
+    }
+    #[cfg(not(any(
+        all(target_arch = "x86_64", target_feature = "avx2"),
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
+    {
+        accumulate_column_32_fallback(acc, col, act);
+    }
+}
+
 /// Evaluates both Red and Black forward passes simultaneously with shared SCReLU activations,
-/// zero-skipping, and register-friendly separated L2 accumulation.
+/// zero-skipping, and SIMD-accelerated L2 accumulation.
 #[inline]
 #[must_use]
 pub fn evaluate_dual_forward(
@@ -1072,53 +1210,39 @@ pub fn evaluate_dual_forward(
     let red_slice = red_acts.get(..red_count).unwrap_or(&[]);
     let black_slice = black_acts.get(..black_count).unwrap_or(&[]);
 
-    // 1a. Layer 1 -> Layer 2 for Red perspective (sequential column access, fits in registers)
     let mut l2_red = weights.b2;
-    for &(i, act) in red_slice {
-        let act32 = i32::from(act);
-        if let Some(col) = weights.w2_col.get(usize::from(i)) {
-            for (out, &w) in l2_red.iter_mut().zip(col.iter()) {
-                *out += act32 * i32::from(w);
-            }
-        }
-    }
-    for &(i, act) in black_slice {
-        let act32 = i32::from(act);
-        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + usize::from(i)) {
-            for (out, &w) in l2_red.iter_mut().zip(col.iter()) {
-                *out += act32 * i32::from(w);
-            }
-        }
-    }
-
-    // 1b. Layer 1 -> Layer 2 for Black perspective (sequential column access, fits in registers)
     let mut l2_black = weights.b2;
-    for &(i, act) in black_slice {
-        let act32 = i32::from(act);
-        if let Some(col) = weights.w2_col.get(usize::from(i)) {
-            for (out, &w) in l2_black.iter_mut().zip(col.iter()) {
-                *out += act32 * i32::from(w);
-            }
-        }
-    }
+
+    // 1. Layer 1 -> Layer 2 with joint perspective accumulation
     for &(i, act) in red_slice {
-        let act32 = i32::from(act);
-        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + usize::from(i)) {
-            for (out, &w) in l2_black.iter_mut().zip(col.iter()) {
-                *out += act32 * i32::from(w);
-            }
+        let idx = usize::from(i);
+        if let Some(col) = weights.w2_col.get(idx) {
+            accumulate_column_32(&mut l2_red, col, act);
+        }
+        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + idx) {
+            accumulate_column_32(&mut l2_black, col, act);
         }
     }
 
-    // 2. Layer 2 -> Layer 3 (32 -> 32)
+    for &(i, act) in black_slice {
+        let idx = usize::from(i);
+        if let Some(col) = weights.w2_col.get(L1_OUTPUT_SIZE + idx) {
+            accumulate_column_32(&mut l2_red, col, act);
+        }
+        if let Some(col) = weights.w2_col.get(idx) {
+            accumulate_column_32(&mut l2_black, col, act);
+        }
+    }
+
+    // 2. Layer 2 -> Layer 3 (32 -> 32) with SIMD column accumulation
     let mut l3_red = weights.b3;
     for (j, &sum) in l2_red.iter().enumerate() {
         let act = (sum >> 7).clamp(0, 128);
         if act != 0 {
+            #[allow(clippy::cast_possible_truncation)]
+            let act16 = act as i16;
             if let Some(col) = weights.w3_col.get(j) {
-                for (out, &w) in l3_red.iter_mut().zip(col.iter()) {
-                    *out += act * i32::from(w);
-                }
+                accumulate_column_32(&mut l3_red, col, act16);
             }
         }
     }
@@ -1127,10 +1251,10 @@ pub fn evaluate_dual_forward(
     for (j, &sum) in l2_black.iter().enumerate() {
         let act = (sum >> 7).clamp(0, 128);
         if act != 0 {
+            #[allow(clippy::cast_possible_truncation)]
+            let act16 = act as i16;
             if let Some(col) = weights.w3_col.get(j) {
-                for (out, &w) in l3_black.iter_mut().zip(col.iter()) {
-                    *out += act * i32::from(w);
-                }
+                accumulate_column_32(&mut l3_black, col, act16);
             }
         }
     }

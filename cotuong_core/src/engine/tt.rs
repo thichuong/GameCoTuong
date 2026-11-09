@@ -1,6 +1,7 @@
 use crate::engine::Move;
 
 pub const MATE_THRESHOLD: i32 = 15_000;
+pub const NO_EVAL: i16 = i16::MIN;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TTFlag {
@@ -14,6 +15,7 @@ pub struct TTEntry {
     pub key: u64,
     pub best_move: Option<Move>,
     pub score: i32,
+    pub static_eval: i16,
     pub depth: u8,
     pub flag: TTFlag,
     pub age: u8,
@@ -25,6 +27,7 @@ impl Default for TTEntry {
             key: 0,
             best_move: None,
             score: 0,
+            static_eval: NO_EVAL,
             depth: 0,
             flag: TTFlag::Exact,
             age: 0,
@@ -137,11 +140,13 @@ impl TranspositionTable {
     /// - If matching key already exists: updates in place (preserving best_move if not provided).
     /// - Otherwise: updates Depth-preferred slot if incoming depth is deeper or current slot is stale;
     ///   or replaces Always-replace slot.
+    #[allow(clippy::too_many_arguments)]
     pub fn store(
         &mut self,
         key: u64,
         best_move: Option<Move>,
         score: i32,
+        static_eval: i16,
         depth: u8,
         flag: TTFlag,
         ply: u8,
@@ -158,16 +163,24 @@ impl TranspositionTable {
         for entry in &mut bucket.entries {
             if entry.key == key {
                 let mv = best_move.or(entry.best_move);
+                let eval = if static_eval != NO_EVAL {
+                    static_eval
+                } else {
+                    entry.static_eval
+                };
                 // Update if deeper search, same depth with exact flag, or stale generation
                 if depth >= entry.depth || entry.age != gen || flag == TTFlag::Exact {
                     *entry = TTEntry {
                         key,
                         best_move: mv,
                         score: tt_score,
+                        static_eval: eval,
                         depth,
                         flag,
                         age: gen,
                     };
+                } else if static_eval != NO_EVAL && entry.static_eval == NO_EVAL {
+                    entry.static_eval = static_eval;
                 }
                 return;
             }
@@ -184,6 +197,7 @@ impl TranspositionTable {
                 key,
                 best_move,
                 score: tt_score,
+                static_eval,
                 depth,
                 flag,
                 age: gen,
@@ -194,6 +208,7 @@ impl TranspositionTable {
                 key,
                 best_move,
                 score: tt_score,
+                static_eval,
                 depth,
                 flag,
                 age: gen,
@@ -238,7 +253,7 @@ mod tests {
         let key2 = 0xFEDC_BA09_8765_4321;
 
         tt.new_search();
-        tt.store(key1, None, 100, 4, TTFlag::Exact, 0);
+        tt.store(key1, None, 100, NO_EVAL, 4, TTFlag::Exact, 0);
 
         let probed = tt.probe(key1, 0);
         assert!(probed.is_some());
@@ -252,7 +267,7 @@ mod tests {
         assert_eq!(probed_after_gen.unwrap().score, 100);
 
         // Store a second key mapping to the same bucket
-        tt.store(key2, None, 200, 5, TTFlag::Exact, 0);
+        tt.store(key2, None, 200, NO_EVAL, 5, TTFlag::Exact, 0);
         assert!(tt.probe(key2, 0).is_some());
     }
 
@@ -260,7 +275,7 @@ mod tests {
     fn test_tt_clear() {
         let mut tt = TranspositionTable::new(1);
         let key = 0xAAAA_BBBB_CCCC_DDDD;
-        tt.store(key, None, 50, 3, TTFlag::Exact, 0);
+        tt.store(key, None, 50, NO_EVAL, 3, TTFlag::Exact, 0);
         assert!(tt.probe(key, 0).is_some());
 
         tt.clear();

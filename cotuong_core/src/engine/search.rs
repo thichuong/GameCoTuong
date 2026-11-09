@@ -1,7 +1,7 @@
 use crate::engine::config::EngineConfig;
 use crate::engine::eval::SimpleEvaluator;
 use crate::engine::movegen::EngineMoveGen;
-use crate::engine::tt::{TTEntry, TTFlag, TranspositionTable};
+use crate::engine::tt::{TTEntry, TTFlag, TranspositionTable, NO_EVAL};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, BoardCoordinate, Color, Piece};
 use crate::logic::eval_constants::get_piece_value;
@@ -384,7 +384,8 @@ impl AlphaBetaEngine {
         }
 
         let hash = board.zobrist_hash;
-        if let Some(entry) = self.tt.probe(hash, ply) {
+        let tt_entry = self.tt.probe(hash, ply);
+        if let Some(entry) = tt_entry {
             match entry.flag {
                 TTFlag::Exact => return Some(entry.score),
                 TTFlag::LowerBound if entry.score >= beta => return Some(entry.score),
@@ -395,8 +396,24 @@ impl AlphaBetaEngine {
 
         let in_check = is_in_check(board, turn);
         self.in_check_stack[(ply as usize).min(95)] = in_check;
+        let mut static_eval_red = tt_entry.map_or(NO_EVAL, |e| e.static_eval);
+
         let stand_pat = if !in_check {
-            let sp = self.eval_for_turn(board, turn);
+            let sp = if static_eval_red != NO_EVAL {
+                if turn == Color::Red {
+                    i32::from(static_eval_red)
+                } else {
+                    -i32::from(static_eval_red)
+                }
+            } else {
+                let ev = self.eval_for_turn(board, turn);
+                let rev = if turn == Color::Red { ev } else { -ev };
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    static_eval_red = rev.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
+                }
+                ev
+            };
             if sp >= beta {
                 return Some(beta);
             }
@@ -463,7 +480,15 @@ impl AlphaBetaEngine {
             let score = score_opt?;
 
             if score >= beta {
-                self.tt.store(hash, None, beta, 0, TTFlag::LowerBound, ply);
+                self.tt.store(
+                    hash,
+                    None,
+                    beta,
+                    static_eval_red,
+                    0,
+                    TTFlag::LowerBound,
+                    ply,
+                );
                 return Some(beta);
             }
             if score > alpha {
@@ -480,7 +505,8 @@ impl AlphaBetaEngine {
         } else {
             TTFlag::UpperBound
         };
-        self.tt.store(hash, None, alpha, 0, flag, ply);
+        self.tt
+            .store(hash, None, alpha, static_eval_red, 0, flag, ply);
 
         Some(alpha)
     }
@@ -611,10 +637,25 @@ impl AlphaBetaEngine {
     ) -> Option<i32> {
         let in_check = is_in_check(board, turn);
         self.in_check_stack[(ply as usize).min(95)] = in_check;
+        let mut static_eval_red = tt_entry.map_or(NO_EVAL, |e| e.static_eval);
 
         // 3. Non-PV Pruning: Reverse Futility Pruning (RFP) & Null Move Pruning (NMP)
         if !is_pv && !in_check {
-            let raw_eval = self.eval_for_turn(board, turn);
+            let raw_eval = if static_eval_red != NO_EVAL {
+                if turn == Color::Red {
+                    i32::from(static_eval_red)
+                } else {
+                    -i32::from(static_eval_red)
+                }
+            } else {
+                let ev = self.eval_for_turn(board, turn);
+                let rev = if turn == Color::Red { ev } else { -ev };
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    static_eval_red = rev.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
+                }
+                ev
+            };
             let eval = Self::refine_eval_with_tt(raw_eval, tt_entry);
 
             // Reverse Futility Pruning (Static Null Move Pruning)
@@ -835,8 +876,15 @@ impl AlphaBetaEngine {
             return Some(-self.calculate_mate_score(ply));
         }
 
-        self.tt
-            .store(hash, best_move_this_node, best_score, depth, tt_flag, ply);
+        self.tt.store(
+            hash,
+            best_move_this_node,
+            best_score,
+            static_eval_red,
+            depth,
+            tt_flag,
+            ply,
+        );
 
         Some(best_score)
     }
@@ -1093,6 +1141,7 @@ impl Searcher for AlphaBetaEngine {
                         board.zobrist_hash,
                         Some(mv),
                         best_score_this_iteration,
+                        NO_EVAL,
                         d,
                         TTFlag::Exact,
                         0,
