@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   SlidersHorizontal,
   Upload,
@@ -94,83 +94,90 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     message: string;
   } | null>(null);
 
+  // Local draft configs to prevent premature mutation before explicit user confirmation
+  const [draftRedConfig, setDraftRedConfig] = useState<EngineConfig>({ ...redConfig });
+  const [draftBlackConfig, setDraftBlackConfig] = useState<EngineConfig>({ ...blackConfig });
+
+  // Reset local draft to current active props whenever modal is opened
+  useEffect(() => {
+    if (isOpen) {
+      setDraftRedConfig({ ...redConfig });
+      setDraftBlackConfig({ ...blackConfig });
+      setFeedback(null);
+    }
+  }, [isOpen, redConfig, blackConfig]);
+
   if (!isOpen) return null;
 
-  const currentConfig = activeTab === 'red' ? redConfig : blackConfig;
-  const setConfig = activeTab === 'red' ? setRedConfig : setBlackConfig;
+  const currentConfig = activeTab === 'red' ? draftRedConfig : draftBlackConfig;
+  const setDraftConfig = activeTab === 'red' ? setDraftRedConfig : setDraftBlackConfig;
 
   const updateParam = <K extends keyof EngineConfig>(
     key: K,
     value: EngineConfig[K],
   ) => {
     if (syncBothSides) {
-      setRedConfig((prev) => ({
+      setDraftRedConfig((prev) => ({
         ...prev,
         [key]: value,
       }));
-      setBlackConfig((prev) => ({
+      setDraftBlackConfig((prev) => ({
         ...prev,
         [key]: value,
       }));
     } else {
-      setConfig((prev) => ({
+      setDraftConfig((prev) => ({
         ...prev,
         [key]: value,
       }));
     }
 
-    const targetConfig = { ...currentConfig, [key]: value };
-    if (key === 'tt_size_mb' || key === 'threads') {
-      onConfigChange?.(targetConfig);
-      if (key === 'tt_size_mb') {
-        const sizeNum = Number(value);
-        const sizeStr = sizeNum >= 1024 ? `${(sizeNum / 1024).toFixed(sizeNum % 1024 === 0 ? 0 : 1)} GB` : `${sizeNum} MB`;
-        setFeedback({
-          type: 'success',
-          message: `Đã xóa bộ nhớ cũ và tái cấp phát Transposition Table (${sizeStr}) đảm bảo cho toàn bộ luồng AI!`,
-        });
-      }
+    if (key === 'tt_size_mb') {
+      const sizeNum = Number(value);
+      const sizeStr = sizeNum >= 1024 ? `${(sizeNum / 1024).toFixed(sizeNum % 1024 === 0 ? 0 : 1)} GB` : `${sizeNum} MB`;
+      setFeedback({
+        type: 'success',
+        message: `Đã chọn Transposition Table ${sizeStr}. Nhấn "Áp Dụng & Đóng" để lưu và tái cấp phát bộ nhớ mới cho AI!`,
+      });
     }
   };
 
   const handleApplyPreset = (preset: Preset) => {
     if (syncBothSides) {
-      setRedConfig({ ...preset.config });
-      setBlackConfig({ ...preset.config });
+      setDraftRedConfig({ ...preset.config });
+      setDraftBlackConfig({ ...preset.config });
       setFeedback({
         type: 'success',
-        message: `Đã áp dụng đồng bộ Preset "${preset.name}" và tái cấp phát bộ nhớ TT (${preset.config.tt_size_mb >= 1024 ? `${preset.config.tt_size_mb / 1024} GB` : `${preset.config.tt_size_mb} MB`}) cho cả 2 bên AI!`,
+        message: `Đã chọn Preset "${preset.name}" cho cả 2 bên. Nhấn "Áp Dụng & Đóng" để kích hoạt cấu hình!`,
       });
     } else {
-      setConfig({ ...preset.config });
+      setDraftConfig({ ...preset.config });
       setFeedback({
         type: 'success',
-        message: `Đã áp dụng Preset "${preset.name}" và tái cấp phát bộ nhớ TT (${preset.config.tt_size_mb >= 1024 ? `${preset.config.tt_size_mb / 1024} GB` : `${preset.config.tt_size_mb} MB`}) cho AI ${
+        message: `Đã chọn Preset "${preset.name}" cho AI ${
           activeTab === 'red' ? 'Đỏ' : 'Đen'
-        }!`,
+        }. Nhấn "Áp Dụng & Đóng" để kích hoạt cấu hình!`,
       });
     }
-    onConfigChange?.(preset.config);
   };
 
   const handleResetDefault = () => {
     if (syncBothSides) {
-      setRedConfig({ ...DEFAULT_ENGINE_CONFIG });
-      setBlackConfig({ ...DEFAULT_ENGINE_CONFIG });
+      setDraftRedConfig({ ...DEFAULT_ENGINE_CONFIG });
+      setDraftBlackConfig({ ...DEFAULT_ENGINE_CONFIG });
       setFeedback({
         type: 'success',
-        message: 'Đã khôi phục cấu hình mặc định cotuong_core và tái cấp phát bộ nhớ chuẩn (512 MB) cho cả AI Đỏ và AI Đen.',
+        message: 'Đã đưa về cấu hình mặc định cotuong_core (TT 512MB). Nhấn "Áp Dụng & Đóng" để xác nhận.',
       });
     } else {
-      setConfig({ ...DEFAULT_ENGINE_CONFIG });
+      setDraftConfig({ ...DEFAULT_ENGINE_CONFIG });
       setFeedback({
         type: 'success',
-        message: `Đã khôi phục cấu hình mặc định cotuong_core và tái cấp phát bộ nhớ chuẩn (512 MB) cho AI ${
+        message: `Đã đưa về cấu hình mặc định cotuong_core cho AI ${
           activeTab === 'red' ? 'Đỏ' : 'Đen'
-        }.`,
+        }. Nhấn "Áp Dụng & Đóng" để xác nhận.`,
       });
     }
-    onConfigChange?.(DEFAULT_ENGINE_CONFIG);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -205,12 +212,15 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               : (currentConfig.threads || getDefaultThreads()),
         };
 
-        setConfig(cleaned);
-        onConfigChange?.(cleaned);
-        const sizeStr = cleaned.tt_size_mb >= 1024 ? `${(cleaned.tt_size_mb / 1024).toFixed(0)} GB` : `${cleaned.tt_size_mb} MB`;
+        if (syncBothSides) {
+          setDraftRedConfig(cleaned);
+          setDraftBlackConfig(cleaned);
+        } else {
+          setDraftConfig(cleaned);
+        }
         setFeedback({
           type: 'success',
-          message: `Nhập cấu hình JSON thành công và đã tái cấp phát bộ nhớ (${sizeStr}) cho cotuong_core!`,
+          message: 'Nhập cấu hình JSON thành công! Nhấn "Áp Dụng & Đóng" để lưu và áp dụng.',
         });
       } catch (err) {
         setFeedback({
@@ -221,6 +231,23 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+
+  // Commit draft changes to parent state and trigger engine memory reallocation
+  const handleApplyAndClose = () => {
+    setRedConfig(draftRedConfig);
+    setBlackConfig(draftBlackConfig);
+    const appliedConfig = activeTab === 'red' ? draftRedConfig : draftBlackConfig;
+    onConfigChange?.(appliedConfig);
+    onClose();
+  };
+
+  // Discard draft modifications and exit without saving
+  const handleDiscardAndClose = () => {
+    setDraftRedConfig({ ...redConfig });
+    setDraftBlackConfig({ ...blackConfig });
+    setFeedback(null);
+    onClose();
   };
 
   // Construct pure cotuong_core EngineConfig payload for JSON export and preview
@@ -234,7 +261,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4"
-      onClick={onClose}
+      onClick={handleDiscardAndClose}
     >
       <div
         className="w-full max-w-2xl max-h-[90vh] bg-[#1A1613] border border-stone-700/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
@@ -256,14 +283,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-stone-400 mt-0.5">
-                Các tham số được đồng bộ trực tiếp tới Rust WebAssembly Engine
+                Các thay đổi chỉ được lưu và tái cấp phát bộ nhớ khi nhấn "Áp Dụng & Đóng"
               </p>
             </div>
           </div>
           <button
             type="button"
-            onClick={onClose}
-            aria-label="Đóng"
+            onClick={handleDiscardAndClose}
+            aria-label="Đóng mà không lưu"
             className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -755,20 +782,30 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-5 sm:px-6 py-3.5 border-t border-stone-800 bg-[#161210] flex items-center justify-between">
+        <div className="px-5 sm:px-6 py-3.5 border-t border-stone-800 bg-[#161210] flex flex-wrap items-center justify-between gap-3">
           <div className="text-[11px] text-stone-400 hidden sm:block">
-            Cấu hình đang tác động tới:{' '}
+            Cấu hình sẽ áp dụng cho:{' '}
             <strong className="text-amber-400">
               {syncBothSides ? 'Cả hai bên AI (Đỏ & Đen)' : activeTab === 'red' ? 'AI Đỏ' : 'AI Đen'}
             </strong>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full sm:w-auto px-6 py-2 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-stone-950 transition-colors cursor-pointer shadow-md"
-          >
-            Áp Dụng & Đóng
-          </button>
+          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+            <button
+              type="button"
+              onClick={handleDiscardAndClose}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700 transition-colors cursor-pointer"
+            >
+              Hủy Bỏ
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyAndClose}
+              className="px-6 py-2 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-stone-950 transition-colors cursor-pointer shadow-md font-bold flex items-center justify-center gap-1.5"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Áp Dụng & Đóng</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
