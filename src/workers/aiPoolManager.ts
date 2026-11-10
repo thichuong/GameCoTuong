@@ -1,4 +1,4 @@
-import type { SearchResult } from '../types/game.js';
+import type { SearchResult, EngineConfig } from '../types/game.js';
 import type { WasmGameState } from '../wasm/cotuong_core.js';
 
 export interface SearchRequest {
@@ -50,6 +50,24 @@ export class AiPoolManager {
   public clearMemory(): void {
     for (const worker of this.workers) {
       worker.postMessage({ type: 'CLEAR_TT' });
+    }
+  }
+
+  /**
+   * Resets and re-allocates engine memory across all worker threads.
+   * This ensures previous Transposition Tables are freed and new TT memory size is allocated immediately.
+   */
+  public resetConfig(config: Partial<EngineConfig>): void {
+    if (config.threads) {
+      this.adjustPoolSize(config.threads);
+    }
+    const configJson = JSON.stringify(config);
+    for (let i = 0; i < this.workers.length; i++) {
+      this.workers[i]!.postMessage({
+        type: 'RESET_CONFIG',
+        configJson,
+        threadId: i,
+      });
     }
   }
 

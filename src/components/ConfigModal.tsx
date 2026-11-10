@@ -26,6 +26,7 @@ interface ConfigModalProps {
   setRedConfig: React.Dispatch<React.SetStateAction<EngineConfig>>;
   blackConfig: EngineConfig;
   setBlackConfig: React.Dispatch<React.SetStateAction<EngineConfig>>;
+  onConfigChange?: (updatedConfig: EngineConfig) => void;
 }
 
 interface Preset {
@@ -84,6 +85,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
   setRedConfig,
   blackConfig,
   setBlackConfig,
+  onConfigChange,
 }) => {
   const [activeTab, setActiveTab] = useState<'red' | 'black'>('red');
   const [syncBothSides, setSyncBothSides] = useState<boolean>(true);
@@ -116,6 +118,19 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         [key]: value,
       }));
     }
+
+    const targetConfig = { ...currentConfig, [key]: value };
+    if (key === 'tt_size_mb' || key === 'threads') {
+      onConfigChange?.(targetConfig);
+      if (key === 'tt_size_mb') {
+        const sizeNum = Number(value);
+        const sizeStr = sizeNum >= 1024 ? `${(sizeNum / 1024).toFixed(sizeNum % 1024 === 0 ? 0 : 1)} GB` : `${sizeNum} MB`;
+        setFeedback({
+          type: 'success',
+          message: `Đã xóa bộ nhớ cũ và tái cấp phát Transposition Table (${sizeStr}) đảm bảo cho toàn bộ luồng AI!`,
+        });
+      }
+    }
   };
 
   const handleApplyPreset = (preset: Preset) => {
@@ -124,17 +139,18 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       setBlackConfig({ ...preset.config });
       setFeedback({
         type: 'success',
-        message: `Đã áp dụng đồng bộ Preset "${preset.name}" cho cả 2 bên AI (Đỏ & Đen). Các tùy chỉnh bên dưới đã được cập nhật tương ứng!`,
+        message: `Đã áp dụng đồng bộ Preset "${preset.name}" và tái cấp phát bộ nhớ TT (${preset.config.tt_size_mb >= 1024 ? `${preset.config.tt_size_mb / 1024} GB` : `${preset.config.tt_size_mb} MB`}) cho cả 2 bên AI!`,
       });
     } else {
       setConfig({ ...preset.config });
       setFeedback({
         type: 'success',
-        message: `Đã áp dụng Preset "${preset.name}" cho AI ${
+        message: `Đã áp dụng Preset "${preset.name}" và tái cấp phát bộ nhớ TT (${preset.config.tt_size_mb >= 1024 ? `${preset.config.tt_size_mb / 1024} GB` : `${preset.config.tt_size_mb} MB`}) cho AI ${
           activeTab === 'red' ? 'Đỏ' : 'Đen'
-        }. Các tùy chỉnh bên dưới đã được cập nhật tương ứng!`,
+        }!`,
       });
     }
+    onConfigChange?.(preset.config);
   };
 
   const handleResetDefault = () => {
@@ -143,17 +159,18 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       setBlackConfig({ ...DEFAULT_ENGINE_CONFIG });
       setFeedback({
         type: 'success',
-        message: 'Đã khôi phục cấu hình mặc định cotuong_core cho cả AI Đỏ và AI Đen.',
+        message: 'Đã khôi phục cấu hình mặc định cotuong_core và tái cấp phát bộ nhớ chuẩn (512 MB) cho cả AI Đỏ và AI Đen.',
       });
     } else {
       setConfig({ ...DEFAULT_ENGINE_CONFIG });
       setFeedback({
         type: 'success',
-        message: `Đã khôi phục cấu hình mặc định cotuong_core cho AI ${
+        message: `Đã khôi phục cấu hình mặc định cotuong_core và tái cấp phát bộ nhớ chuẩn (512 MB) cho AI ${
           activeTab === 'red' ? 'Đỏ' : 'Đen'
         }.`,
       });
     }
+    onConfigChange?.(DEFAULT_ENGINE_CONFIG);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -189,9 +206,11 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         };
 
         setConfig(cleaned);
+        onConfigChange?.(cleaned);
+        const sizeStr = cleaned.tt_size_mb >= 1024 ? `${(cleaned.tt_size_mb / 1024).toFixed(0)} GB` : `${cleaned.tt_size_mb} MB`;
         setFeedback({
           type: 'success',
-          message: 'Nhập cấu hình JSON thành công vào cotuong_core!',
+          message: `Nhập cấu hình JSON thành công và đã tái cấp phát bộ nhớ (${sizeStr}) cho cotuong_core!`,
         });
       } catch (err) {
         setFeedback({

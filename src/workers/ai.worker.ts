@@ -34,6 +34,14 @@ async function ensureInitialized(configJson?: string, threadId: number = 0): Pro
   }
 
   if (!engine || (configJson && configJson !== currentConfigJson)) {
+    if (engine) {
+      try {
+        engine.clear_tt();
+        engine.free();
+      } catch {
+        // ignore
+      }
+    }
     engine = new WasmEngine(configJson ?? null);
     currentConfigJson = configJson ?? null;
   }
@@ -64,6 +72,29 @@ self.onmessage = async (e: MessageEvent) => {
   if (type === 'CLEAR_TT') {
     if (engine) {
       engine.clear_tt();
+    }
+    return;
+  }
+
+  if (type === 'RESET_CONFIG') {
+    try {
+      if (engine) {
+        try {
+          engine.clear_tt();
+          engine.free();
+        } catch {
+          // ignore
+        }
+        engine = null;
+      }
+      currentConfigJson = null;
+      if (configJson) {
+        engine = await ensureInitialized(configJson, threadId);
+      }
+      self.postMessage({ type: 'RESET_CONFIG_SUCCESS', threadId });
+    } catch (err) {
+      console.error(`Failed to reset engine memory in worker #${threadId}:`, err);
+      self.postMessage({ type: 'RESET_CONFIG_ERROR', error: String(err), threadId });
     }
     return;
   }

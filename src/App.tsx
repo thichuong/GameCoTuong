@@ -1214,6 +1214,9 @@ export const App: React.FC = () => {
         setRedConfig={setRedConfig}
         blackConfig={blackConfig}
         setBlackConfig={setBlackConfig}
+        onConfigChange={(newConfig) => {
+          aiPoolRef.current?.resetConfig(newConfig);
+        }}
       />
     </div>
   );
