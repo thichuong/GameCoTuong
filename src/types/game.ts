@@ -58,6 +58,7 @@ export interface SearchStats {
   depth: number;
   nodes: number;
   time_ms: number;
+  score?: number;
 }
 
 export interface SearchResult {
@@ -69,12 +70,22 @@ export interface EngineConfig {
   mate_score: number;
   tt_size_mb: number;
   nnue_weight: number;
+  threads: number;
   [key: string]: number | string | undefined;
+}
+
+/**
+ * Returns default search threads based on user rule: system hardware concurrency divided by 4 (minimum 1)
+ */
+export function getDefaultThreads(): number {
+  const hardware = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
+  return Math.max(1, Math.floor(hardware / 4));
 }
 
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   mate_score: 300000,
-  tt_size_mb: 256,
+  tt_size_mb: 512,
   nnue_weight: 100,
+  threads: getDefaultThreads(),
 };
 

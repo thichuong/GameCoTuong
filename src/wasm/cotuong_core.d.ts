@@ -28,6 +28,18 @@ export class WasmEngine {
      */
     search(game_state: WasmGameState, time_limit_ms: bigint, max_depth?: number | null): any;
     /**
+     * Run AI search with optional root move partitioning for multi-threaded search
+     */
+    search_with_partition(game_state: WasmGameState, time_limit_ms: bigint, max_depth?: number | null, allowed_moves_flat?: Uint32Array | null): any;
+    /**
+     * Sets the thread ID for multi-threading (0 = Master, >0 = Helper)
+     */
+    set_thread_id(thread_id: number): void;
+    /**
+     * Gets the current thread ID
+     */
+    thread_id(): number;
+    /**
      * Update engine configuration from JSON
      */
     update_config(config_json: string): void;
@@ -125,6 +137,9 @@ export interface InitOutput {
     readonly wasmengine_load_weights_bytes: (a: number, b: number, c: number) => [number, number];
     readonly wasmengine_new: (a: number, b: number) => [number, number, number];
     readonly wasmengine_search: (a: number, b: number, c: bigint, d: number) => [number, number, number];
+    readonly wasmengine_search_with_partition: (a: number, b: number, c: bigint, d: number, e: number, f: number) => [number, number, number];
+    readonly wasmengine_set_thread_id: (a: number, b: number) => void;
+    readonly wasmengine_thread_id: (a: number) => number;
     readonly wasmengine_update_config: (a: number, b: number, c: number) => [number, number];
     readonly wasmgamestate_annotate_last_move: (a: number, b: number, c: number) => void;
     readonly wasmgamestate_from_fen: (a: number, b: number) => [number, number, number];

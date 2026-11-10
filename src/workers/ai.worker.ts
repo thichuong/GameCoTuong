@@ -5,6 +5,7 @@ import { getOrFetchNnueModel } from '../utils/modelStorage.js';
 let isWasmInitialized = false;
 let engine: WasmEngine | null = null;
 let currentConfigJson: string | null = null;
+let currentThreadId: number = 0;
 let modelLoadingPromise: Promise<Uint8Array | null> | null = null;
 
 async function ensureModelLoaded(eng: WasmEngine): Promise<void> {
@@ -26,7 +27,7 @@ async function ensureModelLoaded(eng: WasmEngine): Promise<void> {
   }
 }
 
-async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
+async function ensureInitialized(configJson?: string, threadId: number = 0): Promise<WasmEngine> {
   if (!isWasmInitialized) {
     await init();
     isWasmInitialized = true;
@@ -37,6 +38,11 @@ async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
     currentConfigJson = configJson ?? null;
   }
 
+  if (currentThreadId !== threadId) {
+    engine.set_thread_id(threadId);
+    currentThreadId = threadId;
+  }
+
   // Pre-load NNUE neural weights from IndexedDB/Network
   await ensureModelLoaded(engine);
 
@@ -44,7 +50,16 @@ async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
 }
 
 self.onmessage = async (e: MessageEvent) => {
-  const { type, stateJson, fen, timeLimitMs, maxDepth, configJson } = e.data;
+  const {
+    type,
+    stateJson,
+    fen,
+    timeLimitMs,
+    maxDepth,
+    configJson,
+    threadId = 0,
+    allowedMovesFlat,
+  } = e.data;
 
   if (type === 'CLEAR_TT') {
     if (engine) {
@@ -53,19 +68,38 @@ self.onmessage = async (e: MessageEvent) => {
     return;
   }
 
+  if (type === 'INIT') {
+    try {
+      await ensureInitialized(configJson, threadId);
+      self.postMessage({ type: 'INIT_SUCCESS', threadId });
+    } catch (err) {
+      self.postMessage({ type: 'INIT_ERROR', error: String(err), threadId });
+    }
+    return;
+  }
+
   if (type === 'SEARCH') {
     try {
-      const eng = await ensureInitialized(configJson);
+      const eng = await ensureInitialized(configJson, threadId);
       const state = stateJson
         ? WasmGameState.from_json(stateJson)
         : WasmGameState.from_fen(fen);
 
       // Execute search natively via Rust WebAssembly engine
-      // Full game state history is preserved for three-fold repetition detection
-      const rawResult = eng.search(
-        state,
-        BigInt(timeLimitMs),
-        maxDepth ?? undefined
+      // Supports root move partitioning when allowedMovesFlat is specified
+      const rawResult = (
+        allowedMovesFlat && allowedMovesFlat.length > 0
+          ? eng.search_with_partition(
+              state,
+              BigInt(timeLimitMs),
+              maxDepth ?? undefined,
+              allowedMovesFlat
+            )
+          : eng.search(
+              state,
+              BigInt(timeLimitMs),
+              maxDepth ?? undefined
+            )
       ) as SearchResult | null;
 
       const result = rawResult ?? null;
@@ -81,7 +115,7 @@ self.onmessage = async (e: MessageEvent) => {
         )
       ) {
         console.warn(
-          'AI search candidate move was not strictly legal, picking fallback legal move.'
+          `AI thread #${threadId} search candidate move was not strictly legal, picking fallback legal move.`
         );
         const flatMoves = state.get_strictly_legal_moves_flat() as number[];
         if (flatMoves.length >= 4) {
@@ -97,13 +131,13 @@ self.onmessage = async (e: MessageEvent) => {
       state.free();
 
       if (result) {
-        self.postMessage({ type: 'SEARCH_SUCCESS', result });
+        self.postMessage({ type: 'SEARCH_SUCCESS', result, threadId });
       } else {
-        self.postMessage({ type: 'NO_MOVE' });
+        self.postMessage({ type: 'NO_MOVE', threadId });
       }
     } catch (err) {
-      console.error('Error during AI search in worker:', err);
-      self.postMessage({ type: 'SEARCH_ERROR', error: String(err) });
+      console.error(`Error during AI search in worker thread #${threadId}:`, err);
+      self.postMessage({ type: 'SEARCH_ERROR', error: String(err), threadId });
     }
   }
 };

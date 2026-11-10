@@ -16,7 +16,7 @@ import {
   Link2,
 } from 'lucide-react';
 import type { EngineConfig } from '../types/game.js';
-import { DEFAULT_ENGINE_CONFIG } from '../types/game.js';
+import { DEFAULT_ENGINE_CONFIG, getDefaultThreads } from '../types/game.js';
 import { exportConfigJson } from '../utils/export.js';
 
 interface ConfigModalProps {
@@ -37,11 +37,12 @@ interface Preset {
 const PRESETS: Preset[] = [
   {
     name: 'Tiêu Chuẩn (Mặc định)',
-    desc: 'Cân bằng hoàn hảo theo cấu hình gốc của cotuong_core với SIMD NNUE.',
+    desc: 'Cân bằng hoàn hảo theo cấu hình gốc của cotuong_core với TT 512MB tối ưu đa luồng.',
     config: {
       mate_score: 300000,
-      tt_size_mb: 256,
+      tt_size_mb: 512,
       nnue_weight: 100,
+      threads: getDefaultThreads(),
     },
   },
   {
@@ -49,26 +50,29 @@ const PRESETS: Preset[] = [
     desc: 'Tăng điểm chiếu bí, khuếch đại thế công mạng và dùng độ sâu tính toán tối đa.',
     config: {
       mate_score: 400000,
-      tt_size_mb: 256,
+      tt_size_mb: 512,
       nnue_weight: 120,
+      threads: Math.min(16, Math.max(2, getDefaultThreads() * 2)),
     },
   },
   {
-    name: 'Tiết Kiệm RAM',
-    desc: 'Bảng băm TT 64MB, tối ưu tài nguyên tối đa cho thiết bị di động.',
+    name: 'Tiết Kiệm RAM & CPU',
+    desc: 'Bảng băm TT 64MB, chạy 1 luồng đơn, tối ưu pin và tài nguyên tối đa cho thiết bị di động.',
     config: {
       mate_score: 200000,
       tt_size_mb: 64,
       nnue_weight: 90,
+      threads: 1,
     },
   },
   {
     name: 'Sát Cục / Giải Cờ Thế',
-    desc: 'Bảng băm cực đại 512MB & điểm chiếu bí tối đa 500k để giải cờ thế.',
+    desc: 'Bảng băm cực đại 2GB (2048MB), điểm chiếu bí tối đa 500k và huy động tối đa số luồng phần cứng.',
     config: {
       mate_score: 500000,
-      tt_size_mb: 512,
+      tt_size_mb: 2048,
       nnue_weight: 110,
+      threads: Math.min(16, typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4),
     },
   },
 ];
@@ -172,12 +176,16 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               : currentConfig.mate_score,
           tt_size_mb:
             typeof rawParsed.tt_size_mb === 'number'
-              ? Math.max(16, Math.min(1024, Math.round(rawParsed.tt_size_mb)))
+              ? Math.max(16, Math.min(2048, Math.round(rawParsed.tt_size_mb)))
               : currentConfig.tt_size_mb,
           nnue_weight:
             typeof rawParsed.nnue_weight === 'number'
               ? Math.max(50, Math.min(150, Math.round(rawParsed.nnue_weight)))
               : currentConfig.nnue_weight,
+          threads:
+            typeof rawParsed.threads === 'number'
+              ? Math.max(1, Math.min(16, Math.round(rawParsed.threads)))
+              : (currentConfig.threads || getDefaultThreads()),
         };
 
         setConfig(cleaned);
@@ -201,6 +209,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     mate_score: currentConfig.mate_score,
     tt_size_mb: currentConfig.tt_size_mb,
     nnue_weight: currentConfig.nnue_weight,
+    threads: currentConfig.threads || getDefaultThreads(),
   };
 
   return (
@@ -360,7 +369,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 const isSelected =
                   currentConfig.mate_score === preset.config.mate_score &&
                   currentConfig.tt_size_mb === preset.config.tt_size_mb &&
-                  currentConfig.nnue_weight === preset.config.nnue_weight;
+                  currentConfig.nnue_weight === preset.config.nnue_weight &&
+                  (currentConfig.threads || getDefaultThreads()) === preset.config.threads;
 
                 return (
                   <button
@@ -392,6 +402,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                       <span>Mate: {(preset.config.mate_score / 1000).toLocaleString('vi-VN')}k</span>
                       <span>•</span>
                       <span>NNUE: {preset.config.nnue_weight}%</span>
+                      <span>•</span>
+                      <span>Luồng: {preset.config.threads}</span>
                     </div>
                   </button>
                 );
@@ -429,7 +441,9 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div className="text-right shrink-0">
                   <span className="text-sm font-mono font-bold text-amber-400">
-                    {currentConfig.tt_size_mb} MB
+                    {currentConfig.tt_size_mb >= 1024
+                      ? `${(currentConfig.tt_size_mb / 1024).toFixed(currentConfig.tt_size_mb % 1024 === 0 ? 0 : 1)} GB (${currentConfig.tt_size_mb} MB)`
+                      : `${currentConfig.tt_size_mb} MB`}
                   </span>
                 </div>
               </div>
@@ -437,8 +451,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               <input
                 type="range"
                 min={16}
-                max={512}
-                step={16}
+                max={2048}
+                step={32}
                 value={currentConfig.tt_size_mb}
                 onChange={(e) => updateParam('tt_size_mb', Number(e.target.value))}
                 className="w-full accent-amber-500 cursor-pointer h-1.5 bg-stone-800 rounded-lg"
@@ -446,7 +460,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
                 <span className="text-[10px] text-stone-400 mr-1">Mức nhanh:</span>
-                {[32, 64, 128, 256, 512].map((size) => (
+                {[64, 128, 256, 512, 1024, 2048].map((size) => (
                   <button
                     key={size}
                     type="button"
@@ -457,7 +471,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                         : 'bg-stone-800 hover:bg-stone-700 text-stone-300 border-stone-700'
                     }`}
                   >
-                    {size} MB {size === 256 && '(Chuẩn)'}
+                    {size >= 1024 ? `${size / 1024} GB` : `${size} MB`}{' '}
+                    {size === 512 && '(Mặc định)'}
                   </button>
                 ))}
               </div>
@@ -573,7 +588,81 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
             </div>
 
-            {/* 4. Standard NNUE Model Architecture */}
+            {/* 4. Multi-threading Search Threads */}
+            <div className="bg-[#221D19] p-4 rounded-xl border border-stone-800/90 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-amber-400 shrink-0" />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-stone-200">
+                        Số Luồng Tìm Kiếm AI (Multi-threading)
+                      </span>
+                      <code className="text-[11px] font-mono text-amber-300 bg-stone-900 px-1.5 py-0.5 rounded border border-stone-700/60">
+                        threads: usize
+                      </code>
+                    </div>
+                    <p className="text-[11px] text-stone-400 mt-0.5">
+                      Số luồng tính toán song song qua Web Worker Pool. Mặc định là số luồng của máy chia 4 ({getDefaultThreads()} luồng trên thiết bị này / {typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4} logical cores).
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-sm font-mono font-bold text-amber-400">
+                    {currentConfig.threads || getDefaultThreads()} Luồng
+                  </span>
+                </div>
+              </div>
+
+              <input
+                type="range"
+                min={1}
+                max={Math.max(4, Math.min(16, typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 8 : 8))}
+                step={1}
+                value={currentConfig.threads || getDefaultThreads()}
+                onChange={(e) => updateParam('threads', Number(e.target.value))}
+                className="w-full accent-amber-500 cursor-pointer h-1.5 bg-stone-800 rounded-lg"
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] text-stone-400 mr-1">Mức nhanh:</span>
+                  {Array.from(new Set([1, getDefaultThreads(), 2, 4, 8].filter((t) => t <= (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 8 : 8))))
+                    .sort((a, b) => a - b)
+                    .map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => updateParam('threads', t)}
+                        className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer border ${
+                          (currentConfig.threads || getDefaultThreads()) === t
+                            ? 'bg-amber-500 text-stone-950 font-bold border-amber-400'
+                            : 'bg-stone-800 hover:bg-stone-700 text-stone-300 border-stone-700'
+                        }`}
+                      >
+                        {t} Luồng {t === getDefaultThreads() && '(Mặc định)'}
+                      </button>
+                    ))}
+                </div>
+
+                <div className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-stone-900 text-stone-300 border border-stone-800 flex items-center gap-1.5">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated
+                        ? 'bg-emerald-400'
+                        : 'bg-amber-400'
+                    }`}
+                  />
+                  <span>
+                    {typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated
+                      ? 'WebAssembly Shared Memory (Lazy SMP)'
+                      : 'Worker Pool (Root Splitting)'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 5. Standard NNUE Model Architecture */}
             <div className="bg-[#221D19] p-4 rounded-xl border border-stone-800/90 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2">

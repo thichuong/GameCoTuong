@@ -888,9 +888,11 @@ function evaluateBoard(grid: BoardGrid): number {
 export class PolyfillEngine {
   private config: EngineConfig = {
     mate_score: 300000,
-    tt_size_mb: 256,
+    tt_size_mb: 512,
     nnue_weight: 100,
+    threads: 1,
   };
+  private currentThreadId: number = 0;
 
   constructor(configJson?: string | null) {
     if (configJson) {
@@ -900,6 +902,14 @@ export class PolyfillEngine {
         // ignore
       }
     }
+  }
+
+  set_thread_id(thread_id: number): void {
+    this.currentThreadId = thread_id;
+  }
+
+  thread_id(): number {
+    return this.currentThreadId;
   }
 
   update_config(configJson: string): void {
@@ -920,6 +930,15 @@ export class PolyfillEngine {
 
   is_nnue_active(): boolean {
     return false;
+  }
+
+  search_with_partition(
+    gameState: PolyfillGameState,
+    timeLimitMs: bigint | number,
+    maxDepth?: number,
+    _allowedMovesFlat?: number[]
+  ): SearchResult | null {
+    return this.search(gameState, timeLimitMs, maxDepth);
   }
 
   search(

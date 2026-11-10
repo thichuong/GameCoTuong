@@ -22,6 +22,7 @@ import { LogPanel } from './components/LogPanel.js';
 import { ThinkingIndicator } from './components/ThinkingIndicator.js';
 import { ConfigModal } from './components/ConfigModal.js';
 import { CapturedPiecesTray } from './components/CapturedPiecesTray.js';
+import { AiPoolManager } from './workers/aiPoolManager.js';
 import {
   extractCapturedPieces,
   extractOffBoardPieces,
@@ -152,8 +153,8 @@ export const App: React.FC = () => {
     }
   }, [board, selectedSetupPiece]);
 
-  // AI Web Worker
-  const workerRef = useRef<Worker | null>(null);
+  // AI Multi-threaded Web Worker Pool
+  const aiPoolRef = useRef<AiPoolManager | null>(null);
 
   // Sync state from WasmGameState instance
   const syncGameState = useCallback(() => {
@@ -169,31 +170,27 @@ export const App: React.FC = () => {
 
   // Clear AI engine transposition table & memory when explicitly starting a fresh game or puzzle
   const clearEngineMemory = useCallback(() => {
-    workerRef.current?.postMessage({ type: 'CLEAR_TT' });
+    aiPoolRef.current?.clearMemory();
   }, []);
 
-  // Initialize WASM and Worker
+  // Initialize WASM and AI Worker Pool
   useEffect(() => {
-    let worker: Worker | null = null;
-
     async function setup() {
       await init();
       gameStateRef.current = new WasmGameState();
       syncGameState();
       setIsWasmReady(true);
 
-      worker = new Worker(new URL('./workers/ai.worker.ts', import.meta.url), {
-        type: 'module',
-      });
-      workerRef.current = worker;
+      const pool = new AiPoolManager(DEFAULT_ENGINE_CONFIG.threads);
+      aiPoolRef.current = pool;
     }
 
     setup().catch((err) => {
-      console.error('Failed to initialize WASM or worker:', err);
+      console.error('Failed to initialize WASM or AI worker pool:', err);
     });
 
     return () => {
-      worker?.terminate();
+      aiPoolRef.current?.terminate();
     };
   }, [syncGameState]);
 
@@ -201,8 +198,8 @@ export const App: React.FC = () => {
   const triggerAiMove = useCallback(() => {
     if (isAiProcessingRef.current) return;
     const state = gameStateRef.current;
-    const worker = workerRef.current;
-    if (!state || !worker) return;
+    const pool = aiPoolRef.current;
+    if (!state || !pool) return;
 
     const currentStatus = state.status() as GameStatus;
     if (currentStatus.status !== 'Playing') return;
@@ -258,14 +255,25 @@ export const App: React.FC = () => {
       return;
     }
 
-    // 2. Offload to Web Worker
+    // 2. Offload to Multi-threaded AI Worker Pool
     const currentTurn = state.turn() as PieceColor;
     const config = currentTurn === 'red' ? redConfigRef.current : blackConfigRef.current;
     const timeLimitMs = DIFFICULTY_TIMES[difficultyRef.current];
+    const threadCount = config.threads || DEFAULT_ENGINE_CONFIG.threads || 1;
 
-    const handleWorkerMessage = (e: MessageEvent) => {
-      if (e.data.type === 'SEARCH_SUCCESS') {
-        const { move, stats } = e.data.result;
+    pool
+      .search({
+        state,
+        stateJson: state.to_json(),
+        fen: state.to_fen(),
+        timeLimitMs,
+        configJson: JSON.stringify(config),
+        threads: threadCount,
+      })
+      .then((result) => {
+        if (!result) return;
+        const { move, stats } = result;
+
         try {
           const res = state.make_move(
             move.from_row,
@@ -276,8 +284,9 @@ export const App: React.FC = () => {
 
           const nps = stats.time_ms > 0 ? Math.round((stats.nodes / stats.time_ms) * 1000) : 0;
           const npsStr = nps >= 1000 ? `${(nps / 1000).toFixed(1)}k` : `${nps}`;
+          const threadStr = threadCount > 1 ? ` [${threadCount} luồng]` : '';
           state.annotate_last_move(
-            `🤖 Độ sâu: ${stats.depth}, Nodes: ${stats.nodes}, Thời gian: ${stats.time_ms}ms (${npsStr} NPS)`
+            `🤖 Độ sâu: ${stats.depth}, Nodes: ${stats.nodes}, Thời gian: ${stats.time_ms}ms (${npsStr} NPS)${threadStr}`
           );
 
           setLastStats(stats);
@@ -326,26 +335,15 @@ export const App: React.FC = () => {
           } catch (recoveryErr) {
             console.error('Error applying recovery AI move:', recoveryErr);
           }
-        } finally {
-          isAiProcessingRef.current = false;
-          setIsThinking(false);
-          worker.removeEventListener('message', handleWorkerMessage);
         }
-      } else if (e.data.type === 'NO_MOVE' || e.data.type === 'SEARCH_ERROR') {
+      })
+      .catch((err) => {
+        console.error('Error during AI search in pool:', err);
+      })
+      .finally(() => {
         isAiProcessingRef.current = false;
         setIsThinking(false);
-        worker.removeEventListener('message', handleWorkerMessage);
-      }
-    };
-
-    worker.addEventListener('message', handleWorkerMessage);
-    worker.postMessage({
-      type: 'SEARCH',
-      stateJson: state.to_json(),
-      fen: state.to_fen(),
-      timeLimitMs,
-      configJson: JSON.stringify(config),
-    });
+      });
   }, [syncGameState, gameMode]);
 
   // Handle Game Loop (Check whether AI should play)

@@ -49,6 +49,12 @@ impl MoveList {
         self.count == 0
     }
 
+    pub fn swap(&mut self, a: usize, b: usize) {
+        if a < self.count && b < self.count {
+            self.moves.swap(a, b);
+        }
+    }
+
     pub fn iter(&self) -> std::slice::Iter<'_, Move> {
         self.moves.get(0..self.count).unwrap_or(&[]).iter()
     }

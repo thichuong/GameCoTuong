@@ -20,7 +20,7 @@ type PendingNnueMove = (usize, usize, Piece, Option<Piece>);
 pub struct AlphaBetaEngine {
     config: Arc<EngineConfig>,
     evaluator: SimpleEvaluator,
-    tt: TranspositionTable,
+    tt: Arc<TranspositionTable>,
     eval_cache: EvalCache,
     history_stack: Vec<u64>,
     game_history_len: usize,
@@ -33,6 +33,8 @@ pub struct AlphaBetaEngine {
     time_limit: Option<f64>,
     lmr_table: [[u8; 64]; 64],
     mate_score_table: [i32; 256],
+    thread_id: usize,
+    allowed_root_moves: Option<Vec<Move>>,
 }
 
 impl AlphaBetaEngine {
@@ -46,7 +48,7 @@ impl AlphaBetaEngine {
         };
         Self {
             evaluator: SimpleEvaluator::new(config.clone()),
-            tt: TranspositionTable::new(tt_size),
+            tt: Arc::new(TranspositionTable::new(tt_size)),
             eval_cache: EvalCache::new(),
             history_stack: Vec::with_capacity(128),
             game_history_len: 0,
@@ -59,8 +61,17 @@ impl AlphaBetaEngine {
             time_limit: None,
             lmr_table: Self::precompute_lmr(),
             mate_score_table,
+            thread_id: 0,
+            allowed_root_moves: None,
             config,
         }
+    }
+
+    #[must_use]
+    pub fn with_shared_tt(config: Arc<EngineConfig>, tt: Arc<TranspositionTable>) -> Self {
+        let mut engine = Self::new(config);
+        engine.tt = tt;
+        engine
     }
 
     #[must_use]
@@ -85,11 +96,33 @@ impl AlphaBetaEngine {
 
     pub fn update_config(&mut self, config: Arc<EngineConfig>) {
         if config.tt_size_mb != self.config.tt_size_mb && config.tt_size_mb > 0 {
-            self.tt = TranspositionTable::new(config.tt_size_mb);
+            self.tt = Arc::new(TranspositionTable::new(config.tt_size_mb));
         }
         self.mate_score_table = Self::precompute_mate_scores(&config);
         self.evaluator = SimpleEvaluator::new(config.clone());
         self.config = config;
+    }
+
+    #[must_use]
+    pub fn tt(&self) -> Arc<TranspositionTable> {
+        self.tt.clone()
+    }
+
+    pub fn set_tt(&mut self, tt: Arc<TranspositionTable>) {
+        self.tt = tt;
+    }
+
+    pub fn set_thread_id(&mut self, thread_id: usize) {
+        self.thread_id = thread_id;
+    }
+
+    #[must_use]
+    pub fn thread_id(&self) -> usize {
+        self.thread_id
+    }
+
+    pub fn set_allowed_root_moves(&mut self, moves: Option<Vec<Move>>) {
+        self.allowed_root_moves = moves;
     }
 
     /// Clears the transposition table, eval cache, and resets search heuristics.
@@ -1091,6 +1124,16 @@ impl Searcher for AlphaBetaEngine {
 
         // 1. Pre-filter strictly legal, non-repetition moves at Root ("bước đầu")
         let mut root_moves = game_state.get_strictly_legal_moves();
+        if let Some(ref allowed) = self.allowed_root_moves {
+            root_moves.retain(|m| {
+                allowed.iter().any(|al| {
+                    m.from_row == al.from_row
+                        && m.from_col == al.from_col
+                        && m.to_row == al.to_row
+                        && m.to_col == al.to_col
+                })
+            });
+        }
         if !excluded_moves.is_empty() {
             root_moves.retain(|m| {
                 !excluded_moves.iter().any(|ex| {
@@ -1106,7 +1149,9 @@ impl Searcher for AlphaBetaEngine {
             return None;
         }
 
-        if root_moves.len() == 1 {
+        // Only early-return if the entire game state has only 1 forced legal move,
+        // never when partitioning moves for multi-threaded search.
+        if self.allowed_root_moves.is_none() && root_moves.len() == 1 {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let elapsed_ms = (Self::now() - self.start_time).max(0.0) as u64;
             return Some((
@@ -1142,7 +1187,14 @@ impl Searcher for AlphaBetaEngine {
             }
         }
 
-        for d in 1..=max_depth {
+        // Lazy SMP Depth Skew for helper threads (thread_id > 0)
+        let start_depth = if self.thread_id > 0 {
+            1 + (self.thread_id as u8 % 2)
+        } else {
+            1
+        };
+
+        for d in start_depth..=max_depth {
             if let Some(sl) = soft_limit {
                 let elapsed = Self::now() - self.start_time;
                 if elapsed > sl {
@@ -1152,7 +1204,7 @@ impl Searcher for AlphaBetaEngine {
 
             let mut alpha = -INF_SCORE;
             let mut beta = INF_SCORE;
-            let mut delta = 35;
+            let mut delta = if self.thread_id == 3 { 60 } else { 35 };
 
             if let Some(score) = previous_score {
                 if d >= 2 && score.abs() < MATE_THRESHOLD {
@@ -1190,6 +1242,11 @@ impl Searcher for AlphaBetaEngine {
                     })
                 });
                 moves.sort_by(|a, b| b.score.cmp(&a.score));
+
+                // Lazy SMP Move Jitter: Helper thread #2 explores alternative root refutations first
+                if self.thread_id == 2 && moves.len() >= 3 {
+                    moves.swap(0, 1);
+                }
 
                 if moves.is_empty() {
                     break;

@@ -71,6 +71,39 @@ export class WasmEngine {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Run AI search with optional root move partitioning for multi-threaded search
+     * @param {WasmGameState} game_state
+     * @param {bigint} time_limit_ms
+     * @param {number | null} [max_depth]
+     * @param {Uint32Array | null} [allowed_moves_flat]
+     * @returns {any}
+     */
+    search_with_partition(game_state, time_limit_ms, max_depth, allowed_moves_flat) {
+        _assertClass(game_state, WasmGameState);
+        var ptr0 = isLikeNone(allowed_moves_flat) ? 0 : passArray32ToWasm0(allowed_moves_flat, wasm.__wbindgen_malloc);
+        var len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmengine_search_with_partition(this.__wbg_ptr, game_state.__wbg_ptr, time_limit_ms, isLikeNone(max_depth) ? 0xFFFFFF : max_depth, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Sets the thread ID for multi-threading (0 = Master, >0 = Helper)
+     * @param {number} thread_id
+     */
+    set_thread_id(thread_id) {
+        wasm.wasmengine_set_thread_id(this.__wbg_ptr, thread_id);
+    }
+    /**
+     * Gets the current thread ID
+     * @returns {number}
+     */
+    thread_id() {
+        const ret = wasm.wasmengine_thread_id(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Update engine configuration from JSON
      * @param {string} config_json
      */
@@ -544,6 +577,14 @@ function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
 }
 
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
+}
+
 let cachedUint8ArrayMemory0 = null;
 function getUint8ArrayMemory0() {
     if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
@@ -563,6 +604,13 @@ function handleError(f, args) {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArray32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passArray8ToWasm0(arg, malloc) {
@@ -650,6 +698,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

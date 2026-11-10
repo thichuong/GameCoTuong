@@ -3,7 +3,7 @@
 
 use crate::engine::config::EngineConfig;
 use crate::engine::search::AlphaBetaEngine;
-use crate::engine::{SearchLimit, Searcher};
+use crate::engine::{Move, SearchLimit, Searcher};
 use crate::logic::board::{Board, BoardCoordinate, Color, Piece, PieceType};
 use crate::logic::game::{GameState, GameStatus, MoveRecord};
 use crate::logic::opening;
@@ -100,6 +100,8 @@ struct SearchStatsDto {
     depth: u8,
     nodes: u32,
     time_ms: u64,
+    #[serde(default)]
+    score: i32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -399,6 +401,49 @@ impl WasmEngine {
         self.engine.has_eval_weights()
     }
 
+    /// Sets the thread ID for multi-threading (0 = Master, >0 = Helper)
+    pub fn set_thread_id(&mut self, thread_id: usize) {
+        self.engine.set_thread_id(thread_id);
+    }
+
+    /// Gets the current thread ID
+    #[must_use]
+    pub fn thread_id(&self) -> usize {
+        self.engine.thread_id()
+    }
+
+    /// Run AI search with optional root move partitioning for multi-threaded search
+    pub fn search_with_partition(
+        &mut self,
+        game_state: &WasmGameState,
+        time_limit_ms: u64,
+        max_depth: Option<u8>,
+        allowed_moves_flat: Option<Vec<usize>>,
+    ) -> Result<JsValue, JsValue> {
+        let allowed = allowed_moves_flat.map(|flat| {
+            let mut moves = Vec::new();
+            for chunk in flat.chunks_exact(4) {
+                if let (Some(&fr), Some(&fc), Some(&tr), Some(&tc)) =
+                    (chunk.first(), chunk.get(1), chunk.get(2), chunk.get(3))
+                {
+                    moves.push(Move {
+                        from_row: fr as u8,
+                        from_col: fc as u8,
+                        to_row: tr as u8,
+                        to_col: tc as u8,
+                        score: 0,
+                    });
+                }
+            }
+            moves
+        });
+
+        self.engine.set_allowed_root_moves(allowed);
+        let res = self.search(game_state, time_limit_ms, max_depth);
+        self.engine.set_allowed_root_moves(None);
+        res
+    }
+
     /// Run AI search on the given game state
     pub fn search(
         &mut self,
@@ -425,6 +470,7 @@ impl WasmEngine {
                 depth: stats.depth,
                 nodes: stats.nodes,
                 time_ms: stats.time_ms,
+                score: stats.score,
             },
         });
 
