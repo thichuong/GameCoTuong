@@ -7,9 +7,15 @@ let engine: WasmEngine | null = null;
 let currentConfigJson: string | null = null;
 let currentThreadId: number = 0;
 let modelLoadingPromise: Promise<Uint8Array | null> | null = null;
+let messageQueue: Promise<void> = Promise.resolve();
 
 async function ensureModelLoaded(eng: WasmEngine): Promise<void> {
-  if (eng.is_nnue_active()) {
+  try {
+    if (eng.is_nnue_active()) {
+      return;
+    }
+  } catch (err) {
+    console.warn('Error checking NNUE status:', err);
     return;
   }
 
@@ -19,7 +25,7 @@ async function ensureModelLoaded(eng: WasmEngine): Promise<void> {
 
   try {
     const weights = await modelLoadingPromise;
-    if (weights && weights.length > 0) {
+    if (weights && weights.length > 0 && !eng.is_nnue_active()) {
       eng.load_weights_bytes(weights);
     }
   } catch (err) {
@@ -33,17 +39,23 @@ async function ensureInitialized(configJson?: string, threadId: number = 0): Pro
     isWasmInitialized = true;
   }
 
-  if (!engine || (configJson && configJson !== currentConfigJson)) {
-    if (engine) {
+  if (!engine) {
+    engine = new WasmEngine(configJson ?? null);
+    currentConfigJson = configJson ?? null;
+  } else if (configJson && configJson !== currentConfigJson) {
+    try {
+      engine.update_config(configJson);
+      currentConfigJson = configJson;
+    } catch {
       try {
         engine.clear_tt();
         engine.free();
       } catch {
         // ignore
       }
+      engine = new WasmEngine(configJson);
+      currentConfigJson = configJson;
     }
-    engine = new WasmEngine(configJson ?? null);
-    currentConfigJson = configJson ?? null;
   }
 
   if (currentThreadId !== threadId) {
@@ -57,7 +69,7 @@ async function ensureInitialized(configJson?: string, threadId: number = 0): Pro
   return engine;
 }
 
-self.onmessage = async (e: MessageEvent) => {
+async function handleMessage(e: MessageEvent): Promise<void> {
   const {
     type,
     stateJson,
@@ -78,17 +90,22 @@ self.onmessage = async (e: MessageEvent) => {
 
   if (type === 'RESET_CONFIG') {
     try {
-      if (engine) {
+      if (engine && configJson) {
         try {
+          engine.update_config(configJson);
           engine.clear_tt();
-          engine.free();
+          currentConfigJson = configJson;
         } catch {
-          // ignore
+          try {
+            engine.free();
+          } catch {
+            // ignore
+          }
+          engine = null;
+          currentConfigJson = null;
+          engine = await ensureInitialized(configJson, threadId);
         }
-        engine = null;
-      }
-      currentConfigJson = null;
-      if (configJson) {
+      } else if (!engine) {
         engine = await ensureInitialized(configJson, threadId);
       }
       self.postMessage({ type: 'RESET_CONFIG_SUCCESS', threadId });
@@ -110,9 +127,10 @@ self.onmessage = async (e: MessageEvent) => {
   }
 
   if (type === 'SEARCH') {
+    let state: WasmGameState | null = null;
     try {
       const eng = await ensureInitialized(configJson, threadId);
-      const state = stateJson
+      state = stateJson
         ? WasmGameState.from_json(stateJson)
         : WasmGameState.from_fen(fen);
 
@@ -159,8 +177,6 @@ self.onmessage = async (e: MessageEvent) => {
         }
       }
 
-      state.free();
-
       if (result) {
         self.postMessage({ type: 'SEARCH_SUCCESS', result, threadId });
       } else {
@@ -168,7 +184,33 @@ self.onmessage = async (e: MessageEvent) => {
       }
     } catch (err) {
       console.error(`Error during AI search in worker thread #${threadId}:`, err);
+      // Clean up poisoned engine instance on any runtime trap/error
+      if (engine) {
+        try {
+          engine.free();
+        } catch {
+          // ignore
+        }
+        engine = null;
+      }
+      currentConfigJson = null;
       self.postMessage({ type: 'SEARCH_ERROR', error: String(err), threadId });
+    } finally {
+      if (state) {
+        try {
+          state.free();
+        } catch {
+          // ignore
+        }
+      }
     }
   }
+}
+
+self.onmessage = (e: MessageEvent) => {
+  messageQueue = messageQueue
+    .then(() => handleMessage(e))
+    .catch((err) => {
+      console.error('Unhandled error in worker queue:', err);
+    });
 };

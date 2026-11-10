@@ -200,8 +200,12 @@ pub struct TranspositionTable {
 impl TranspositionTable {
     #[must_use]
     pub fn new(size_mb: usize) -> Self {
-        // Cap size_mb to maximum 2048MB (2GB)
+        // Cap size_mb to maximum 2048MB (2GB) on native, 256MB on wasm32 to prevent out-of-memory traps
+        #[cfg(target_arch = "wasm32")]
+        let safe_mb = size_mb.min(256);
+        #[cfg(not(target_arch = "wasm32"))]
         let safe_mb = size_mb.min(2048);
+
         let bucket_size = std::mem::size_of::<TTBucket>();
         let num_buckets = ((safe_mb as u64 * 1024 * 1024) / bucket_size as u64) as usize;
 
@@ -216,10 +220,7 @@ impl TranspositionTable {
             size = 512; // Minimum bucket count (1024 entries)
         }
 
-        let mut buckets = Vec::with_capacity(size);
-        for _ in 0..size {
-            buckets.push(TTBucket::default());
-        }
+        let buckets = (0..size).map(|_| TTBucket::default()).collect();
 
         Self {
             buckets,

@@ -21,7 +21,7 @@ export class AiPoolManager {
   /**
    * Dynamically resizes the worker pool to match the desired thread count
    */
-  public adjustPoolSize(targetThreads: number): void {
+  public adjustPoolSize(targetThreads: number, initConfigJson?: string): void {
     const desired = Math.max(1, Math.min(16, targetThreads));
     if (this.workers.length === desired) {
       return;
@@ -33,7 +33,11 @@ export class AiPoolManager {
       const worker = new Worker(new URL('./ai.worker.ts', import.meta.url), {
         type: 'module',
       });
-      worker.postMessage({ type: 'INIT', threadId });
+      if (initConfigJson) {
+        worker.postMessage({ type: 'RESET_CONFIG', configJson: initConfigJson, threadId });
+      } else {
+        worker.postMessage({ type: 'INIT', threadId });
+      }
       this.workers.push(worker);
     }
 
@@ -42,6 +46,27 @@ export class AiPoolManager {
       const worker = this.workers.pop();
       worker?.terminate();
     }
+  }
+
+  /**
+   * Respawns a crashed or poisoned worker thread to keep the pool healthy
+   */
+  public respawnWorker(threadId: number): void {
+    if (threadId < 0 || threadId >= this.workers.length) {
+      return;
+    }
+    const oldWorker = this.workers[threadId];
+    try {
+      oldWorker?.terminate();
+    } catch {
+      // ignore
+    }
+
+    const worker = new Worker(new URL('./ai.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    worker.postMessage({ type: 'INIT', threadId });
+    this.workers[threadId] = worker;
   }
 
   /**
@@ -58,11 +83,20 @@ export class AiPoolManager {
    * This ensures previous Transposition Tables are freed and new TT memory size is allocated immediately.
    */
   public resetConfig(config: Partial<EngineConfig>): void {
+    const desiredThreads = config.threads ?? this.workers.length;
+    const threadCount = Math.max(1, Math.min(16, desiredThreads));
+    const totalTt = config.tt_size_mb ?? 512;
+    const perWorkerTt = Math.max(16, Math.floor(totalTt / threadCount));
+    const workerConfig = { ...config, tt_size_mb: perWorkerTt };
+    const configJson = JSON.stringify(workerConfig);
+
+    const prevCount = this.workers.length;
     if (config.threads) {
-      this.adjustPoolSize(config.threads);
+      this.adjustPoolSize(config.threads, configJson);
     }
-    const configJson = JSON.stringify(config);
-    for (let i = 0; i < this.workers.length; i++) {
+
+    // Only post RESET_CONFIG to workers that were already running before adjustPoolSize
+    for (let i = 0; i < Math.min(prevCount, this.workers.length); i++) {
       this.workers[i]!.postMessage({
         type: 'RESET_CONFIG',
         configJson,
@@ -82,13 +116,28 @@ export class AiPoolManager {
       return null;
     }
 
+    // Distribute total TT size proportionally across threads to prevent memory exhaustion in browsers
+    let configJson = req.configJson;
+    if (configJson) {
+      try {
+        const parsed = JSON.parse(configJson);
+        if (typeof parsed.tt_size_mb === 'number') {
+          const perWorkerTt = Math.max(16, Math.floor(parsed.tt_size_mb / threadCount));
+          configJson = JSON.stringify({ ...parsed, tt_size_mb: perWorkerTt });
+        }
+      } catch {
+        // ignore JSON parse error
+      }
+    }
+    const effectiveReq = { ...req, configJson };
+
     // Single thread execution shortcut
     if (this.workers.length === 1) {
-      return this.searchSingle(this.workers[0]!, req, 0);
+      return this.searchSingle(this.workers[0]!, effectiveReq, 0);
     }
 
     // Multi-threaded search with Cooperative Lazy SMP across all threads
-    return this.searchParallel(req);
+    return this.searchParallel(effectiveReq);
   }
 
   private searchSingle(
@@ -107,12 +156,14 @@ export class AiPoolManager {
           resolve(null);
         } else if (e.data.type === 'SEARCH_ERROR') {
           cleanup();
+          this.respawnWorker(threadId);
           reject(new Error(e.data.error || 'Search error in worker'));
         }
       };
 
       const onError = (err: ErrorEvent) => {
         cleanup();
+        this.respawnWorker(threadId);
         reject(err);
       };
 

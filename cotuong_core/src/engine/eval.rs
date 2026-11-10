@@ -100,6 +100,11 @@ impl SimpleEvaluator {
     }
 
     #[must_use]
+    pub fn arc_weights(&self) -> Option<Arc<NnueWeights>> {
+        self.weights.clone()
+    }
+
+    #[must_use]
     pub fn weights(&self) -> &NnueWeights {
         match &self.weights {
             Some(w) => w.as_ref(),

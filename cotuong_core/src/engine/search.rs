@@ -99,7 +99,10 @@ impl AlphaBetaEngine {
             self.tt = Arc::new(TranspositionTable::new(config.tt_size_mb));
         }
         self.mate_score_table = Self::precompute_mate_scores(&config);
-        self.evaluator = SimpleEvaluator::new(config.clone());
+        let existing_weights = self.evaluator.arc_weights();
+        let mut new_evaluator = SimpleEvaluator::new(config.clone());
+        new_evaluator.set_weights(existing_weights);
+        self.evaluator = new_evaluator;
         self.config = config;
     }
 

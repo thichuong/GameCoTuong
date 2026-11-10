@@ -160,21 +160,12 @@ impl GameState {
     /// If it has already been executed 3 times, attempting it a 4th time is forbidden.
     #[must_use]
     pub fn count_move_back_and_forth(&self, from: BoardCoordinate, to: BoardCoordinate) -> usize {
-        let player_moves: Vec<&MoveRecord> = self
-            .history
-            .iter()
-            .filter(|r| r.color == self.turn)
-            .collect();
-
         let mut count = 0;
-        let mut i = player_moves.len();
+        let mut iter = self.history.iter().rev().filter(|r| r.color == self.turn);
 
-        while i >= 2 {
-            let last = player_moves[i - 1];
-            let prev = player_moves[i - 2];
+        while let (Some(last), Some(prev)) = (iter.next(), iter.next()) {
             if last.from == to && last.to == from && prev.from == from && prev.to == to {
                 count += 1;
-                i -= 2;
             } else {
                 break;
             }
@@ -190,12 +181,12 @@ impl GameState {
     #[must_use]
     pub fn is_repetition_violation(&self, next_hash: u64, is_check: bool) -> bool {
         let mut history_count = 0;
-        let mut history_matches = Vec::new();
+        let mut last_match_idx = None;
 
         for (idx, r) in self.history.iter().enumerate() {
             if r.hash == next_hash {
                 history_count += 1;
-                history_matches.push(idx);
+                last_match_idx = Some(idx);
             }
         }
 
@@ -208,8 +199,8 @@ impl GameState {
         }
 
         // 2. Perpetual Check (Trường Chiếu): nếu liên tục chiếu lặp lại từ 3 lần trở lên
-        if is_check && total_count >= 3 && !history_matches.is_empty() {
-            if let Some(&last_idx) = history_matches.last() {
+        if is_check && total_count >= 3 {
+            if let Some(last_idx) = last_match_idx {
                 if let Some(slice) = self.history.get(last_idx..) {
                     let all_checks = slice
                         .iter()
