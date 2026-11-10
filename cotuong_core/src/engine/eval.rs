@@ -4,6 +4,70 @@ use crate::engine::Evaluator;
 use crate::logic::board::Board;
 use std::sync::Arc;
 
+pub const EVAL_CACHE_SIZE: usize = 16_384;
+pub const NO_EVAL_CACHE: i16 = i16::MIN;
+
+#[derive(Clone, Copy)]
+pub struct EvalCacheEntry {
+    pub hash: u64,
+    pub score: i16,
+}
+
+pub struct EvalCache {
+    table: Box<[EvalCacheEntry; EVAL_CACHE_SIZE]>,
+}
+
+impl Default for EvalCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EvalCache {
+    #[must_use]
+    pub fn new() -> Self {
+        let entries = vec![
+            EvalCacheEntry {
+                hash: 0,
+                score: NO_EVAL_CACHE,
+            };
+            EVAL_CACHE_SIZE
+        ];
+        let Ok(table) = entries.into_boxed_slice().try_into() else {
+            unreachable!()
+        };
+        Self { table }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn probe(&self, hash: u64) -> Option<i16> {
+        let idx = (hash as usize) & (EVAL_CACHE_SIZE - 1);
+        if let Some(entry) = self.table.get(idx) {
+            if entry.hash == hash && entry.score != NO_EVAL_CACHE {
+                return Some(entry.score);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub fn store(&mut self, hash: u64, score: i16) {
+        let idx = (hash as usize) & (EVAL_CACHE_SIZE - 1);
+        if let Some(entry) = self.table.get_mut(idx) {
+            entry.hash = hash;
+            entry.score = score;
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for entry in self.table.iter_mut() {
+            entry.hash = 0;
+            entry.score = NO_EVAL_CACHE;
+        }
+    }
+}
+
 pub struct SimpleEvaluator {
     config: Arc<EngineConfig>,
     weights: Option<Arc<NnueWeights>>,
@@ -28,6 +92,11 @@ impl SimpleEvaluator {
 
     pub fn set_weights(&mut self, weights: Option<Arc<NnueWeights>>) {
         self.weights = weights;
+    }
+
+    #[must_use]
+    pub fn has_weights(&self) -> bool {
+        self.weights.is_some() || cfg!(feature = "embed-model")
     }
 
     #[must_use]

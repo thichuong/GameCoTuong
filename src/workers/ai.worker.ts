@@ -1,9 +1,30 @@
 import init, { WasmEngine, WasmGameState } from '../wasm/cotuong_core.js';
 import type { SearchResult } from '../types/game.js';
+import { getOrFetchNnueModel } from '../utils/modelStorage.js';
 
 let isWasmInitialized = false;
 let engine: WasmEngine | null = null;
 let currentConfigJson: string | null = null;
+let modelLoadingPromise: Promise<Uint8Array | null> | null = null;
+
+async function ensureModelLoaded(eng: WasmEngine): Promise<void> {
+  if (eng.is_nnue_active()) {
+    return;
+  }
+
+  if (!modelLoadingPromise) {
+    modelLoadingPromise = getOrFetchNnueModel();
+  }
+
+  try {
+    const weights = await modelLoadingPromise;
+    if (weights && weights.length > 0) {
+      eng.load_weights_bytes(weights);
+    }
+  } catch (err) {
+    console.warn('Could not load dynamic NNUE model weights:', err);
+  }
+}
 
 async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
   if (!isWasmInitialized) {
@@ -15,6 +36,9 @@ async function ensureInitialized(configJson?: string): Promise<WasmEngine> {
     engine = new WasmEngine(configJson ?? null);
     currentConfigJson = configJson ?? null;
   }
+
+  // Pre-load NNUE neural weights from IndexedDB/Network
+  await ensureModelLoaded(engine);
 
   return engine;
 }

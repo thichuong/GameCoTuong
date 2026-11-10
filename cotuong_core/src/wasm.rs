@@ -385,6 +385,20 @@ impl WasmEngine {
         self.engine.clear_tt();
     }
 
+    /// Loads NNUE weights dynamically from a Uint8Array / binary slice
+    pub fn load_weights_bytes(&mut self, bytes: &[u8]) -> Result<(), JsValue> {
+        let weights = crate::engine::nnue::NnueWeights::load_from_bytes(bytes)
+            .map_err(|e| JsValue::from_str(&format!("Failed to load NNUE weights: {e}")))?;
+        self.engine.set_eval_weights(Some(Arc::new(weights)));
+        Ok(())
+    }
+
+    /// Checks if active NNUE weights are loaded and functional
+    #[must_use]
+    pub fn is_nnue_active(&self) -> bool {
+        self.engine.has_eval_weights()
+    }
+
     /// Run AI search on the given game state
     pub fn search(
         &mut self,

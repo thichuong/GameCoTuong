@@ -21,6 +21,26 @@ export class WasmEngine {
         wasm.wasmengine_clear_tt(this.__wbg_ptr);
     }
     /**
+     * Checks if active NNUE weights are loaded and functional
+     * @returns {boolean}
+     */
+    is_nnue_active() {
+        const ret = wasm.wasmengine_is_nnue_active(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Loads NNUE weights dynamically from a Uint8Array / binary slice
+     * @param {Uint8Array} bytes
+     */
+    load_weights_bytes(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmengine_load_weights_bytes(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Initialize AI search engine with optional JSON config
      * @param {string | null} [config_json]
      */
@@ -543,6 +563,13 @@ function handleError(f, args) {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {

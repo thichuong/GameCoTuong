@@ -36,7 +36,10 @@ pub const FLOAT_FILE_SIZE: usize = 8
     + (L3_OUTPUT_SIZE * 4)
     + 4;
 
+#[cfg(feature = "embed-model")]
 const EMBEDDED_WEIGHTS: &[u8] = include_bytes!("../../assets/default.nnue");
+#[cfg(not(feature = "embed-model"))]
+const EMBEDDED_WEIGHTS: &[u8] = &[];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NnueAccumulator {
@@ -78,7 +81,11 @@ impl NnueWeights {
     #[must_use]
     pub fn get() -> &'static Self {
         NNUE_INSTANCE.get_or_init(|| {
-            Self::load_from_bytes(EMBEDDED_WEIGHTS).unwrap_or_else(|_| Self::empty())
+            if EMBEDDED_WEIGHTS.is_empty() {
+                Self::empty()
+            } else {
+                Self::load_from_bytes(EMBEDDED_WEIGHTS).unwrap_or_else(|_| Self::empty())
+            }
         })
     }
 
@@ -422,60 +429,101 @@ impl NnueWeights {
         }
 
         let mut offset = 8;
+
+        // 1. Fast Bulk Memory Copy for W1 (4,043,520 bytes)
         let mut w1_vec = vec![[0i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE];
-        for row in &mut w1_vec {
-            for val in row {
-                let slice = bytes
-                    .get(offset..offset + 2)
-                    .ok_or_else(|| "Unexpected EOF while reading W1".to_string())?;
-                *val =
-                    i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
-                offset += 2;
+        let w1_byte_len = L1_INPUT_SIZE * L1_OUTPUT_SIZE * 2;
+        let w1_slice = bytes
+            .get(offset..offset + w1_byte_len)
+            .ok_or_else(|| "Unexpected EOF while reading W1".to_string())?;
+        #[cfg(target_endian = "little")]
+        unsafe {
+            let dst_ptr = w1_vec.as_mut_ptr().cast::<u8>();
+            std::ptr::copy_nonoverlapping(w1_slice.as_ptr(), dst_ptr, w1_byte_len);
+        }
+        #[cfg(not(target_endian = "little"))]
+        {
+            let mut off = 0;
+            for row in &mut w1_vec {
+                for val in row {
+                    if let Some(s) = w1_slice.get(off..off + 2) {
+                        *val =
+                            i16::from_le_bytes([*s.first().unwrap_or(&0), *s.get(1).unwrap_or(&0)]);
+                    }
+                    off += 2;
+                }
             }
         }
+        offset += w1_byte_len;
         let w1: Box<[[i16; L1_OUTPUT_SIZE]; L1_INPUT_SIZE]> = w1_vec
             .into_boxed_slice()
             .try_into()
             .map_err(|_| "Failed to allocate boxed W1 array".to_string())?;
 
+        // 2. Fast Copy for B1 (384 bytes)
         let mut b1 = [0i16; L1_OUTPUT_SIZE];
-        for val in &mut b1 {
-            let slice = bytes
-                .get(offset..offset + 2)
-                .ok_or_else(|| "Unexpected EOF while reading B1".to_string())?;
-            *val = i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
-            offset += 2;
+        let b1_byte_len = L1_OUTPUT_SIZE * 2;
+        let b1_slice = bytes
+            .get(offset..offset + b1_byte_len)
+            .ok_or_else(|| "Unexpected EOF while reading B1".to_string())?;
+        #[cfg(target_endian = "little")]
+        unsafe {
+            let dst_ptr = b1.as_mut_ptr().cast::<u8>();
+            std::ptr::copy_nonoverlapping(b1_slice.as_ptr(), dst_ptr, b1_byte_len);
         }
-
-        let mut w_psqt_vec = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE];
-        for row in &mut w_psqt_vec {
-            for val in row {
-                let slice = bytes
-                    .get(offset..offset + 2)
-                    .ok_or_else(|| "Unexpected EOF while reading W_PSQT".to_string())?;
-                *val =
-                    i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
-                offset += 2;
+        #[cfg(not(target_endian = "little"))]
+        {
+            let mut off = 0;
+            for val in &mut b1 {
+                if let Some(s) = b1_slice.get(off..off + 2) {
+                    *val = i16::from_le_bytes([*s.first().unwrap_or(&0), *s.get(1).unwrap_or(&0)]);
+                }
+                off += 2;
             }
         }
+        offset += b1_byte_len;
+
+        // 3. Fast Bulk Memory Copy for W_PSQT (168,480 bytes)
+        let mut w_psqt_vec = vec![[0i16; PSQT_BUCKETS]; L1_INPUT_SIZE];
+        let psqt_byte_len = L1_INPUT_SIZE * PSQT_BUCKETS * 2;
+        let psqt_slice = bytes
+            .get(offset..offset + psqt_byte_len)
+            .ok_or_else(|| "Unexpected EOF while reading W_PSQT".to_string())?;
+        #[cfg(target_endian = "little")]
+        unsafe {
+            let dst_ptr = w_psqt_vec.as_mut_ptr().cast::<u8>();
+            std::ptr::copy_nonoverlapping(psqt_slice.as_ptr(), dst_ptr, psqt_byte_len);
+        }
+        #[cfg(not(target_endian = "little"))]
+        {
+            let mut off = 0;
+            for row in &mut w_psqt_vec {
+                for val in row {
+                    if let Some(s) = psqt_slice.get(off..off + 2) {
+                        *val =
+                            i16::from_le_bytes([*s.first().unwrap_or(&0), *s.get(1).unwrap_or(&0)]);
+                    }
+                    off += 2;
+                }
+            }
+        }
+        offset += psqt_byte_len;
         let w_psqt: Box<[[i16; PSQT_BUCKETS]; L1_INPUT_SIZE]> = w_psqt_vec
             .into_boxed_slice()
             .try_into()
             .map_err(|_| "Failed to allocate boxed W_PSQT array".to_string())?;
 
+        // 4. Fast Copy for W2 (12,288 bytes)
         let mut w2_vec = vec![[0i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE];
-        for row in &mut w2_vec {
-            for val in row {
-                let b = bytes
-                    .get(offset)
-                    .ok_or_else(|| "Unexpected EOF while reading W2".to_string())?;
-                #[allow(clippy::cast_possible_wrap)]
-                {
-                    *val = *b as i8;
-                }
-                offset += 1;
-            }
+        let w2_byte_len = L2_INPUT_SIZE * L2_OUTPUT_SIZE;
+        let w2_slice = bytes
+            .get(offset..offset + w2_byte_len)
+            .ok_or_else(|| "Unexpected EOF while reading W2".to_string())?;
+        unsafe {
+            let dst_ptr = w2_vec.as_mut_ptr().cast::<u8>();
+            std::ptr::copy_nonoverlapping(w2_slice.as_ptr(), dst_ptr, w2_byte_len);
         }
+        offset += w2_byte_len;
         let w2: Box<[[i8; L2_INPUT_SIZE]; L2_OUTPUT_SIZE]> =
             w2_vec
                 .into_boxed_slice()
@@ -483,33 +531,45 @@ impl NnueWeights {
                 .map_err(|_| "Failed to allocate boxed W2 array".to_string())?;
         let w2_col = Self::transpose_w2(&w2);
 
+        // 5. Fast Copy for B2 (128 bytes)
         let mut b2 = [0i32; L2_OUTPUT_SIZE];
-        for val in &mut b2 {
-            let slice = bytes
-                .get(offset..offset + 4)
-                .ok_or_else(|| "Unexpected EOF while reading B2".to_string())?;
-            *val = i32::from_le_bytes([
-                *slice.first().unwrap_or(&0),
-                *slice.get(1).unwrap_or(&0),
-                *slice.get(2).unwrap_or(&0),
-                *slice.get(3).unwrap_or(&0),
-            ]);
-            offset += 4;
+        let b2_byte_len = L2_OUTPUT_SIZE * 4;
+        let b2_slice = bytes
+            .get(offset..offset + b2_byte_len)
+            .ok_or_else(|| "Unexpected EOF while reading B2".to_string())?;
+        #[cfg(target_endian = "little")]
+        unsafe {
+            let dst_ptr = b2.as_mut_ptr().cast::<u8>();
+            std::ptr::copy_nonoverlapping(b2_slice.as_ptr(), dst_ptr, b2_byte_len);
         }
-
-        let mut w3_vec = vec![[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
-        for row in &mut w3_vec {
-            for val in row {
-                let b = bytes
-                    .get(offset)
-                    .ok_or_else(|| "Unexpected EOF while reading W3".to_string())?;
-                #[allow(clippy::cast_possible_wrap)]
-                {
-                    *val = *b as i8;
+        #[cfg(not(target_endian = "little"))]
+        {
+            let mut off = 0;
+            for val in &mut b2 {
+                if let Some(s) = b2_slice.get(off..off + 4) {
+                    *val = i32::from_le_bytes([
+                        *s.first().unwrap_or(&0),
+                        *s.get(1).unwrap_or(&0),
+                        *s.get(2).unwrap_or(&0),
+                        *s.get(3).unwrap_or(&0),
+                    ]);
                 }
-                offset += 1;
+                off += 4;
             }
         }
+        offset += b2_byte_len;
+
+        // 6. Fast Copy for W3 (1,024 bytes)
+        let mut w3_vec = vec![[0i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE];
+        let w3_byte_len = L3_INPUT_SIZE * L3_OUTPUT_SIZE;
+        let w3_slice = bytes
+            .get(offset..offset + w3_byte_len)
+            .ok_or_else(|| "Unexpected EOF while reading W3".to_string())?;
+        unsafe {
+            let dst_ptr = w3_vec.as_mut_ptr().cast::<u8>();
+            std::ptr::copy_nonoverlapping(w3_slice.as_ptr(), dst_ptr, w3_byte_len);
+        }
+        offset += w3_byte_len;
         let w3: Box<[[i8; L3_INPUT_SIZE]; L3_OUTPUT_SIZE]> =
             w3_vec
                 .into_boxed_slice()
@@ -517,29 +577,58 @@ impl NnueWeights {
                 .map_err(|_| "Failed to allocate boxed W3 array".to_string())?;
         let w3_col = Self::transpose_w3(&w3);
 
+        // 7. Fast Copy for B3 (128 bytes)
         let mut b3 = [0i32; L3_OUTPUT_SIZE];
-        for val in &mut b3 {
-            let slice = bytes
-                .get(offset..offset + 4)
-                .ok_or_else(|| "Unexpected EOF while reading B3".to_string())?;
-            *val = i32::from_le_bytes([
-                *slice.first().unwrap_or(&0),
-                *slice.get(1).unwrap_or(&0),
-                *slice.get(2).unwrap_or(&0),
-                *slice.get(3).unwrap_or(&0),
-            ]);
-            offset += 4;
+        let b3_byte_len = L3_OUTPUT_SIZE * 4;
+        let b3_slice = bytes
+            .get(offset..offset + b3_byte_len)
+            .ok_or_else(|| "Unexpected EOF while reading B3".to_string())?;
+        #[cfg(target_endian = "little")]
+        unsafe {
+            let dst_ptr = b3.as_mut_ptr().cast::<u8>();
+            std::ptr::copy_nonoverlapping(b3_slice.as_ptr(), dst_ptr, b3_byte_len);
         }
+        #[cfg(not(target_endian = "little"))]
+        {
+            let mut off = 0;
+            for val in &mut b3 {
+                if let Some(s) = b3_slice.get(off..off + 4) {
+                    *val = i32::from_le_bytes([
+                        *s.first().unwrap_or(&0),
+                        *s.get(1).unwrap_or(&0),
+                        *s.get(2).unwrap_or(&0),
+                        *s.get(3).unwrap_or(&0),
+                    ]);
+                }
+                off += 4;
+            }
+        }
+        offset += b3_byte_len;
 
+        // 8. Fast Copy for W4 (64 bytes)
         let mut w4 = [0i16; L3_OUTPUT_SIZE];
-        for val in &mut w4 {
-            let slice = bytes
-                .get(offset..offset + 2)
-                .ok_or_else(|| "Unexpected EOF while reading W4".to_string())?;
-            *val = i16::from_le_bytes([*slice.first().unwrap_or(&0), *slice.get(1).unwrap_or(&0)]);
-            offset += 2;
+        let w4_byte_len = L3_OUTPUT_SIZE * 2;
+        let w4_slice = bytes
+            .get(offset..offset + w4_byte_len)
+            .ok_or_else(|| "Unexpected EOF while reading W4".to_string())?;
+        #[cfg(target_endian = "little")]
+        unsafe {
+            let dst_ptr = w4.as_mut_ptr().cast::<u8>();
+            std::ptr::copy_nonoverlapping(w4_slice.as_ptr(), dst_ptr, w4_byte_len);
         }
+        #[cfg(not(target_endian = "little"))]
+        {
+            let mut off = 0;
+            for val in &mut w4 {
+                if let Some(s) = w4_slice.get(off..off + 2) {
+                    *val = i16::from_le_bytes([*s.first().unwrap_or(&0), *s.get(1).unwrap_or(&0)]);
+                }
+                off += 2;
+            }
+        }
+        offset += w4_byte_len;
 
+        // 9. B4 (4 bytes)
         let slice = bytes
             .get(offset..offset + 4)
             .ok_or_else(|| "Unexpected EOF while reading B4".to_string())?;
@@ -699,9 +788,7 @@ impl NnueAccumulator {
             halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
         {
             if let Some(w_row) = weights.w1.get(red_feat) {
-                for (a, &w) in self.red.iter_mut().zip(w_row.iter()) {
-                    *a = a.saturating_add(w);
-                }
+                accum_add_192(&mut self.red, w_row);
             }
             if let Some(psqt_row) = weights.w_psqt.get(red_feat) {
                 for (p, &w) in self.psqt_red.iter_mut().zip(psqt_row.iter()) {
@@ -723,9 +810,7 @@ impl NnueAccumulator {
             halfkp_feature_idx_red(k_red, piece.color == Color::Black, piece.piece_type, sq)
         {
             if let Some(w_row) = weights.w1.get(red_feat) {
-                for (a, &w) in self.red.iter_mut().zip(w_row.iter()) {
-                    *a = a.saturating_sub(w);
-                }
+                accum_sub_192(&mut self.red, w_row);
             }
             if let Some(psqt_row) = weights.w_psqt.get(red_feat) {
                 for (p, &w) in self.psqt_red.iter_mut().zip(psqt_row.iter()) {
@@ -747,9 +832,7 @@ impl NnueAccumulator {
             halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
         {
             if let Some(w_row) = weights.w1.get(black_feat) {
-                for (a, &w) in self.black.iter_mut().zip(w_row.iter()) {
-                    *a = a.saturating_add(w);
-                }
+                accum_add_192(&mut self.black, w_row);
             }
             if let Some(psqt_row) = weights.w_psqt.get(black_feat) {
                 for (p, &w) in self.psqt_black.iter_mut().zip(psqt_row.iter()) {
@@ -771,9 +854,7 @@ impl NnueAccumulator {
             halfkp_feature_idx_black(k_black, piece.color == Color::Red, piece.piece_type, sq)
         {
             if let Some(w_row) = weights.w1.get(black_feat) {
-                for (a, &w) in self.black.iter_mut().zip(w_row.iter()) {
-                    *a = a.saturating_sub(w);
-                }
+                accum_sub_192(&mut self.black, w_row);
             }
             if let Some(psqt_row) = weights.w_psqt.get(black_feat) {
                 for (p, &w) in self.psqt_black.iter_mut().zip(psqt_row.iter()) {
@@ -802,10 +883,7 @@ impl NnueAccumulator {
 
         if let (Some(add_row), Some(sub_row)) = (weights.w1.get(add_feat), weights.w1.get(sub_feat))
         {
-            for ((a, &w_add), &w_sub) in self.red.iter_mut().zip(add_row.iter()).zip(sub_row.iter())
-            {
-                *a = a.saturating_add(w_add).saturating_sub(w_sub);
-            }
+            accum_quiet_192(&mut self.red, add_row, sub_row);
         }
         if let (Some(add_p), Some(sub_p)) =
             (weights.w_psqt.get(add_feat), weights.w_psqt.get(sub_feat))
@@ -839,14 +917,7 @@ impl NnueAccumulator {
 
         if let (Some(add_row), Some(sub_row)) = (weights.w1.get(add_feat), weights.w1.get(sub_feat))
         {
-            for ((a, &w_add), &w_sub) in self
-                .black
-                .iter_mut()
-                .zip(add_row.iter())
-                .zip(sub_row.iter())
-            {
-                *a = a.saturating_add(w_add).saturating_sub(w_sub);
-            }
+            accum_quiet_192(&mut self.black, add_row, sub_row);
         }
         if let (Some(add_p), Some(sub_p)) =
             (weights.w_psqt.get(add_feat), weights.w_psqt.get(sub_feat))
@@ -898,18 +969,7 @@ impl NnueAccumulator {
             weights.w1.get(sub_feat),
             weights.w1.get(cap_feat),
         ) {
-            for (((a, &w_add), &w_sub), &w_cap) in self
-                .red
-                .iter_mut()
-                .zip(add_row.iter())
-                .zip(sub_row.iter())
-                .zip(cap_row.iter())
-            {
-                *a = a
-                    .saturating_sub(w_cap)
-                    .saturating_sub(w_sub)
-                    .saturating_add(w_add);
-            }
+            accum_capture_192(&mut self.red, add_row, sub_row, cap_row);
         }
         if let (Some(add_p), Some(sub_p), Some(cap_p)) = (
             weights.w_psqt.get(add_feat),
@@ -965,18 +1025,7 @@ impl NnueAccumulator {
             weights.w1.get(sub_feat),
             weights.w1.get(cap_feat),
         ) {
-            for (((a, &w_add), &w_sub), &w_cap) in self
-                .black
-                .iter_mut()
-                .zip(add_row.iter())
-                .zip(sub_row.iter())
-                .zip(cap_row.iter())
-            {
-                *a = a
-                    .saturating_sub(w_cap)
-                    .saturating_sub(w_sub)
-                    .saturating_add(w_add);
-            }
+            accum_capture_192(&mut self.black, add_row, sub_row, cap_row);
         }
         if let (Some(add_p), Some(sub_p), Some(cap_p)) = (
             weights.w_psqt.get(add_feat),
@@ -1022,6 +1071,273 @@ impl NnueAccumulator {
     ) {
         self.remove_piece_red(piece, sq, k_red, weights);
         self.remove_piece_black(piece, sq, k_black, weights);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SIMD Saturating Vectorization for Accumulator Updates (192 x i16)
+// ---------------------------------------------------------------------------
+
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[inline]
+#[target_feature(enable = "avx2")]
+unsafe fn simd_accum_add_avx2(acc: &mut [i16; L1_OUTPUT_SIZE], add_row: &[i16; L1_OUTPUT_SIZE]) {
+    use core::arch::x86_64::{_mm256_adds_epi16, _mm256_loadu_si256, _mm256_storeu_si256};
+    let acc_ptr = acc.as_mut_ptr();
+    let add_ptr = add_row.as_ptr();
+    for i in 0..12 {
+        let offset = i * 16;
+        let a = _mm256_loadu_si256(acc_ptr.add(offset).cast());
+        let w = _mm256_loadu_si256(add_ptr.add(offset).cast());
+        _mm256_storeu_si256(acc_ptr.add(offset).cast(), _mm256_adds_epi16(a, w));
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[inline]
+#[target_feature(enable = "avx2")]
+unsafe fn simd_accum_sub_avx2(acc: &mut [i16; L1_OUTPUT_SIZE], sub_row: &[i16; L1_OUTPUT_SIZE]) {
+    use core::arch::x86_64::{_mm256_loadu_si256, _mm256_storeu_si256, _mm256_subs_epi16};
+    let acc_ptr = acc.as_mut_ptr();
+    let sub_ptr = sub_row.as_ptr();
+    for i in 0..12 {
+        let offset = i * 16;
+        let a = _mm256_loadu_si256(acc_ptr.add(offset).cast());
+        let w = _mm256_loadu_si256(sub_ptr.add(offset).cast());
+        _mm256_storeu_si256(acc_ptr.add(offset).cast(), _mm256_subs_epi16(a, w));
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[inline]
+#[target_feature(enable = "avx2")]
+unsafe fn simd_accum_quiet_avx2(
+    acc: &mut [i16; L1_OUTPUT_SIZE],
+    add_row: &[i16; L1_OUTPUT_SIZE],
+    sub_row: &[i16; L1_OUTPUT_SIZE],
+) {
+    use core::arch::x86_64::{
+        _mm256_adds_epi16, _mm256_loadu_si256, _mm256_storeu_si256, _mm256_subs_epi16,
+    };
+    let acc_ptr = acc.as_mut_ptr();
+    let add_ptr = add_row.as_ptr();
+    let sub_ptr = sub_row.as_ptr();
+    for i in 0..12 {
+        let offset = i * 16;
+        let a = _mm256_loadu_si256(acc_ptr.add(offset).cast());
+        let w_add = _mm256_loadu_si256(add_ptr.add(offset).cast());
+        let w_sub = _mm256_loadu_si256(sub_ptr.add(offset).cast());
+        let res = _mm256_subs_epi16(_mm256_adds_epi16(a, w_add), w_sub);
+        _mm256_storeu_si256(acc_ptr.add(offset).cast(), res);
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[inline]
+#[target_feature(enable = "avx2")]
+unsafe fn simd_accum_capture_avx2(
+    acc: &mut [i16; L1_OUTPUT_SIZE],
+    add_row: &[i16; L1_OUTPUT_SIZE],
+    sub_row: &[i16; L1_OUTPUT_SIZE],
+    cap_row: &[i16; L1_OUTPUT_SIZE],
+) {
+    use core::arch::x86_64::{
+        _mm256_adds_epi16, _mm256_loadu_si256, _mm256_storeu_si256, _mm256_subs_epi16,
+    };
+    let acc_ptr = acc.as_mut_ptr();
+    let add_ptr = add_row.as_ptr();
+    let sub_ptr = sub_row.as_ptr();
+    let cap_ptr = cap_row.as_ptr();
+    for i in 0..12 {
+        let offset = i * 16;
+        let a = _mm256_loadu_si256(acc_ptr.add(offset).cast());
+        let w_add = _mm256_loadu_si256(add_ptr.add(offset).cast());
+        let w_sub = _mm256_loadu_si256(sub_ptr.add(offset).cast());
+        let w_cap = _mm256_loadu_si256(cap_ptr.add(offset).cast());
+        let step1 = _mm256_subs_epi16(a, w_cap);
+        let step2 = _mm256_subs_epi16(step1, w_sub);
+        let res = _mm256_adds_epi16(step2, w_add);
+        _mm256_storeu_si256(acc_ptr.add(offset).cast(), res);
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[inline]
+unsafe fn simd_accum_add_wasm(acc: &mut [i16; L1_OUTPUT_SIZE], add_row: &[i16; L1_OUTPUT_SIZE]) {
+    use core::arch::wasm32::{i16x8_add_sat, v128_load, v128_store};
+    let acc_ptr = acc.as_mut_ptr();
+    let add_ptr = add_row.as_ptr();
+    for i in 0..24 {
+        let offset = i * 8;
+        let a = v128_load(acc_ptr.add(offset).cast());
+        let w = v128_load(add_ptr.add(offset).cast());
+        v128_store(acc_ptr.add(offset).cast(), i16x8_add_sat(a, w));
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[inline]
+unsafe fn simd_accum_sub_wasm(acc: &mut [i16; L1_OUTPUT_SIZE], sub_row: &[i16; L1_OUTPUT_SIZE]) {
+    use core::arch::wasm32::{i16x8_sub_sat, v128_load, v128_store};
+    let acc_ptr = acc.as_mut_ptr();
+    let sub_ptr = sub_row.as_ptr();
+    for i in 0..24 {
+        let offset = i * 8;
+        let a = v128_load(acc_ptr.add(offset).cast());
+        let w = v128_load(sub_ptr.add(offset).cast());
+        v128_store(acc_ptr.add(offset).cast(), i16x8_sub_sat(a, w));
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[inline]
+unsafe fn simd_accum_quiet_wasm(
+    acc: &mut [i16; L1_OUTPUT_SIZE],
+    add_row: &[i16; L1_OUTPUT_SIZE],
+    sub_row: &[i16; L1_OUTPUT_SIZE],
+) {
+    use core::arch::wasm32::{i16x8_add_sat, i16x8_sub_sat, v128_load, v128_store};
+    let acc_ptr = acc.as_mut_ptr();
+    let add_ptr = add_row.as_ptr();
+    let sub_ptr = sub_row.as_ptr();
+    for i in 0..24 {
+        let offset = i * 8;
+        let a = v128_load(acc_ptr.add(offset).cast());
+        let w_add = v128_load(add_ptr.add(offset).cast());
+        let w_sub = v128_load(sub_ptr.add(offset).cast());
+        let res = i16x8_sub_sat(i16x8_add_sat(a, w_add), w_sub);
+        v128_store(acc_ptr.add(offset).cast(), res);
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[inline]
+unsafe fn simd_accum_capture_wasm(
+    acc: &mut [i16; L1_OUTPUT_SIZE],
+    add_row: &[i16; L1_OUTPUT_SIZE],
+    sub_row: &[i16; L1_OUTPUT_SIZE],
+    cap_row: &[i16; L1_OUTPUT_SIZE],
+) {
+    use core::arch::wasm32::{i16x8_add_sat, i16x8_sub_sat, v128_load, v128_store};
+    let acc_ptr = acc.as_mut_ptr();
+    let add_ptr = add_row.as_ptr();
+    let sub_ptr = sub_row.as_ptr();
+    let cap_ptr = cap_row.as_ptr();
+    for i in 0..24 {
+        let offset = i * 8;
+        let a = v128_load(acc_ptr.add(offset).cast());
+        let w_add = v128_load(add_ptr.add(offset).cast());
+        let w_sub = v128_load(sub_ptr.add(offset).cast());
+        let w_cap = v128_load(cap_ptr.add(offset).cast());
+        let step1 = i16x8_sub_sat(a, w_cap);
+        let step2 = i16x8_sub_sat(step1, w_sub);
+        let res = i16x8_add_sat(step2, w_add);
+        v128_store(acc_ptr.add(offset).cast(), res);
+    }
+}
+
+#[inline(always)]
+fn accum_add_192(acc: &mut [i16; L1_OUTPUT_SIZE], add_row: &[i16; L1_OUTPUT_SIZE]) {
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    {
+        unsafe {
+            simd_accum_add_avx2(acc, add_row);
+        }
+        return;
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        unsafe {
+            simd_accum_add_wasm(acc, add_row);
+        }
+        return;
+    }
+    #[allow(unreachable_code)]
+    for (a, &w) in acc.iter_mut().zip(add_row.iter()) {
+        *a = a.saturating_add(w);
+    }
+}
+
+#[inline(always)]
+fn accum_sub_192(acc: &mut [i16; L1_OUTPUT_SIZE], sub_row: &[i16; L1_OUTPUT_SIZE]) {
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    {
+        unsafe {
+            simd_accum_sub_avx2(acc, sub_row);
+        }
+        return;
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        unsafe {
+            simd_accum_sub_wasm(acc, sub_row);
+        }
+        return;
+    }
+    #[allow(unreachable_code)]
+    for (a, &w) in acc.iter_mut().zip(sub_row.iter()) {
+        *a = a.saturating_sub(w);
+    }
+}
+
+#[inline(always)]
+fn accum_quiet_192(
+    acc: &mut [i16; L1_OUTPUT_SIZE],
+    add_row: &[i16; L1_OUTPUT_SIZE],
+    sub_row: &[i16; L1_OUTPUT_SIZE],
+) {
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    {
+        unsafe {
+            simd_accum_quiet_avx2(acc, add_row, sub_row);
+        }
+        return;
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        unsafe {
+            simd_accum_quiet_wasm(acc, add_row, sub_row);
+        }
+        return;
+    }
+    #[allow(unreachable_code)]
+    for ((a, &w_add), &w_sub) in acc.iter_mut().zip(add_row.iter()).zip(sub_row.iter()) {
+        *a = a.saturating_add(w_add).saturating_sub(w_sub);
+    }
+}
+
+#[inline(always)]
+fn accum_capture_192(
+    acc: &mut [i16; L1_OUTPUT_SIZE],
+    add_row: &[i16; L1_OUTPUT_SIZE],
+    sub_row: &[i16; L1_OUTPUT_SIZE],
+    cap_row: &[i16; L1_OUTPUT_SIZE],
+) {
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    {
+        unsafe {
+            simd_accum_capture_avx2(acc, add_row, sub_row, cap_row);
+        }
+        return;
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        unsafe {
+            simd_accum_capture_wasm(acc, add_row, sub_row, cap_row);
+        }
+        return;
+    }
+    #[allow(unreachable_code)]
+    for (((a, &w_add), &w_sub), &w_cap) in acc
+        .iter_mut()
+        .zip(add_row.iter())
+        .zip(sub_row.iter())
+        .zip(cap_row.iter())
+    {
+        *a = a
+            .saturating_sub(w_cap)
+            .saturating_sub(w_sub)
+            .saturating_add(w_add);
     }
 }
 
@@ -1288,23 +1604,60 @@ pub fn evaluate_forward(
     score
 }
 
+/// Evaluates an accumulator directly from Red's perspective using given piece count and weights.
+#[inline]
+#[must_use]
+pub fn evaluate_accumulator_with_weights(
+    acc: &NnueAccumulator,
+    piece_count: usize,
+    weights: &NnueWeights,
+) -> i32 {
+    let bucket = ((piece_count.saturating_sub(2)) * PSQT_BUCKETS / 30).min(PSQT_BUCKETS - 1);
+    let psqt_red = acc.psqt_red.get(bucket).copied().unwrap_or(0);
+    let psqt_black = acc.psqt_black.get(bucket).copied().unwrap_or(0);
+    let psqt_score = (psqt_red - psqt_black) / 16;
+
+    let (red_score, black_score) = evaluate_dual_forward(&acc.red, &acc.black, weights);
+    let positional_score = (red_score - black_score) / 2;
+
+    psqt_score + positional_score
+}
+
+/// Evaluates a pair of accumulators simultaneously for batched move evaluation.
+#[inline]
+#[must_use]
+pub fn evaluate_batch_accumulators_2(
+    accs: [&NnueAccumulator; 2],
+    piece_counts: [usize; 2],
+    weights: &NnueWeights,
+) -> [i32; 2] {
+    let s0 = evaluate_accumulator_with_weights(accs[0], piece_counts[0], weights);
+    let s1 = evaluate_accumulator_with_weights(accs[1], piece_counts[1], weights);
+    [s0, s1]
+}
+
+/// Evaluates 4 accumulators simultaneously for batched move evaluation.
+#[inline]
+#[must_use]
+pub fn evaluate_batch_accumulators_4(
+    accs: [&NnueAccumulator; 4],
+    piece_counts: [usize; 4],
+    weights: &NnueWeights,
+) -> [i32; 4] {
+    let s0 = evaluate_accumulator_with_weights(accs[0], piece_counts[0], weights);
+    let s1 = evaluate_accumulator_with_weights(accs[1], piece_counts[1], weights);
+    let s2 = evaluate_accumulator_with_weights(accs[2], piece_counts[2], weights);
+    let s3 = evaluate_accumulator_with_weights(accs[3], piece_counts[3], weights);
+    [s0, s1, s2, s3]
+}
+
 /// Evaluates the board position from Red's perspective using the Pikafish-style
 /// Dual-Head HalfKP NNUE (8-Bucket Phase PSQT Head + Deep SCReLU Positional Head).
 #[inline]
 #[must_use]
 pub fn evaluate_nnue_with_weights(board: &Board, weights: &NnueWeights) -> i32 {
     let piece_count = board.occupied.count_ones() as usize;
-    let bucket = ((piece_count.saturating_sub(2)) * PSQT_BUCKETS / 30).min(PSQT_BUCKETS - 1);
-
-    let psqt_red = board.nnue_acc.psqt_red.get(bucket).copied().unwrap_or(0);
-    let psqt_black = board.nnue_acc.psqt_black.get(bucket).copied().unwrap_or(0);
-    let psqt_score = (psqt_red - psqt_black) / 16;
-
-    let (red_score, black_score) =
-        evaluate_dual_forward(&board.nnue_acc.red, &board.nnue_acc.black, weights);
-    let positional_score = (red_score - black_score) / 2;
-
-    psqt_score + positional_score
+    evaluate_accumulator_with_weights(&board.nnue_acc, piece_count, weights)
 }
 
 #[inline]

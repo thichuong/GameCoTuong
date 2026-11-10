@@ -914,6 +914,14 @@ export class PolyfillEngine {
     // Polyfill transposition table clear
   }
 
+  load_weights_bytes(_bytes: Uint8Array): void {
+    // No-op for pure JS polyfill
+  }
+
+  is_nnue_active(): boolean {
+    return false;
+  }
+
   search(
     gameState: PolyfillGameState,
     timeLimitMs: bigint | number,

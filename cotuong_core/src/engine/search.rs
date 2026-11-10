@@ -1,5 +1,5 @@
 use crate::engine::config::EngineConfig;
-use crate::engine::eval::SimpleEvaluator;
+use crate::engine::eval::{EvalCache, SimpleEvaluator};
 use crate::engine::movegen::EngineMoveGen;
 use crate::engine::tt::{TTEntry, TTFlag, TranspositionTable, NO_EVAL};
 use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
@@ -21,6 +21,7 @@ pub struct AlphaBetaEngine {
     config: Arc<EngineConfig>,
     evaluator: SimpleEvaluator,
     tt: TranspositionTable,
+    eval_cache: EvalCache,
     history_stack: Vec<u64>,
     game_history_len: usize,
     in_check_stack: [bool; 96],
@@ -46,6 +47,7 @@ impl AlphaBetaEngine {
         Self {
             evaluator: SimpleEvaluator::new(config.clone()),
             tt: TranspositionTable::new(tt_size),
+            eval_cache: EvalCache::new(),
             history_stack: Vec::with_capacity(128),
             game_history_len: 0,
             in_check_stack: [false; 96],
@@ -72,7 +74,13 @@ impl AlphaBetaEngine {
     }
 
     pub fn set_eval_weights(&mut self, weights: Option<Arc<crate::engine::nnue::NnueWeights>>) {
+        self.eval_cache.clear();
         self.evaluator.set_weights(weights);
+    }
+
+    #[must_use]
+    pub fn has_eval_weights(&self) -> bool {
+        self.evaluator.has_weights()
     }
 
     pub fn update_config(&mut self, config: Arc<EngineConfig>) {
@@ -84,10 +92,11 @@ impl AlphaBetaEngine {
         self.config = config;
     }
 
-    /// Clears the transposition table and resets search heuristics.
+    /// Clears the transposition table, eval cache, and resets search heuristics.
     /// Call this when starting a brand new game or loading an unrelated puzzle FEN.
     pub fn clear_tt(&mut self) {
         self.tt.clear();
+        self.eval_cache.clear();
         self.killer_moves = [[None; 2]; 64];
         for row in self.countermoves.iter_mut() {
             for slot in row.iter_mut() {
@@ -263,8 +272,17 @@ impl AlphaBetaEngine {
     }
 
     #[inline]
-    fn eval_for_turn(&self, board: &Board, turn: Color) -> i32 {
-        let raw = self.evaluator.evaluate(board);
+    fn eval_for_turn(&mut self, board: &Board, turn: Color) -> i32 {
+        let hash = board.zobrist_hash;
+        let raw = if let Some(cached) = self.eval_cache.probe(hash) {
+            i32::from(cached)
+        } else {
+            let ev = self.evaluator.evaluate(board);
+            #[allow(clippy::cast_possible_truncation)]
+            let clamped = ev.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
+            self.eval_cache.store(hash, clamped);
+            ev
+        };
         if turn == Color::Red {
             raw
         } else {

@@ -4,6 +4,8 @@ export const memory: WebAssembly.Memory;
 export const __wbg_wasmengine_free: (a: number, b: number) => void;
 export const __wbg_wasmgamestate_free: (a: number, b: number) => void;
 export const wasmengine_clear_tt: (a: number) => void;
+export const wasmengine_is_nnue_active: (a: number) => number;
+export const wasmengine_load_weights_bytes: (a: number, b: number, c: number) => [number, number];
 export const wasmengine_new: (a: number, b: number) => [number, number, number];
 export const wasmengine_search: (a: number, b: number, c: bigint, d: number) => [number, number, number];
 export const wasmengine_update_config: (a: number, b: number, c: number) => [number, number];

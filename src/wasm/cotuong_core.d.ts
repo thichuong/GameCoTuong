@@ -12,6 +12,14 @@ export class WasmEngine {
      */
     clear_tt(): void;
     /**
+     * Checks if active NNUE weights are loaded and functional
+     */
+    is_nnue_active(): boolean;
+    /**
+     * Loads NNUE weights dynamically from a Uint8Array / binary slice
+     */
+    load_weights_bytes(bytes: Uint8Array): void;
+    /**
      * Initialize AI search engine with optional JSON config
      */
     constructor(config_json?: string | null);
@@ -113,6 +121,8 @@ export interface InitOutput {
     readonly __wbg_wasmengine_free: (a: number, b: number) => void;
     readonly __wbg_wasmgamestate_free: (a: number, b: number) => void;
     readonly wasmengine_clear_tt: (a: number) => void;
+    readonly wasmengine_is_nnue_active: (a: number) => number;
+    readonly wasmengine_load_weights_bytes: (a: number, b: number, c: number) => [number, number];
     readonly wasmengine_new: (a: number, b: number) => [number, number, number];
     readonly wasmengine_search: (a: number, b: number, c: bigint, d: number) => [number, number, number];
     readonly wasmengine_update_config: (a: number, b: number, c: number) => [number, number];

@@ -10,7 +10,7 @@
     "test": "npx tsx --test src/**/*.test.ts",
     "preview": "vite preview",
     "deploy": "npm run build && npx wrangler deploy",
-    "build:wasm": "cargo build -p cotuong_core --target wasm32-unknown-unknown --release && wasm-bindgen --target web --out-dir src/wasm target/wasm32-unknown-unknown/release/cotuong_core.wasm",
+    "build:wasm": "cargo build -p cotuong_core --target wasm32-unknown-unknown --release --no-default-features && wasm-bindgen --target web --out-dir src/wasm target/wasm32-unknown-unknown/release/cotuong_core.wasm",
     "train": "bash train.sh"
   },
   "dependencies": {
