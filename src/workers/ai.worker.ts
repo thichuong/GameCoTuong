@@ -9,6 +9,36 @@ let currentThreadId: number = 0;
 let modelLoadingPromise: Promise<Uint8Array | null> | null = null;
 let messageQueue: Promise<void> = Promise.resolve();
 
+// SharedArrayBuffer partition assigned to this worker thread (SharedArrayBuffer / threads)
+interface WorkerPartition {
+  buffer: SharedArrayBuffer;
+  offset: number;
+  length: number;
+  view: Uint8Array;
+}
+let workerPartition: WorkerPartition | null = null;
+
+function updateWorkerPartition(
+  sharedBuffer?: SharedArrayBuffer,
+  offset?: number,
+  length?: number
+): void {
+  if (sharedBuffer && typeof offset === 'number' && typeof length === 'number' && length > 0) {
+    try {
+      const view = new Uint8Array(sharedBuffer, offset, length);
+      workerPartition = {
+        buffer: sharedBuffer,
+        offset,
+        length,
+        view,
+      };
+    } catch (err) {
+      console.warn('Failed to create worker partition view on SharedArrayBuffer:', err);
+      workerPartition = null;
+    }
+  }
+}
+
 async function ensureModelLoaded(eng: WasmEngine): Promise<void> {
   try {
     if (eng.is_nnue_active()) {
@@ -79,9 +109,21 @@ async function handleMessage(e: MessageEvent): Promise<void> {
     configJson,
     threadId = 0,
     allowedMovesFlat,
+    sharedBuffer,
+    bufferOffset,
+    bufferLength,
   } = e.data;
 
+  updateWorkerPartition(sharedBuffer, bufferOffset, bufferLength);
+
   if (type === 'CLEAR_TT') {
+    if (workerPartition) {
+      try {
+        workerPartition.view.fill(0);
+      } catch {
+        // ignore
+      }
+    }
     if (engine) {
       engine.clear_tt();
     }
@@ -90,6 +132,13 @@ async function handleMessage(e: MessageEvent): Promise<void> {
 
   if (type === 'RESET_CONFIG') {
     try {
+      if (workerPartition) {
+        try {
+          workerPartition.view.fill(0);
+        } catch {
+          // ignore
+        }
+      }
       if (engine && configJson) {
         try {
           engine.update_config(configJson);

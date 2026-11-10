@@ -200,9 +200,9 @@ pub struct TranspositionTable {
 impl TranspositionTable {
     #[must_use]
     pub fn new(size_mb: usize) -> Self {
-        // Cap size_mb to maximum 2048MB (2GB) on native, 256MB on wasm32 to prevent out-of-memory traps
+        // Cap size_mb to maximum 2048MB (2GB) on native, 1024MB (1GB) on wasm32 to prevent out-of-memory traps
         #[cfg(target_arch = "wasm32")]
-        let safe_mb = size_mb.min(256);
+        let safe_mb = size_mb.min(1024);
         #[cfg(not(target_arch = "wasm32"))]
         let safe_mb = size_mb.min(2048);
 

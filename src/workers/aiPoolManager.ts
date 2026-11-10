@@ -13,9 +13,35 @@ export interface SearchRequest {
 
 export class AiPoolManager {
   private workers: Worker[] = [];
+  private sharedBuffer: SharedArrayBuffer | null = null;
+  private currentWorkerTtMb: number = 256;
 
-  constructor(initialThreads: number = 1) {
+  constructor(initialThreads: number = 1, initialWorkerTtMb: number = 256) {
+    this.currentWorkerTtMb = initialWorkerTtMb;
+    const totalMb = initialWorkerTtMb * initialThreads;
+    this.ensureSharedBuffer(totalMb);
     this.adjustPoolSize(initialThreads);
+  }
+
+  /**
+   * Ensures the SharedArrayBuffer of the requested total size in MB exists.
+   * If SharedArrayBuffer is unavailable (e.g. non-isolated context), returns null gracefully.
+   */
+  public ensureSharedBuffer(totalTtSizeMb: number): SharedArrayBuffer | null {
+    if (typeof SharedArrayBuffer === 'undefined') {
+      return null;
+    }
+    const safeMb = Math.max(16, Math.min(8192, totalTtSizeMb));
+    const targetBytes = safeMb * 1024 * 1024;
+    if (!this.sharedBuffer || this.sharedBuffer.byteLength !== targetBytes) {
+      try {
+        this.sharedBuffer = new SharedArrayBuffer(targetBytes);
+      } catch (err) {
+        console.warn('Failed to allocate SharedArrayBuffer:', err);
+        this.sharedBuffer = null;
+      }
+    }
+    return this.sharedBuffer;
   }
 
   /**
@@ -27,17 +53,26 @@ export class AiPoolManager {
       return;
     }
 
+    const totalMb = this.currentWorkerTtMb * desired;
+    const sBuf = this.ensureSharedBuffer(totalMb);
+    const perWorkerBytes = this.currentWorkerTtMb * 1024 * 1024;
+
     // Grow pool if needed
     while (this.workers.length < desired) {
       const threadId = this.workers.length;
       const worker = new Worker(new URL('./ai.worker.ts', import.meta.url), {
         type: 'module',
       });
-      if (initConfigJson) {
-        worker.postMessage({ type: 'RESET_CONFIG', configJson: initConfigJson, threadId });
-      } else {
-        worker.postMessage({ type: 'INIT', threadId });
-      }
+      const configPayload = initConfigJson ?? JSON.stringify({ tt_size_mb: this.currentWorkerTtMb, threads: desired });
+      worker.postMessage({
+        type: 'RESET_CONFIG',
+        configJson: configPayload,
+        threadId,
+        sharedBuffer: sBuf,
+        bufferOffset: threadId * perWorkerBytes,
+        bufferLength: perWorkerBytes,
+        totalThreads: desired,
+      });
       this.workers.push(worker);
     }
 
@@ -62,17 +97,37 @@ export class AiPoolManager {
       // ignore
     }
 
+    const totalThreads = Math.max(1, this.workers.length);
+    const totalMb = this.currentWorkerTtMb * totalThreads;
+    const sBuf = this.ensureSharedBuffer(totalMb);
+    const perWorkerBytes = this.currentWorkerTtMb * 1024 * 1024;
+
     const worker = new Worker(new URL('./ai.worker.ts', import.meta.url), {
       type: 'module',
     });
-    worker.postMessage({ type: 'INIT', threadId });
+    worker.postMessage({
+      type: 'INIT',
+      threadId,
+      sharedBuffer: sBuf,
+      bufferOffset: threadId * perWorkerBytes,
+      bufferLength: perWorkerBytes,
+      totalThreads,
+      configJson: JSON.stringify({ tt_size_mb: this.currentWorkerTtMb, threads: totalThreads }),
+    });
     this.workers[threadId] = worker;
   }
 
   /**
-   * Broadcasts CLEAR_TT command to all active workers in the pool
+   * Broadcasts CLEAR_TT command to all active workers in the pool and zero-fills SharedArrayBuffer
    */
   public clearMemory(): void {
+    if (this.sharedBuffer) {
+      try {
+        new Uint8Array(this.sharedBuffer).fill(0);
+      } catch {
+        // ignore
+      }
+    }
     for (const worker of this.workers) {
       worker.postMessage({ type: 'CLEAR_TT' });
     }
@@ -80,14 +135,19 @@ export class AiPoolManager {
 
   /**
    * Resets and re-allocates engine memory across all worker threads.
-   * This ensures previous Transposition Tables are freed and new TT memory size is allocated immediately.
+   * tt_size_mb is treated as the memory for each worker.
+   * Total SharedArrayBuffer allocated = tt_size_mb * threads.
    */
   public resetConfig(config: Partial<EngineConfig>): void {
     const desiredThreads = config.threads ?? this.workers.length;
     const threadCount = Math.max(1, Math.min(16, desiredThreads));
-    const totalTt = config.tt_size_mb ?? 512;
-    const perWorkerTt = Math.max(16, Math.floor(totalTt / threadCount));
-    const workerConfig = { ...config, tt_size_mb: perWorkerTt };
+    const workerTtMb = config.tt_size_mb ?? this.currentWorkerTtMb;
+    this.currentWorkerTtMb = workerTtMb;
+
+    const totalMb = workerTtMb * threadCount;
+    const sBuf = this.ensureSharedBuffer(totalMb);
+    const perWorkerBytes = workerTtMb * 1024 * 1024;
+    const workerConfig = { ...config, tt_size_mb: workerTtMb, threads: threadCount };
     const configJson = JSON.stringify(workerConfig);
 
     const prevCount = this.workers.length;
@@ -95,12 +155,16 @@ export class AiPoolManager {
       this.adjustPoolSize(config.threads, configJson);
     }
 
-    // Only post RESET_CONFIG to workers that were already running before adjustPoolSize
+    // Post RESET_CONFIG with partitioned SharedArrayBuffer to all active workers
     for (let i = 0; i < Math.min(prevCount, this.workers.length); i++) {
       this.workers[i]!.postMessage({
         type: 'RESET_CONFIG',
         configJson,
         threadId: i,
+        sharedBuffer: sBuf,
+        bufferOffset: i * perWorkerBytes,
+        bufferLength: perWorkerBytes,
+        totalThreads: threadCount,
       });
     }
   }
@@ -116,14 +180,17 @@ export class AiPoolManager {
       return null;
     }
 
-    // Distribute total TT size proportionally across threads to prevent memory exhaustion in browsers
+    // Update shared buffer and worker configuration based on per-worker TT size
     let configJson = req.configJson;
     if (configJson) {
       try {
         const parsed = JSON.parse(configJson);
         if (typeof parsed.tt_size_mb === 'number') {
-          const perWorkerTt = Math.max(16, Math.floor(parsed.tt_size_mb / threadCount));
-          configJson = JSON.stringify({ ...parsed, tt_size_mb: perWorkerTt });
+          const workerTtMb = parsed.tt_size_mb;
+          this.currentWorkerTtMb = workerTtMb;
+          const totalMb = workerTtMb * threadCount;
+          this.ensureSharedBuffer(totalMb);
+          configJson = JSON.stringify({ ...parsed, tt_size_mb: workerTtMb, threads: threadCount });
         }
       } catch {
         // ignore JSON parse error
@@ -176,6 +243,11 @@ export class AiPoolManager {
       worker.addEventListener('error', onError);
 
       const stateJson = req.stateJson || req.state.to_json();
+      const totalThreads = Math.max(1, this.workers.length);
+      const totalMb = this.currentWorkerTtMb * totalThreads;
+      const sBuf = this.ensureSharedBuffer(totalMb);
+      const perWorkerBytes = this.currentWorkerTtMb * 1024 * 1024;
+
       worker.postMessage({
         type: 'SEARCH',
         stateJson,
@@ -185,6 +257,10 @@ export class AiPoolManager {
         configJson: req.configJson,
         threadId,
         allowedMovesFlat,
+        sharedBuffer: sBuf,
+        bufferOffset: threadId * perWorkerBytes,
+        bufferLength: perWorkerBytes,
+        totalThreads,
       });
     });
   }
@@ -275,6 +351,7 @@ export class AiPoolManager {
       worker.terminate();
     }
     this.workers = [];
+    this.sharedBuffer = null;
   }
 
   public get threadCount(): number {

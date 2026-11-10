@@ -6,7 +6,7 @@ pub struct EngineConfig {
     // Checkmate scoring
     pub mate_score: i32, // Base score for checkmate (higher = stronger preference)
 
-    // Transposition Table
+    // Transposition Table size in MB (allocated per worker from SharedArrayBuffer partition)
     pub tt_size_mb: usize,
 
     // NNUE weight / scale percentage (50..=150)

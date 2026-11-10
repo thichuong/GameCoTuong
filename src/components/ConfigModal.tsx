@@ -16,6 +16,7 @@ import {
   Link2,
 } from 'lucide-react';
 import type { EngineConfig } from '../types/game.js';
+// (remove it from import list)
 import { DEFAULT_ENGINE_CONFIG, getDefaultThreads } from '../types/game.js';
 import { exportConfigJson } from '../utils/export.js';
 
@@ -37,46 +38,54 @@ interface Preset {
 
 const PRESETS: Preset[] = [
   {
-    name: 'Tiêu Chuẩn (Mặc định)',
-    desc: 'Cân bằng hoàn hảo theo cấu hình gốc của cotuong_core với TT 512MB tối ưu đa luồng.',
-    config: {
-      mate_score: 300000,
-      tt_size_mb: 512,
-      nnue_weight: 100,
-      threads: getDefaultThreads(),
-    },
-  },
-  {
-    name: 'Tấn Công / Chuẩn Xác Cao',
-    desc: 'Tăng điểm chiếu bí, khuếch đại thế công mạng và dùng độ sâu tính toán tối đa.',
-    config: {
-      mate_score: 400000,
-      tt_size_mb: 512,
-      nnue_weight: 120,
-      threads: Math.min(16, Math.max(2, getDefaultThreads() * 2)),
-    },
-  },
-  {
-    name: 'Tiết Kiệm RAM & CPU',
-    desc: 'Bảng băm TT 64MB, chạy 1 luồng đơn, tối ưu pin và tài nguyên tối đa cho thiết bị di động.',
+    name: 'Tiết Kiệm (1 luồng)',
+    desc: 'Thiết bị di động hoặc máy yếu: 1 luồng, 256MB RAM/luồng.',
     config: {
       mate_score: 200000,
-      tt_size_mb: 64,
+      tt_size_mb: 256,
       nnue_weight: 90,
       threads: 1,
     },
   },
   {
-    name: 'Sát Cục / Giải Cờ Thế',
-    desc: 'Bảng băm cực đại 2GB (2048MB), điểm chiếu bí tối đa 500k và huy động tối đa số luồng phần cứng.',
+    name: 'Tiêu Chuẩn (2 luồng)',
+    desc: 'Cấu hình cân bằng: 2 luồng, 256MB RAM/luồng.',
     config: {
-      mate_score: 500000,
-      tt_size_mb: 2048,
-      nnue_weight: 110,
-      threads: Math.min(16, typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4),
+      mate_score: 300000,
+      tt_size_mb: 256,
+      nnue_weight: 100,
+      threads: 2,
     },
   },
-];
+  {
+    name: 'Cao (4 luồng)',
+    desc: 'Sức mạnh trung bình: 4 luồng, 512MB RAM/luồng.',
+    config: {
+      mate_score: 400000,
+      tt_size_mb: 512,
+      nnue_weight: 110,
+      threads: 4,
+    },
+  },
+  {
+    name: 'Cực cao (8 luồng)',
+    desc: 'Sức mạnh tối đa: 8 luồng, 512MB RAM/luồng.',
+    config: {
+      mate_score: 500000,
+      tt_size_mb: 512,
+      nnue_weight: 120,
+      threads: 8,
+    },
+  },
+].filter((p) => {
+  const hardware = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 8 : 8;
+  const totalMemoryMb = typeof navigator !== 'undefined' && 'deviceMemory' in navigator ? (navigator as any).deviceMemory * 1024 : 8192;
+  const isThreadCompatible = p.config.threads <= hardware;
+  // Rule: total_tt * 2 < 80% RAM
+  const totalTt = p.config.tt_size_mb * p.config.threads;
+  const isMemoryCompatible = (totalTt * 2) < (totalMemoryMb * 0.8);
+  return isThreadCompatible && isMemoryCompatible;
+});
 
 export const ConfigModal: React.FC<ConfigModalProps> = ({
   isOpen,
@@ -132,12 +141,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       }));
     }
 
-    if (key === 'tt_size_mb') {
-      const sizeNum = Number(value);
-      const sizeStr = sizeNum >= 1024 ? `${(sizeNum / 1024).toFixed(sizeNum % 1024 === 0 ? 0 : 1)} GB` : `${sizeNum} MB`;
+    if (key === 'tt_size_mb' || key === 'threads') {
+      const perWorker = key === 'tt_size_mb' ? Number(value) : currentConfig.tt_size_mb;
+      const th = key === 'threads' ? Number(value) : currentConfig.threads;
+      const totalMb = perWorker * th;
+      const totalStr = totalMb >= 1024 ? `${(totalMb / 1024).toFixed(totalMb % 1024 === 0 ? 0 : 1)} GB` : `${totalMb} MB`;
       setFeedback({
         type: 'success',
-        message: `Đã chọn Transposition Table ${sizeStr}. Nhấn "Áp Dụng & Đóng" để lưu và tái cấp phát bộ nhớ mới cho AI!`,
+        message: `Đã chọn ${perWorker} MB/luồng × ${th} luồng = Tổng ${totalStr} SharedArrayBuffer. Nhấn "Áp Dụng & Đóng" để kích hoạt!`,
       });
     }
   };
@@ -443,7 +454,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                       {preset.desc}
                     </p>
                     <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[10px] font-mono text-stone-400">
-                      <span>TT: {preset.config.tt_size_mb}MB</span>
+                      <span>TT: {preset.config.tt_size_mb}MB/luồng (Tổng: {preset.config.tt_size_mb * preset.config.threads >= 1024 ? `${(preset.config.tt_size_mb * preset.config.threads) / 1024}GB` : `${preset.config.tt_size_mb * preset.config.threads}MB`})</span>
                       <span>•</span>
                       <span>Mate: {(preset.config.mate_score / 1000).toLocaleString('vi-VN')}k</span>
                       <span>•</span>
@@ -474,53 +485,59 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-stone-200">
-                        Kích thước Transposition Table
+                        Transposition Table (mỗi luồng)
                       </span>
                       <code className="text-[11px] font-mono text-amber-300 bg-stone-900 px-1.5 py-0.5 rounded border border-stone-700/60">
                         tt_size_mb: usize
                       </code>
                     </div>
                     <p className="text-[11px] text-stone-400 mt-0.5">
-                      Dung lượng bảng băm Zobrist lưu trữ thế cờ đã duyệt và các nhánh cắt tỉa (Cutoff), tăng tốc độ duyệt nút (NPS).
+                      Dung lượng Transposition Table cho <strong>mỗi</strong> Web Worker. Tổng bộ nhớ chia sẻ sẽ là <strong className="text-amber-400">{currentConfig.tt_size_mb * currentConfig.threads} MB</strong>.
                     </p>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <span className="text-sm font-mono font-bold text-amber-400">
-                    {currentConfig.tt_size_mb >= 1024
-                      ? `${(currentConfig.tt_size_mb / 1024).toFixed(currentConfig.tt_size_mb % 1024 === 0 ? 0 : 1)} GB (${currentConfig.tt_size_mb} MB)`
-                      : `${currentConfig.tt_size_mb} MB`}
-                  </span>
+                  <div className="text-sm font-mono font-bold text-amber-400">
+                    {currentConfig.tt_size_mb} MB
+                  </div>
+                  <div className="text-[11px] font-mono text-stone-400 mt-0.5">
+                    × {currentConfig.threads} luồng = {currentConfig.tt_size_mb * currentConfig.threads} MB tổng
+                  </div>
                 </div>
               </div>
 
               <input
                 type="range"
                 min={16}
-                max={2048}
+                max={1024}
                 step={32}
                 value={currentConfig.tt_size_mb}
                 onChange={(e) => updateParam('tt_size_mb', Number(e.target.value))}
                 className="w-full accent-amber-500 cursor-pointer h-1.5 bg-stone-800 rounded-lg"
               />
 
-              <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                <span className="text-[10px] text-stone-400 mr-1">Mức nhanh:</span>
-                {[64, 128, 256, 512, 1024, 2048].map((size) => (
-                  <button
-                    key={size}
-                    type="button"
-                    onClick={() => updateParam('tt_size_mb', size)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer border ${
-                      currentConfig.tt_size_mb === size
-                        ? 'bg-amber-500 text-stone-950 font-bold border-amber-400'
-                        : 'bg-stone-800 hover:bg-stone-700 text-stone-300 border-stone-700'
-                    }`}
-                  >
-                    {size >= 1024 ? `${size / 1024} GB` : `${size} MB`}{' '}
-                    {size === 512 && '(Mặc định)'}
-                  </button>
-                ))}
+              <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] text-stone-400 mr-1">Mức nhanh:</span>
+                  {[64, 128, 256, 512, 1024].map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => updateParam('tt_size_mb', size)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer border ${
+                        currentConfig.tt_size_mb === size
+                          ? 'bg-amber-500 text-stone-950 font-bold border-amber-400'
+                          : 'bg-stone-800 hover:bg-stone-700 text-stone-300 border-stone-700'
+                      }`}
+                    >
+                      {size} MB {' '}
+                      {size === 256 && '(Mặc định)'}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] font-mono text-amber-400/80 bg-stone-900/80 px-2 py-0.5 rounded border border-stone-800">
+                  Tổng SharedArrayBuffer: {currentConfig.tt_size_mb * currentConfig.threads} MB
+                </div>
               </div>
             </div>
 

@@ -68,10 +68,28 @@ export interface SearchResult {
 
 export interface EngineConfig {
   mate_score: number;
+  /** Transposition Table memory size in MB for each worker thread. Total SharedArrayBuffer allocated = tt_size_mb * threads. */
   tt_size_mb: number;
   nnue_weight: number;
   threads: number;
   [key: string]: number | string | undefined;
+}
+
+/**
+ * Calculates total SharedArrayBuffer size in megabytes across all workers: ttSizeMb * threads.
+ */
+export function calculateTotalTtMb(ttSizeMb: number, threads: number): number {
+  const threadCount = Math.max(1, Math.min(16, threads));
+  return ttSizeMb * threadCount;
+}
+
+/**
+ * Calculates per-worker Transposition Table size in megabytes from the total SharedArrayBuffer size.
+ * Guarantees a safe lower bound of 16 MB to prevent hash thrashing.
+ */
+export function calculatePerWorkerTtMb(ttSizeMb: number, threads: number): number {
+  const threadCount = Math.max(1, Math.min(16, threads));
+  return Math.max(16, Math.floor(ttSizeMb / threadCount));
 }
 
 /**
