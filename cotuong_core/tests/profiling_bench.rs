@@ -143,3 +143,94 @@ fn profile_search_nnue_performance() {
     );
     assert!(nps > 0);
 }
+
+#[test]
+fn profile_perft_speed() {
+    use cotuong_core::engine::perft;
+
+    println!("\n=== PROFILE: Perft Speed (MoveGen + Make/Undo + Legal Validation) ===");
+    let mut board = Board::new();
+
+    for d in 1..=4 {
+        let start = Instant::now();
+        let nodes = perft(&mut board, Color::Red, d);
+        let duration = start.elapsed();
+        let nps = (nodes as f64 / duration.as_secs_f64()) as u64;
+        let time_per_node_ns = (duration.as_nanos() as f64) / (nodes as f64);
+
+        println!(
+            "Depth {}: Nodes = {:>9}, Time = {:>10.3?}, NPS = {:>10}, Time/Node = {:>6.2} ns",
+            d, nodes, duration, nps, time_per_node_ns
+        );
+        assert!(nodes > 0);
+    }
+}
+
+#[test]
+fn profile_search_no_eval_vs_nnue() {
+    println!("\n================================================================================");
+    println!("=== PROFILE: Search Node Traversal: Standard NNUE vs No-Eval (Zero-Eval)     ===");
+    println!("================================================================================");
+
+    let game_state = GameState::new();
+
+    for depth in [5u8, 6u8] {
+        println!("\n--- Comparing Search at Depth {} ---", depth);
+
+        // 1. With Standard NNUE Eval
+        let config_nnue = Arc::new(EngineConfig::default());
+        let mut engine_nnue = AlphaBetaEngine::new(config_nnue);
+        engine_nnue.search(&game_state, SearchLimit::Depth(2), &[]); // Warmup
+
+        let start_nnue = Instant::now();
+        let res_nnue = engine_nnue.search(&game_state, SearchLimit::Depth(depth), &[]);
+        let dur_nnue = start_nnue.elapsed();
+        let (mv_nnue, stats_nnue) = res_nnue.expect("NNUE search must succeed");
+        let nps_nnue = (stats_nnue.nodes as f64 / dur_nnue.as_secs_f64()) as u64;
+        let ns_per_node_nnue = (dur_nnue.as_nanos() as f64) / (stats_nnue.nodes as f64);
+
+        // 2. With No-Eval (Zero Eval, bypass NNUE accumulator & forward pass)
+        let config_no_eval = Arc::new(EngineConfig {
+            nnue_weight: 0,
+            ..Default::default()
+        });
+        let mut engine_no_eval = AlphaBetaEngine::new(config_no_eval);
+        engine_no_eval.search(&game_state, SearchLimit::Depth(2), &[]); // Warmup
+
+        let start_no_eval = Instant::now();
+        let res_no_eval = engine_no_eval.search(&game_state, SearchLimit::Depth(depth), &[]);
+        let dur_no_eval = start_no_eval.elapsed();
+        let (mv_no_eval, stats_no_eval) = res_no_eval.expect("No-eval search must succeed");
+        let nps_no_eval = (stats_no_eval.nodes as f64 / dur_no_eval.as_secs_f64()) as u64;
+        let ns_per_node_no_eval = (dur_no_eval.as_nanos() as f64) / (stats_no_eval.nodes as f64);
+
+        println!(
+            "{:<18} | Nodes: {:>7} | Time: {:>9.3?} | NPS: {:>9} | Time/Node: {:>7.2} ns | BestMove: {}",
+            "With NNUE Eval",
+            stats_nnue.nodes,
+            dur_nnue,
+            nps_nnue,
+            ns_per_node_nnue,
+            mv_nnue.to_uci()
+        );
+        println!(
+            "{:<18} | Nodes: {:>7} | Time: {:>9.3?} | NPS: {:>9} | Time/Node: {:>7.2} ns | BestMove: {}",
+            "Without Eval",
+            stats_no_eval.nodes,
+            dur_no_eval,
+            nps_no_eval,
+            ns_per_node_no_eval,
+            mv_no_eval.to_uci()
+        );
+
+        let speedup_ratio = (nps_no_eval as f64) / (nps_nnue as f64);
+        let eval_overhead_ns = (ns_per_node_nnue - ns_per_node_no_eval).max(0.0);
+        let eval_pct = (eval_overhead_ns / ns_per_node_nnue) * 100.0;
+
+        println!(">> Raw NPS Speedup without Eval: {:.2}x", speedup_ratio);
+        println!(
+            ">> Estimated Evaluation Cost per Node: {:.2} ns ({:.1}% of search time)",
+            eval_overhead_ns, eval_pct
+        );
+    }
+}

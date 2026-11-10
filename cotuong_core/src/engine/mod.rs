@@ -11,6 +11,8 @@ pub mod search;
 pub mod tt;
 pub mod zobrist;
 
+pub use search::perft;
+
 #[cfg(test)]
 mod bench_test;
 mod mate_test;
@@ -25,6 +27,15 @@ pub struct Move {
 }
 
 impl Move {
+    #[inline]
+    #[must_use]
+    pub const fn matches(&self, fr: usize, fc: usize, tr: usize, tc: usize) -> bool {
+        self.from_row as usize == fr
+            && self.from_col as usize == fc
+            && self.to_row as usize == tr
+            && self.to_col as usize == tc
+    }
+
     /// Converts a move to a 4-character UCI coordinate string (e.g., "b2e2", "h0g2").
     #[must_use]
     pub fn to_uci(&self) -> String {

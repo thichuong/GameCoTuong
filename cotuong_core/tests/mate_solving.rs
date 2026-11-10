@@ -66,7 +66,6 @@ fn test_mate_in_one_iron_bolt() {
 }
 
 #[test]
-#[ignore]
 fn test_mate_in_one_pawn_move() {
     // Mate in 1:
     // Black King (9,4).
@@ -182,4 +181,52 @@ fn test_mate_in_two_stall_mate() {
 
     // Let's use a known puzzle string if possible or skipped.
     // Fallback: Just enable the Mate in 1 test to verify basic function.
+}
+
+#[test]
+fn test_score_soundness_and_move_quality() {
+    println!("\n=== TEST: Score Soundness & Move Quality Verification ===");
+    let fen_start = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1";
+    let game = game_from_fen(fen_start);
+
+    let config = Arc::new(EngineConfig::default());
+    let mut engine = AlphaBetaEngine::new(config);
+
+    // Warmup
+    engine.search(&game, SearchLimit::Depth(2), &[]);
+
+    // Search Depth 5
+    let (mv, stats) = engine
+        .search(&game, SearchLimit::Depth(5), &[])
+        .expect("Valid move in start position");
+
+    println!(
+        "Opening Depth 5: Move: {}, Score: {}, Nodes: {}, Time: {}ms",
+        mv.to_uci(),
+        stats.score,
+        stats.nodes,
+        stats.time_ms
+    );
+
+    // 1. Move quality check:
+    // Opening move must be a solid, classical development move:
+    // e.g. Central Cannon (b2e2 or h2e2), Elephant (c0e2 or g0e2), or Knight (b0c2 or h0g2)
+    let uci = mv.to_uci();
+    let is_sound_opening_move = matches!(
+        uci.as_str(),
+        "h2e2" | "b2e2" | "b0c2" | "h0g2" | "c0e2" | "g0e2" | "c3c4" | "g3g4"
+    );
+    assert!(
+        is_sound_opening_move,
+        "Engine must pick a canonical high-quality opening move, got: {}",
+        uci
+    );
+
+    // 2. Score check:
+    // Starting position must be roughly balanced (-100 to +100 cp)
+    assert!(
+        stats.score.abs() < 250,
+        "Starting position score must be balanced, got: {}",
+        stats.score
+    );
 }

@@ -219,6 +219,19 @@ pub fn is_flying_general(board: &Board) -> bool {
     }
 }
 
+/// Quickly checks if a move is geometrically pseudo-legal for `turn` without panic.
+#[inline]
+#[must_use]
+pub fn is_pseudo_legal(board: &Board, mv: &crate::engine::Move, turn: Color) -> bool {
+    let Some(from) = BoardCoordinate::new(mv.from_row as usize, mv.from_col as usize) else {
+        return false;
+    };
+    let Some(to) = BoardCoordinate::new(mv.to_row as usize, mv.to_col as usize) else {
+        return false;
+    };
+    validate_piece_logic(board, from, to, turn).is_ok()
+}
+
 /// Validates the geometry and specific rules for a piece move, IGNORING self-check.
 fn validate_piece_logic(
     board: &Board,

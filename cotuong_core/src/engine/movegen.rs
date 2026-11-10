@@ -15,7 +15,8 @@ pub struct MoveGenContext<'a> {
     pub turn: Color,
     pub moves: &'a mut MoveList,
     pub best_move: Option<Move>,
-    pub killers: &'a [Option<Move>],
+    pub killer_1: Option<Move>,
+    pub killer_2: Option<Move>,
     pub countermove: Option<Move>,
     pub history: Option<&'a [[i32; 90]; 90]>,
     pub only_captures: bool,
@@ -71,12 +72,16 @@ impl EngineMoveGen {
         let enemy_bb = board.get_color_bb(turn.opposite());
         let friendly_bb = board.get_color_bb(turn);
 
+        let killer_1 = killers.first().copied().flatten();
+        let killer_2 = killers.get(1).copied().flatten();
+
         let mut ctx = MoveGenContext {
             board,
             turn,
             moves: &mut moves,
             best_move,
-            killers,
+            killer_1,
+            killer_2,
             countermove,
             history,
             only_captures,
@@ -144,33 +149,10 @@ impl EngineMoveGen {
             None
         };
 
-        let is_hash_move = ctx.best_move.is_some_and(|bm| {
-            bm.from_row as usize == r
-                && bm.from_col as usize == c
-                && bm.to_row as usize == tr
-                && bm.to_col as usize == tc
-        });
-
-        let is_killer_1 = ctx.killers.first().and_then(|&k| k).is_some_and(|km| {
-            km.from_row as usize == r
-                && km.from_col as usize == c
-                && km.to_row as usize == tr
-                && km.to_col as usize == tc
-        });
-
-        let is_killer_2 = ctx.killers.get(1).and_then(|&k| k).is_some_and(|km| {
-            km.from_row as usize == r
-                && km.from_col as usize == c
-                && km.to_row as usize == tr
-                && km.to_col as usize == tc
-        });
-
-        let is_countermove = ctx.countermove.is_some_and(|cm| {
-            cm.from_row as usize == r
-                && cm.from_col as usize == c
-                && cm.to_row as usize == tr
-                && cm.to_col as usize == tc
-        });
+        let is_hash_move = ctx.best_move.is_some_and(|bm| bm.matches(r, c, tr, tc));
+        let is_killer_1 = ctx.killer_1.is_some_and(|km| km.matches(r, c, tr, tc));
+        let is_killer_2 = ctx.killer_2.is_some_and(|km| km.matches(r, c, tr, tc));
+        let is_countermove = ctx.countermove.is_some_and(|cm| cm.matches(r, c, tr, tc));
 
         let score = if is_hash_move {
             SCORE_HASH_MOVE

@@ -6,7 +6,9 @@ use crate::engine::{Evaluator, Move, SearchLimit, SearchStats, Searcher};
 use crate::logic::board::{Board, BoardCoordinate, Color, Piece};
 use crate::logic::eval_constants::get_piece_value;
 use crate::logic::game::GameState;
-use crate::logic::rules::{could_cause_flying_general, is_flying_general, is_in_check};
+use crate::logic::rules::{
+    could_cause_flying_general, is_flying_general, is_in_check, is_pseudo_legal,
+};
 use std::sync::Arc;
 
 const MATE_THRESHOLD: i32 = 15_000;
@@ -348,16 +350,20 @@ impl AlphaBetaEngine {
             return None;
         }
 
-        let saved_acc = if let Some((from_sq, to_sq, piece, captured)) = pending_move {
-            let acc = board.nnue_acc;
-            board.update_nnue_for_move_with_weights(
-                from_sq,
-                to_sq,
-                piece,
-                captured,
-                self.evaluator.weights(),
-            );
-            Some(acc)
+        let saved_acc = if self.config.nnue_weight > 0 {
+            if let Some((from_sq, to_sq, piece, captured)) = pending_move {
+                let acc = board.nnue_acc;
+                board.update_nnue_for_move_with_weights(
+                    from_sq,
+                    to_sq,
+                    piece,
+                    captured,
+                    self.evaluator.weights(),
+                );
+                Some(acc)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -524,16 +530,20 @@ impl AlphaBetaEngine {
         prev_move: Option<Move>,
     ) -> Option<i32> {
         if ply >= MAX_PLY {
-            let saved_acc = if let Some((from_sq, to_sq, piece, captured)) = pending_move {
-                let acc = board.nnue_acc;
-                board.update_nnue_for_move_with_weights(
-                    from_sq,
-                    to_sq,
-                    piece,
-                    captured,
-                    self.evaluator.weights(),
-                );
-                Some(acc)
+            let saved_acc = if self.config.nnue_weight > 0 {
+                if let Some((from_sq, to_sq, piece, captured)) = pending_move {
+                    let acc = board.nnue_acc;
+                    board.update_nnue_for_move_with_weights(
+                        from_sq,
+                        to_sq,
+                        piece,
+                        captured,
+                        self.evaluator.weights(),
+                    );
+                    Some(acc)
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -595,16 +605,20 @@ impl AlphaBetaEngine {
         self.history_stack.push(hash);
 
         // Materialize lazy NNUE accumulator update only when node actually needs evaluation/expansion
-        let saved_acc = if let Some((from_sq, to_sq, piece, captured)) = pending_move {
-            let acc = board.nnue_acc;
-            board.update_nnue_for_move_with_weights(
-                from_sq,
-                to_sq,
-                piece,
-                captured,
-                self.evaluator.weights(),
-            );
-            Some(acc)
+        let saved_acc = if self.config.nnue_weight > 0 {
+            if let Some((from_sq, to_sq, piece, captured)) = pending_move {
+                let acc = board.nnue_acc;
+                board.update_nnue_for_move_with_weights(
+                    from_sq,
+                    to_sq,
+                    piece,
+                    captured,
+                    self.evaluator.weights(),
+                );
+                Some(acc)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -692,6 +706,121 @@ impl AlphaBetaEngine {
                 .flatten()
         });
 
+        let mut best_score = -INF_SCORE;
+        let mut best_move_this_node = None;
+        let mut tt_flag = TTFlag::UpperBound;
+        let mut legal_moves_count = 0usize;
+
+        let full_depth = depth.saturating_sub(1) + u8::from(in_check);
+        let mut quiet_moves_tried = [(0usize, 0usize); 64];
+        let mut quiet_count = 0usize;
+        let next_ply = ply.saturating_add(1);
+
+        // 1. STAGED FAST TT MOVE PROBE:
+        // Try the hash move before generating the rest of the moves.
+        // If the hash move causes a beta cutoff, we skip generating all other moves!
+        let mut tt_move_searched = None;
+        if let Some(tt_mv) = best_move_tt {
+            if is_pseudo_legal(board, &tt_mv, turn) {
+                if let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(&tt_mv)
+                {
+                    let is_flying = if could_cause_flying_general(board, piece.piece_type, from_sq)
+                    {
+                        is_flying_general(board)
+                    } else {
+                        false
+                    };
+
+                    if !is_in_check(board, turn) && !is_flying {
+                        legal_moves_count += 1;
+                        tt_move_searched = Some(tt_mv);
+                        let is_capture = captured.is_some();
+                        if !is_capture && quiet_count < 64 {
+                            if let Some(slot) = quiet_moves_tried.get_mut(quiet_count) {
+                                *slot = (from_sq, to_sq);
+                                quiet_count += 1;
+                            }
+                        }
+                        let pending = Some((from_sq, to_sq, piece, captured));
+
+                        let score_opt = self
+                            .alpha_beta(
+                                board,
+                                -beta,
+                                -alpha,
+                                full_depth,
+                                turn.opposite(),
+                                next_ply,
+                                pending,
+                                Some(tt_mv),
+                            )
+                            .map(|v| -v);
+
+                        board.undo_move_board_only(&tt_mv, piece, captured);
+
+                        if let Some(score) = score_opt {
+                            if score > best_score {
+                                best_score = score;
+                                best_move_this_node = Some(tt_mv);
+                            }
+                            if score > alpha {
+                                alpha = score;
+                                tt_flag = TTFlag::Exact;
+                            }
+                            if alpha >= beta {
+                                // BETA CUTOFF ON TT MOVE!
+                                tt_flag = TTFlag::LowerBound;
+                                if !is_capture {
+                                    if self.killer_moves[p_idx][0] != Some(tt_mv) {
+                                        self.killer_moves[p_idx][1] = self.killer_moves[p_idx][0];
+                                        self.killer_moves[p_idx][0] = Some(tt_mv);
+                                    }
+
+                                    let bonus = i32::from(depth) * i32::from(depth);
+                                    if let Some(row) = self.history_table.get_mut(from_sq) {
+                                        if let Some(val) = row.get_mut(to_sq) {
+                                            *val = (*val + bonus).min(50_000);
+                                        }
+                                    }
+
+                                    if let Some(prev) = prev_move {
+                                        let p_from = Board::square_index(
+                                            prev.from_row as usize,
+                                            prev.from_col as usize,
+                                        );
+                                        let p_to = Board::square_index(
+                                            prev.to_row as usize,
+                                            prev.to_col as usize,
+                                        );
+                                        if let Some(row) = self.countermoves.get_mut(p_from) {
+                                            if let Some(slot) = row.get_mut(p_to) {
+                                                *slot = Some(tt_mv);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                self.tt.store(
+                                    hash,
+                                    Some(tt_mv),
+                                    best_score,
+                                    static_eval_red,
+                                    depth,
+                                    tt_flag,
+                                    ply,
+                                );
+                                return Some(best_score);
+                            }
+                        } else {
+                            return None;
+                        }
+                    } else {
+                        board.undo_move_board_only(&tt_mv, piece, captured);
+                    }
+                }
+            }
+        }
+
         let movegen = EngineMoveGen::new();
         let mut moves = movegen.generate_moves_with_ordering(
             board,
@@ -702,18 +831,12 @@ impl AlphaBetaEngine {
             Some(&*self.history_table),
         );
 
-        let mut best_score = -INF_SCORE;
-        let mut best_move_this_node = None;
-        let mut tt_flag = TTFlag::UpperBound;
-        let mut legal_moves_count = 0usize;
-
-        let full_depth = depth.saturating_sub(1) + u8::from(in_check);
-        let mut quiet_moves_tried = [(0usize, 0usize); 64];
-        let mut quiet_count = 0usize;
-
         let mut move_idx = 0;
         while let Some(mv) = moves.pick_next_best(move_idx) {
             move_idx += 1;
+            if Some(mv) == tt_move_searched {
+                continue;
+            }
             let Some((piece, captured, from_sq, to_sq)) = board.apply_move_board_only(&mv) else {
                 continue;
             };
@@ -732,6 +855,22 @@ impl AlphaBetaEngine {
 
             legal_moves_count += 1;
             let is_capture = captured.is_some();
+            let is_tactical = in_check || is_capture || is_pv || beta.abs() >= MATE_THRESHOLD;
+
+            // Tactical Guardrails: Late Move Pruning for quiet moves at shallow depth
+            if !is_tactical && depth <= 3 && legal_moves_count >= 1 {
+                let lmp_threshold = 4 + (depth as usize) * 3;
+                let is_killer = killers.contains(&Some(mv));
+                let is_cm = countermove == Some(mv);
+                if quiet_count >= lmp_threshold && !is_killer && !is_cm {
+                    let gives_check = is_in_check(board, turn.opposite());
+                    if !gives_check {
+                        board.undo_move_board_only(&mv, piece, captured);
+                        continue;
+                    }
+                }
+            }
+
             if !is_capture && quiet_count < 64 {
                 if let Some(slot) = quiet_moves_tried.get_mut(quiet_count) {
                     *slot = (from_sq, to_sq);
@@ -1197,4 +1336,32 @@ impl Searcher for AlphaBetaEngine {
             )
         })
     }
+}
+
+/// Runs performance testing (Perft) to depth `depth`, traversing all legal Xiangqi moves.
+/// Measures pure move generation, make/undo move, and check/flying general validation speed.
+#[must_use]
+pub fn perft(board: &mut Board, turn: Color, depth: u8) -> u64 {
+    if depth == 0 {
+        return 1;
+    }
+    let movegen = EngineMoveGen::new();
+    let moves = movegen.generate_moves(board, turn, None);
+    let mut nodes = 0;
+    for i in 0..moves.len() {
+        if let Some(mv) = moves.moves.get(i) {
+            if let Some((piece, captured, from_sq, _to_sq)) = board.apply_move_board_only(mv) {
+                let is_flying = if could_cause_flying_general(board, piece.piece_type, from_sq) {
+                    is_flying_general(board)
+                } else {
+                    false
+                };
+                if !is_in_check(board, turn) && !is_flying {
+                    nodes += perft(board, turn.opposite(), depth.saturating_sub(1));
+                }
+                board.undo_move_board_only(mv, piece, captured);
+            }
+        }
+    }
+    nodes
 }

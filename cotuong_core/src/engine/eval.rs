@@ -42,6 +42,9 @@ impl SimpleEvaluator {
 impl Evaluator for SimpleEvaluator {
     #[inline]
     fn evaluate(&self, board: &Board) -> i32 {
+        if self.config.nnue_weight == 0 {
+            return 0;
+        }
         let nnue_weights = match &self.weights {
             Some(w) => w.as_ref(),
             None => NnueWeights::get(),
