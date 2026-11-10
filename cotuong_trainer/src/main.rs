@@ -38,6 +38,7 @@ pub const FLOAT_FILE_SIZE: usize = 8
 
 pub const DEFAULT_FLOAT_MODEL: &str = "checkpoints/model_latest.f32";
 pub const DEFAULT_QUANTIZED_MODEL: &str = "cotuong_core/assets/default.nnue";
+pub const PUBLIC_QUANTIZED_MODEL: &str = "public/assets/default.nnue";
 
 #[derive(Clone)]
 pub struct FloatNnue {
@@ -2348,20 +2349,44 @@ fn run_quantize_mode(input_path: &str, output_path: &str) {
         println!("  1️⃣  Không lượng tử (Float 32-bit)   : {f32_str} ({size_mb:.2} MB)");
     }
 
-    // 2. Xuất mô hình NNUE Chuẩn lượng tử hóa (default.nnue) để WASM engine nhúng trực tiếp
+    // 2. Export standard quantized NNUE model to primary output path (e.g. cotuong_core/assets/default.nnue)
     if let Err(e) = model.export_quantized(output_path) {
-        eprintln!("❌ Lỗi xuất mô hình lượng tử hóa NNUE Chuẩn: {e}");
+        eprintln!("❌ Lỗi xuất mô hình lượng tử hóa NNUE Chuẩn tại '{output_path}': {e}");
     } else {
         #[allow(clippy::cast_precision_loss)]
         let size_mb = std::fs::metadata(output_path)
             .map(|m| m.len() as f64 / 1_048_576.0)
             .unwrap_or(0.0);
-        println!("  2️⃣  Mô Hình NNUE Chuẩn (SIMD i16/i8): {output_path} ({size_mb:.2} MB)");
+        println!("  2️⃣  Mô Hình NNUE Chuẩn (Core Native/WASM): {output_path} ({size_mb:.2} MB)");
+    }
+
+    // 3. Export synchronized copy to secondary path (public/assets/default.nnue for Vite web client)
+    let secondary_path = if output_path == DEFAULT_QUANTIZED_MODEL {
+        PUBLIC_QUANTIZED_MODEL
+    } else if output_path == PUBLIC_QUANTIZED_MODEL {
+        DEFAULT_QUANTIZED_MODEL
+    } else {
+        PUBLIC_QUANTIZED_MODEL
+    };
+
+    if let Some(parent) = std::path::Path::new(secondary_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    if let Err(e) = model.export_quantized(secondary_path) {
+        eprintln!("❌ Lỗi xuất bản sao mô hình lượng tử hóa sang '{secondary_path}': {e}");
+    } else {
+        #[allow(clippy::cast_precision_loss)]
+        let size_mb = std::fs::metadata(secondary_path)
+            .map(|m| m.len() as f64 / 1_048_576.0)
+            .unwrap_or(0.0);
+        println!(
+            "  3️⃣  Mô Hình NNUE Chuẩn (Web Public Assets): {secondary_path} ({size_mb:.2} MB)"
+        );
     }
 
     println!(
-        "✅ Đã lượng tử hóa thành công mô hình NNUE chuẩn vào: {}",
-        target_dir.display()
+        "✅ Đã lượng tử hóa thành công mô hình NNUE chuẩn vào cả 2 vị trí: '{output_path}' và '{secondary_path}'"
     );
 }
 
