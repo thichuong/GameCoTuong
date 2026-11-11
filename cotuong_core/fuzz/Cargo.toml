@@ -1,0 +1,31 @@
+[package]
+name = "cotuong_core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+cotuong_core = { path = ".." }
+serde_json = "1.0"
+
+[[bin]]
+name = "fuzz_fen"
+path = "fuzz_targets/fuzz_fen.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_uci"
+path = "fuzz_targets/fuzz_uci.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_json"
+path = "fuzz_targets/fuzz_json.rs"
+test = false
+doc = false
