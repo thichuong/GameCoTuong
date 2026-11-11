@@ -6,13 +6,16 @@
 graph TB
     subgraph Frontend["React 18 + TypeScript Frontend (src/)"]
         direction TB
-        App["App.tsx<br/>(State, 4 Game Modes, Responsive Layout & Worker Orchestrator)"]
-        Canvas["BoardCanvas.tsx<br/>(1:1 Responsive HTML5 Canvas & Puzzle Drag-and-Drop)"]
-        Trays["CapturedPiecesTray.tsx<br/>(Captured Pieces, Material Advantage & Setup Piece Palette)"]
-        Controls["ControlsArea.tsx & PuzzleSetupArea.tsx<br/>(Modes, Puzzle Tools, FEN, Side, Difficulty)"]
+        App["App.tsx<br/>(Root Layout Orchestrator)"]
+        Hooks["hooks/<br/>(useXiangqiGame.ts & useResponsiveLayout.ts)"]
+        Header["TopHeader.tsx<br/>(Brand, Layout Switcher, Check & Turn Status)"]
+        PlayArea["BoardPlayArea.tsx & GameOverOverlay.tsx<br/>(Unified Sides/Stacked Board + Trays Container)"]
+        Canvas["BoardCanvas.tsx & board/<br/>(1:1 Canvas, boardCoords.ts, boardRenderer.ts)"]
+        Trays["CapturedPiecesTray.tsx & tray/<br/>(Player Cards, Material Advantage & MiniWoodenPiece.tsx)"]
+        Controls["ControlsArea.tsx, PuzzleSetupArea.tsx, controls/ & puzzle/<br/>(Modes, PuzzleSetupToolbar, FenModal, PuzzlePiecePalette, PuzzleMatchSettings)"]
         Overlay["ThinkingIndicator.tsx<br/>(Board HUD Overlay)"]
         Log["LogPanel.tsx<br/>(Collapsible Bottom Dock & Drawer)"]
-        Config["ConfigModal.tsx<br/>(Red/Black EngineConfig: TT, Mate, NNUE Weight, Threads)"]
+        Config["ConfigModal.tsx & config/<br/>(configPresets.ts, ConfigPresetsSection, ConfigParamsSection, ConfigArchitectureSection)"]
         Pool["aiPoolManager.ts & ai.worker.ts<br/>(Multi-Threaded Worker Pool, SharedArrayBuffer & IndexedDB Model Cache)"]
     end
 
@@ -31,14 +34,17 @@ graph TB
         TrainMain["main.rs / dataset.rs / protocol.rs<br/>(Supervised, Teacher Distillation UCCI/UCI, Sparring, Quantizer)"]
     end
 
-    App --> Canvas
-    App --> Trays
+    App --> Hooks
+    App --> Header
     App --> Controls
-    App --> Overlay
+    App --> PlayArea
     App --> Log
     App --> Config
-    App -->|"Main Thread Calls"| WGS
-    App <-->|"Async Pool Search"| Pool
+    PlayArea --> Canvas
+    PlayArea --> Trays
+    PlayArea --> Overlay
+    Hooks -->|"Main Thread Calls"| WGS
+    Hooks <-->|"Async Pool Search"| Pool
     Pool -->|"Worker Thread Calls"| WE
     Pool -->|"Reconstruct State"| WGS
     WGS --> Logic
@@ -89,18 +95,41 @@ GameCoTuong/
 │       ├── main.rs             # FloatNnue, huấn luyện giám sát, chưng cất, đấu tập & xuất model
 │       ├── dataset.rs          # Đọc kỳ phổ, trích xuất đặc trưng HalfKP
 │       └── protocol.rs         # Giao tiếp UCCI/UCI với engine ngoài (Pikafish, Fairy-Stockfish)
-├── src/                        # Giao diện React 18 + TypeScript
+├── src/                        # Giao diện React 18 + TypeScript (Kiến trúc Module hóa)
 │   ├── main.tsx                # Điểm khởi chạy React DOM
-│   ├── App.tsx                 # Component điều phối chính (4 chế độ chơi, bố cục thích ứng, Worker Pool)
+│   ├── App.tsx                 # Root Layout Orchestrator kết nối Hooks và các khối giao diện chính
 │   ├── App.css                 # Tailwind CSS v4 & custom animations
+│   ├── hooks/
+│   │   ├── useXiangqiGame.ts   # Custom hook quản lý WasmGameState, AiPoolManager, 4 chế độ chơi & Cờ Thế
+│   │   └── useResponsiveLayout.ts # Custom hook tính toán hướng bố cục (sides/stacked) & kích thước bàn cờ
 │   ├── components/
-│   │   ├── BoardCanvas.tsx     # Bàn cờ HTML5 Canvas 1:1, hỗ trợ kéo-thả xếp cờ thế & xoay chiều
-│   │   ├── CapturedPiecesTray.tsx # Khay quân đã ăn, ưu thế điểm & kho quân kéo-thả ở chế độ Cờ Thế
-│   │   ├── ControlsArea.tsx    # Thanh chọn chế độ, công cụ cờ thế, cầm quân, độ khó & tác vụ
-│   │   ├── PuzzleSetupArea.tsx # Khu vực thiết lập thế cờ, kiểm tra hợp lệ & nạp FEN/thế cờ mẫu
-│   │   ├── ThinkingIndicator.tsx # HUD hiển thị tiến trình suy nghĩ của AI trên bàn cờ
-│   │   ├── LogPanel.tsx        # Thanh biên bản thu gọn ở đáy & ngăn kéo trượt (Drawer)
-│   │   └── ConfigModal.tsx     # Cửa sổ tinh chỉnh EngineConfig (TT, Mate, NNUE Weight, Đa luồng)
+│   │   ├── TopHeader.tsx       # Thanh tiêu đề, nút chuyển bố cục (Tự động/Hai bên/Trên dưới), báo chiếu & lượt đi
+│   │   ├── BoardPlayArea.tsx   # Khung bố cục thích ứng hợp nhất (sides & stacked) cho Bàn cờ + 2 Khay quân
+│   │   ├── GameOverOverlay.tsx # Lớp phủ thông báo Chiếu bí (Checkmate) / Hòa cờ (Stalemate) trên bàn cờ
+│   │   ├── BoardCanvas.tsx     # Component HTML5 Canvas 1:1 xử lý sự kiện chuột, kéo-thả & hiển thị bàn cờ
+│   │   ├── CapturedPiecesTray.tsx # Khay quân đã ăn, ưu thế vật chất & kho quân kéo-thả ở chế độ Cờ Thế
+│   │   ├── ControlsArea.tsx    # Thanh điều khiển chế độ chơi, cầm quân, độ khó & tác vụ ván đấu
+│   │   ├── PuzzleSetupArea.tsx # Trình biên tập thế cờ chuyên dụng, kiểm tra hợp lệ & nạp thế cờ mẫu
+│   │   ├── ThinkingIndicator.tsx # HUD hiển thị tiến trình suy nghĩ của AI ngay trung tâm bàn cờ
+│   │   ├── LogPanel.tsx        # Thanh biên bản thu gọn ở đáy & ngăn kéo trượt (Slide-Up Drawer)
+│   │   ├── ConfigModal.tsx     # Cửa sổ tinh chỉnh EngineConfig cho AI Đỏ / AI Đen
+│   │   ├── board/
+│   │   │   ├── boardCoords.ts  # Hằng số hình học bàn cờ, quy đổi tọa độ logic ↔ hiển thị & ký tự quân cờ
+│   │   │   ├── boardCoords.test.ts # Unit tests kiểm thử hệ tọa độ và lật góc nhìn 180°
+│   │   │   └── boardRenderer.ts # Các hàm vẽ Canvas 2D (mặt bàn gỗ, sông, Cửu Cung, quân cờ 3D, con trỏ chuột)
+│   │   ├── config/
+│   │   │   ├── configPresets.ts # Danh sách PRESETS lọc theo phần cứng, chuẩn hóa JSON & định dạng RAM
+│   │   │   ├── ConfigPresetsSection.tsx # Lưới chọn nhanh cấu hình mẫu (Presets)
+│   │   │   ├── ConfigParamsSection.tsx  # Các thanh trượt tinh chỉnh tt_size_mb, mate_score, nnue_weight, threads
+│   │   │   └── ConfigArchitectureSection.tsx # Thông tin kiến trúc Dual-Head HalfKP v3 & xem trước JSON payload
+│   │   ├── controls/
+│   │   │   ├── FenModal.tsx    # Hộp thoại Nhập / Xuất chuỗi FEN dùng chung cho ControlsArea & PuzzleSetupArea
+│   │   │   └── PuzzleSetupToolbar.tsx # Thanh công cụ xếp cờ thế & dải báo lỗi hợp lệ (PuzzleValidationStrip)
+│   │   ├── puzzle/
+│   │   │   ├── PuzzlePiecePalette.tsx # Kho chọn quân cờ Đỏ/Đen & công cụ tẩy xóa quân trên bàn cờ
+│   │   │   └── PuzzleMatchSettings.tsx # Khối tùy chọn bên đi tiên, thể thức đấu & độ khó AI khi giải thế
+│   │   └── tray/
+│   │       └── MiniWoodenPiece.tsx # Quân cờ gỗ thu nhỏ hỗ trợ kéo-thả/nhấp chọn & hàm tính nhãn vai trò
 │   ├── workers/
 │   │   ├── aiPoolManager.ts    # Điều phối Web Worker Pool đa luồng, SharedArrayBuffer & Lazy SMP
 │   │   └── ai.worker.ts        # Web Worker chạy tìm kiếm AI bất đồng bộ & nạp NNUE động
@@ -301,31 +330,33 @@ Crate `cotuong_trainer` cung cấp công cụ dòng lệnh tốc độ cao (sử
 
 ## 4. Giao diện React + TypeScript (`src/`)
 
-### 4.1. Luồng tương tác giữa UI, WASM và Multi-Threaded Worker Pool
+### 4.1. Luồng tương tác giữa UI, Custom Hooks, WASM và Multi-Threaded Worker Pool
 
 ```mermaid
 sequenceDiagram
     participant User as Người chơi
-    participant App as App.tsx (Main Thread)
+    participant UI as App.tsx / BoardPlayArea.tsx
+    participant Hook as useXiangqiGame.ts (Main Thread)
     participant WGS as WasmGameState
     participant Pool as AiPoolManager (aiPoolManager.ts)
     participant Worker as ai.worker.ts (Workers 0..N-1)
     participant WE as WasmEngine (in Worker)
 
-    User->>App: Click chọn quân & ô đích trên BoardCanvas
-    App->>WGS: make_move(from_r, from_c, to_r, to_c)
-    WGS-->>App: MoveResultDto { success, captured, in_check }
-    App->>App: Phát âm thanh, cập nhật khay quân ăn được & giao diện
+    User->>UI: Click chọn quân & ô đích trên BoardCanvas
+    UI->>Hook: handleSquareClick(row, col)
+    Hook->>WGS: make_move(from_r, from_c, to_r, to_c)
+    WGS-->>Hook: MoveResultDto { success, captured, in_check }
+    Hook->>UI: Phát âm thanh, cập nhật khay quân ăn được & giao diện
 
-    Note over App,Worker: Đến lượt Máy (AI Turn)
-    App->>WGS: get_book_move() & is_move_legal(...)
+    Note over Hook,Worker: Đến lượt Máy (AI Turn)
+    Hook->>WGS: get_book_move() & is_move_legal(...)
     alt Có nước đi hợp lệ trong Sách khai cuộc (Standard Game)
-        WGS-->>App: MoveDto
-        App->>WGS: make_move(...) + annotate_last_move("📖 Khai cuộc (Book Move)")
+        WGS-->>Hook: MoveDto
+        Hook->>WGS: make_move(...) + annotate_last_move("📖 Khai cuộc (Book Move)")
     else Không có trong sách khai cuộc (hoặc đang ở chế độ Giải Cờ Thế)
-        App->>WGS: to_json() & to_fen()
-        App->>Pool: search({ state, stateJson, fen, timeLimitMs, configJson, threads })
-        Note over App: Hiển thị ThinkingIndicator HUD trên bàn cờ
+        Hook->>WGS: to_json() & to_fen()
+        Hook->>Pool: search({ state, stateJson, fen, timeLimitMs, configJson, threads })
+        Note over UI: Hiển thị ThinkingIndicator HUD trên bàn cờ
         Pool->>Pool: adjustPoolSize(threads) & ensureSharedBuffer(tt_size_mb * threads)
         par Cooperative Multi-Search Lazy SMP (Thread 0..N-1)
             Pool->>Worker: postMessage({ type: 'SEARCH', stateJson, threadId, sharedBuffer, ... })
@@ -334,22 +365,28 @@ sequenceDiagram
             WE-->>Worker: SearchResultDto { move, stats }
             Worker-->>Pool: postMessage({ type: 'SEARCH_SUCCESS', result, threadId })
         end
-        Pool-->>App: Tổng hợp nodes, maxDepth & chọn nước đi tối ưu nhất
-        App->>WGS: make_move(...) + annotate_last_move("🤖 Độ sâu, Nodes, Thời gian")
-        App->>App: Ẩn ThinkingIndicator, cập nhật bàn cờ & phát âm thanh
+        Pool-->>Hook: Tổng hợp nodes, maxDepth & chọn nước đi tối ưu nhất
+        Hook->>WGS: make_move(...) + annotate_last_move("🤖 Độ sâu, Nodes, Thời gian")
+        Hook->>UI: Ẩn ThinkingIndicator, cập nhật bàn cờ & phát âm thanh
     end
 ```
 
-### 4.2. Thiết kế các Component & Tiện ích chính
+### 4.2. Thiết kế các Hooks, Component & Tiện ích chính
 
-| Component / Module | Vai trò & Đặc điểm kỹ thuật |
+| Module / Component | Vai trò & Đặc điểm kỹ thuật |
 |---|---|
-| `BoardCanvas.tsx` | Bàn cờ Canvas luôn giữ tỉ lệ vuông **1:1**, tự động xoay 180° khi người chơi chọn cầm quân Đen, hiển thị con trỏ hình quân cờ khi đang chọn quân, hỗ trợ kéo-thả (Drag & Drop) và click chuột phải để xóa quân trong chế độ Xếp Cờ Thế. |
-| `CapturedPiecesTray.tsx` | Hiển thị danh sách quân đối phương đã bị ăn kèm số lượng, tổng điểm ăn được và huy hiệu ưu thế vật chất (`+ điểm`). Tự động chuyển đổi giữa thanh dọc hai bên bàn cờ (`sides`) và thanh ngang trên/dưới (`stacked`). Khi ở giai đoạn Xếp Cờ Thế (`setup`), khay này hiển thị số quân còn lại bên ngoài bàn cờ để người dùng kéo-thả hoặc nhấp đặt lên bàn. |
-| `ControlsArea.tsx` & `PuzzleSetupArea.tsx` | Quản lý 4 chế độ chơi (`Người đấu với Máy`, `Máy đấu với Máy`, `Hai người chơi`, `Giải Cờ Thế`), chọn thế cờ mẫu (`CLASSIC_PUZZLES`), kiểm tra hợp lệ thế cờ (`validateBoardSetup`), hộp thoại Nhập/Xuất FEN, chọn bên đi tiên và độ khó AI. |
+| `App.tsx` | Component gốc gọn nhẹ (~180 dòng) kết nối `useResponsiveLayout`, `useXiangqiGame` với `TopHeader`, `ControlsArea`, `BoardPlayArea`, `LogPanel` và `ConfigModal`. |
+| `hooks/useXiangqiGame.ts` | Quản lý vòng đời `WasmGameState` và `AiPoolManager`, điều phối lượt đi AI (Book Move & Worker Pool), các thao tác Xếp/Giải Cờ Thế và lịch sử nước đi. |
+| `hooks/useResponsiveLayout.ts` | Tự động lắng nghe kích thước cửa sổ (`windowDims`), xác định hướng bố cục (`sides` / `stacked`) và tính kích thước bàn cờ vuông tối ưu (`boardSize`). |
+| `TopHeader.tsx` | Thanh tiêu đề trên cùng hiển thị thương hiệu, bộ chuyển đổi bố cục nhanh (`Tự động` / `Hai bên` / `Trên dưới`), cảnh báo `Chiếu tướng!` và huy hiệu bên đang giữ lượt. |
+| `BoardPlayArea.tsx` & `GameOverOverlay.tsx` | Hợp nhất cách hiển thị bàn cờ trung tâm cùng 2 khay `CapturedPiecesTray` cho cả chế độ ngang (`sides`) và dọc (`stacked`), đồng thời hiển thị `ThinkingIndicator` và lớp phủ kết thúc ván đấu (`GameOverOverlay`). |
+| `BoardCanvas.tsx` & `board/*` | Tách biệt rõ ràng: `boardCoords.ts` xử lý hình học & xoay góc nhìn 180°, `boardRenderer.ts` đảm nhiệm vẽ Canvas 2D HiDPI (mặt bàn gỗ, sông, Cửu Cung, quân cờ 3D, tạo con trỏ chuột `getPieceCursorStyle`), và `BoardCanvas.tsx` quản lý sự kiện chuột / kéo-thả. |
+| `CapturedPiecesTray.tsx` & `tray/MiniWoodenPiece.tsx` | Hiển thị danh sách quân đối phương đã bị ăn (hoặc quân còn lại ngoài bàn khi xếp cờ thế) qua các quân cờ gỗ thu nhỏ (`MiniWoodenPiece`), kèm tổng điểm ăn được và ưu thế vật chất (`+ điểm`). |
+| `ControlsArea.tsx` & `controls/*` | Quản lý 4 chế độ chơi, cầm quân, độ khó AI; tách riêng thanh công cụ xếp cờ thế (`PuzzleSetupToolbar.tsx`) và hộp thoại `FenModal.tsx` dùng chung. |
+| `PuzzleSetupArea.tsx` & `puzzle/*` | Trình thiết lập thế cờ độc lập, chia thành bảng chọn quân Đỏ/Đen (`PuzzlePiecePalette.tsx`), cài đặt thông số trận đấu (`PuzzleMatchSettings.tsx`) và `FenModal.tsx`. |
 | `ThinkingIndicator.tsx` | Hiển thị lớp phủ HUD trực tiếp ở trung tâm bàn cờ khi AI đang tính toán: đồng hồ đếm thời gian thực, thanh tiến trình, cấp độ khó và thông số độ sâu / số nút duyệt. |
 | `LogPanel.tsx` | Thanh biên bản thu gọn ở dưới bàn cờ; khi nhấn vào sẽ mở ngăn kéo trượt (Slide-Up Drawer) hiển thị chi tiết từng hiệp đấu, quân bị ăn, thống kê AI và nút xuất CSV. |
-| `ConfigModal.tsx` | Cho phép tinh chỉnh độc lập hoặc đồng bộ cấu hình `EngineConfig` cho **AI Đỏ** và **AI Đen** (`tt_size_mb` mỗi luồng, `mate_score`, `nnue_weight`, `threads` đa luồng), áp dụng nhanh các Preset lọc tự động theo phần cứng thiết bị, và chỉ tái cấp phát bộ nhớ khi nhấn **"Áp Dụng & Đóng"**. |
+| `ConfigModal.tsx` & `config/*` | Tách thành `configPresets.ts` (lọc Preset theo phần cứng & kiểm tra JSON), `ConfigPresetsSection.tsx`, `ConfigParamsSection.tsx` (`tt_size_mb`, `mate_score`, `nnue_weight`, `threads`) và `ConfigArchitectureSection.tsx` (kiến trúc NNUE & JSON preview). |
 | `AiPoolManager` & `modelStorage.ts` | Quản lý nhóm Web Worker đa luồng (`1–16` luồng), cấp phát phân vùng `SharedArrayBuffer` cho từng Worker, tự động hồi sinh (respawn) Worker nếu gặp lỗi, và lưu đệm trọng số `/assets/default.nnue` trong IndexedDB. |
 
 ---

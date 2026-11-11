@@ -5,40 +5,41 @@ description: Guidelines for modifying the WebAssembly/Polyfill bridge, Web Worke
 
 # WASM Bridge, Polyfill & Worker Integration Skill
 
-> **Note**: For visual styling, Tailwind CSS v4 rules, 1:1 `BoardCanvas` rendering, and responsive `sides`/`stacked` layout guidelines, see the dedicated **`react_ui_design`** skill (`.agent/skills/react_ui_design/SKILL.md`).
+> **Note**: For visual styling, Tailwind CSS v4 rules, 1:1 `BoardCanvas` rendering (`boardCoords.ts` / `boardRenderer.ts`), and responsive `sides`/`stacked` layout guidelines (`useResponsiveLayout.ts` / `BoardPlayArea.tsx`), see the dedicated **`react_ui_design`** skill (`.agent/skills/react_ui_design/SKILL.md`).
 
 ## Scope
 
 This skill covers the WebAssembly/Polyfill data bridge, multi-threaded Web Worker pool, IndexedDB model caching, and state synchronization layer:
 - `cotuong_core/src/wasm.rs` – `#[wasm_bindgen]` exports (`WasmGameState`, `WasmEngine`) and DTO serialization
-- `src/wasm/cotuong_core.ts` & `src/wasm/enginePolyfill.ts` – WASM bridge entry and pure TypeScript fallback/polyfill implementation (`PolyfillGameState`, `PolyfillEngine`)
+- `src/wasm/cotuong_core.js` & `src/wasm/enginePolyfill.ts` – WASM bridge entry and pure TypeScript fallback/polyfill implementation (`PolyfillGameState`, `PolyfillEngine`)
 - `src/workers/aiPoolManager.ts` & `src/workers/ai.worker.ts` – Multi-threaded Web Worker pool (`AiPoolManager`) with `SharedArrayBuffer` partitioning and background Web Workers running `WasmEngine` off the main thread
 - `src/utils/modelStorage.ts` – IndexedDB caching and streaming manager (`getOrFetchNnueModel`) for `/assets/default.nnue`
 - `src/types/game.ts` & `src/types/config.test.ts` – Shared TypeScript DTO interfaces (`Piece`, `Square`, `GameMode`, `PuzzleStage`, `PuzzleSubMode`, `Difficulty`, `GameStatus`, `HistoryRecord`, `SearchStats`, `EngineConfig`)
-- `src/App.tsx` – Game state synchronization (`syncGameState`), opening book check, `AiPoolManager` lifecycle, and fallback move recovery
+- `src/hooks/useXiangqiGame.ts` & `src/App.tsx` – Game state synchronization (`syncGameState`), opening book check, `AiPoolManager` lifecycle, and fallback move recovery
+- `src/components/ConfigModal.tsx` & `src/components/config/*` – EngineConfig UI, preset filtering (`configPresets.ts`), and JSON import sanitization (`sanitizeImportedConfig`)
 - `src/utils/fen.ts` & `src/utils/export.ts` – FEN serialization/validation and CSV/JSON data export utilities
 
 ## Architecture Context
 
-### Multi-Threaded Web Worker Pool (`App.tsx` ↔ `aiPoolManager.ts` ↔ `ai.worker.ts`)
+### Multi-Threaded Web Worker Pool (`useXiangqiGame.ts` ↔ `aiPoolManager.ts` ↔ `ai.worker.ts`)
 ```
-App (Main Thread)                 AiPoolManager                   ai.worker.ts (Worker Pool 0..N-1)
-       |                                |                                         |
-       |── 1. Check get_book_move()     |                                         |
-       |      (standard game only)      |                                         |
-       |── 2. pool.search(req) ────────→|── Adjust pool size (1..16 threads)      |
-       |                                |── Allocate SharedArrayBuffer            |
-       |                                |   (tt_size_mb * threads)                |
-       |                                |── postMessage({ type: 'SEARCH',         |
-       |                                |     stateJson, fen, timeLimitMs,        |
-       |                                |     configJson, threadId, sharedBuffer  |
-       |                                |   }) ──────────────────────────────────→|── ensureInitialized(configJson, threadId)
-       |                                |                                         |── ensureModelLoaded() via IndexedDB
-       |                                |                                         |   (/assets/default.nnue -> load_weights_bytes)
-       |                                |                                         |── WasmEngine.search() (Cooperative Lazy SMP)
-       |                                |←─ postMessage({ type: 'SEARCH_SUCCESS' })|
-       |←─ Aggregate stats & best move ─|                                         |
-       |── 3. state.make_move(...)      |                                         |
+useXiangqiGame (Main Thread)      AiPoolManager                   ai.worker.ts (Worker Pool 0..N-1)
+        |                                |                                         |
+        |── 1. Check get_book_move()     |                                         |
+        |      (standard game only)      |                                         |
+        |── 2. pool.search(req) ────────→|── Adjust pool size (1..16 threads)      |
+        |                                |── Allocate SharedArrayBuffer            |
+        |                                |   (tt_size_mb * threads)                |
+        |                                |── postMessage({ type: 'SEARCH',         |
+        |                                |     stateJson, fen, timeLimitMs,        |
+        |                                |     configJson, threadId, sharedBuffer  |
+        |                                |   }) ──────────────────────────────────→|── ensureInitialized(configJson, threadId)
+        |                                |                                         |── ensureModelLoaded() via IndexedDB
+        |                                |                                         |   (/assets/default.nnue -> load_weights_bytes)
+        |                                |                                         |── WasmEngine.search() (Cooperative Lazy SMP)
+        |                                |←─ postMessage({ type: 'SEARCH_SUCCESS' })|
+        |←─ Aggregate stats & best move ─|                                         |
+        |── 3. state.make_move(...)      |                                         |
 ```
 
 ### WASM ↔ Polyfill Parity (`wasm.rs` & `enginePolyfill.ts`)
@@ -63,10 +64,11 @@ Both `WasmEngine` and `PolyfillEngine` expose:
 1. Add the `#[wasm_bindgen]` method in `cotuong_core/src/wasm.rs`
 2. Add the matching method in `src/wasm/enginePolyfill.ts` (`PolyfillGameState` / `PolyfillEngine`) and add a unit test in `src/wasm/enginePolyfill.test.ts`
 3. Update TypeScript interfaces in `src/types/game.ts` if new DTOs are returned
-4. Rebuild WASM (`npm run build:wasm`) if Rust toolchain is active, and verify with `npm test && npm run lint && npm run build`
+4. Consume the new method in `src/hooks/useXiangqiGame.ts` if needed by the React UI
+5. Rebuild WASM (`npm run build:wasm`) if Rust toolchain is active, and verify with `npm test && npm run lint && npm run build`
 
 ### Updating `EngineConfig` schema across the bridge
 1. Update `EngineConfig` struct in `cotuong_core/src/engine/config.rs`
 2. Update `EngineConfig` interface and `DEFAULT_ENGINE_CONFIG` in `src/types/game.ts`
-3. Update validation/controls in `src/components/ConfigModal.tsx` and tests in `src/types/config.test.ts`
+3. Update presets and JSON validation in `src/components/config/configPresets.ts`, controls in `src/components/config/ConfigParamsSection.tsx`, modal container in `src/components/ConfigModal.tsx`, and tests in `src/types/config.test.ts`
 4. Run `npm test && npm run lint && npm run build`

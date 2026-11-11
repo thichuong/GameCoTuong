@@ -12,12 +12,6 @@ import {
   Gauge,
   Pencil,
   Puzzle,
-  Trash2,
-  FileCode,
-  ShieldAlert,
-  Copy,
-  Check,
-  LayoutGrid,
 } from 'lucide-react';
 import type {
   Difficulty,
@@ -33,8 +27,13 @@ import {
   boardToFen,
   fenToBoard,
 } from '../utils/fen.js';
+import { FenModal } from './controls/FenModal.js';
+import {
+  PuzzleSetupToolbar,
+  PuzzleValidationStrip,
+} from './controls/PuzzleSetupToolbar.js';
 
-interface ControlsAreaProps {
+export interface ControlsAreaProps {
   gameMode: GameMode;
   setGameMode: (mode: GameMode) => void;
   playerSide: PieceColor;
@@ -57,7 +56,11 @@ interface ControlsAreaProps {
   puzzleFirstTurn?: PieceColor;
   setPuzzleFirstTurn?: (turn: PieceColor) => void;
   board?: Square[];
-  onUpdatePuzzleBoard?: (squares: Square[], turn?: PieceColor, recommendedMode?: PuzzleSubMode) => void;
+  onUpdatePuzzleBoard?: (
+    squares: Square[],
+    turn?: PieceColor,
+    recommendedMode?: PuzzleSubMode
+  ) => void;
   onClearPuzzleBoard?: () => void;
   onResetStandardBoard?: () => void;
   onStartSolving?: () => void;
@@ -100,9 +103,6 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
   const effectiveSubMode = isPuzzleMode ? puzzleSubMode : gameMode;
 
   const [isFenModalOpen, setIsFenModalOpen] = useState(false);
-  const [fenInput, setFenInput] = useState('');
-  const [fenError, setFenError] = useState<string | null>(null);
-  const [copiedFen, setCopiedFen] = useState(false);
 
   const validation = React.useMemo(
     () => (isPuzzleSetup ? validateBoardSetup(board) : { valid: true, errors: [] }),
@@ -125,23 +125,10 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
     }
   };
 
-  const handleApplyFen = () => {
+  const handleApplyFen = (fenInput: string) => {
     if (!onUpdatePuzzleBoard) return;
-    try {
-      setFenError(null);
-      const { squares, turn } = fenToBoard(fenInput);
-      onUpdatePuzzleBoard(squares, turn);
-      setIsFenModalOpen(false);
-    } catch (err: unknown) {
-      setFenError(err instanceof Error ? err.message : 'FEN không hợp lệ');
-    }
-  };
-
-  const handleCopyFen = () => {
-    navigator.clipboard.writeText(currentFen).then(() => {
-      setCopiedFen(true);
-      setTimeout(() => setCopiedFen(false), 2000);
-    });
+    const { squares, turn } = fenToBoard(fenInput);
+    onUpdatePuzzleBoard(squares, turn);
   };
 
   return (
@@ -269,112 +256,16 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           {isPuzzleSetup ? (
-            <>
-              {/* Start Solving Button */}
-              <button
-                type="button"
-                onClick={onStartSolving}
-                disabled={!validation.valid}
-                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 shadow-sm ${
-                  validation.valid
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                    : 'bg-stone-800 text-stone-500 border border-stone-700/60 cursor-not-allowed opacity-60'
-                }`}
-              >
-                <Play className="w-3.5 h-3.5 fill-current" />
-                <span>Bắt đầu giải</span>
-              </button>
-
-              {/* First Turn Toggle */}
-              {setPuzzleFirstTurn && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPuzzleFirstTurn(puzzleFirstTurn === 'red' ? 'black' : 'red')
-                  }
-                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                    puzzleFirstTurn === 'red'
-                      ? 'bg-red-950/70 border-red-500/60 text-red-200 hover:bg-red-900/60'
-                      : 'bg-stone-800 border-amber-400/60 text-amber-200 hover:bg-stone-700'
-                  }`}
-                  title="Đổi bên đi nước đầu tiên khi giải thế"
-                >
-                  <span
-                    className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-display-serif font-bold ${
-                      puzzleFirstTurn === 'red'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-stone-900 text-amber-300 border border-amber-400/40'
-                    }`}
-                  >
-                    {puzzleFirstTurn === 'red' ? '帥' : '將'}
-                  </span>
-                  <span>{puzzleFirstTurn === 'red' ? 'Đỏ đi tiên' : 'Đen đi tiên'}</span>
-                </button>
-              )}
-
-              {/* Classic Puzzle Presets */}
-              <select
-                aria-label="Thế cờ mẫu"
-                onChange={(e) => {
-                  if (e.target.value) {
-                    handleLoadPreset(e.target.value);
-                    e.target.value = '';
-                  }
-                }}
-                defaultValue=""
-                className="bg-[#26201C] text-amber-300 text-xs font-semibold rounded-lg px-2.5 py-2 border border-amber-500/40 hover:border-amber-400 focus:outline-none transition-colors cursor-pointer shrink-0"
-              >
-                <option value="" disabled>
-                  📜 Thế cờ mẫu...
-                </option>
-                {CLASSIC_PUZZLES.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-
-              {/* Clear Board (Keep 2 Generals) */}
-              {onClearPuzzleBoard && (
-                <button
-                  type="button"
-                  onClick={onClearPuzzleBoard}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#26201C] hover:bg-[#312923] text-stone-200 border border-stone-700/80 transition-all cursor-pointer whitespace-nowrap shrink-0"
-                  title="Xóa hết quân, chỉ để lại 2 Tướng"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-stone-400" />
-                  <span>Xóa trắng</span>
-                </button>
-              )}
-
-              {/* Standard 32-piece Board */}
-              {onResetStandardBoard && (
-                <button
-                  type="button"
-                  onClick={onResetStandardBoard}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#26201C] hover:bg-[#312923] text-stone-200 border border-stone-700/80 transition-all cursor-pointer whitespace-nowrap shrink-0"
-                  title="Đặt lại đủ 32 quân tiêu chuẩn"
-                >
-                  <LayoutGrid className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Bàn chuẩn</span>
-                </button>
-              )}
-
-              {/* FEN Modal Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setFenInput(currentFen);
-                  setFenError(null);
-                  setIsFenModalOpen(true);
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#26201C] hover:bg-[#312923] text-stone-200 border border-stone-700/80 transition-all cursor-pointer whitespace-nowrap shrink-0"
-                title="Nhập hoặc sao chép chuỗi FEN"
-              >
-                <FileCode className="w-3.5 h-3.5 text-amber-400" />
-                <span>FEN</span>
-              </button>
-            </>
+            <PuzzleSetupToolbar
+              validationValid={validation.valid}
+              puzzleFirstTurn={puzzleFirstTurn}
+              setPuzzleFirstTurn={setPuzzleFirstTurn}
+              onStartSolving={onStartSolving}
+              onLoadPreset={handleLoadPreset}
+              onClearPuzzleBoard={onClearPuzzleBoard}
+              onResetStandardBoard={onResetStandardBoard}
+              onOpenFenModal={() => setIsFenModalOpen(true)}
+            />
           ) : (
             <>
               {/* If ComputerVsComputer (either standard or in Puzzle playing mode) */}
@@ -490,94 +381,17 @@ export const ControlsArea: React.FC<ControlsAreaProps> = ({
 
       {/* Setup Guide / Validation Status Strip in Puzzle Setup Mode */}
       {isPuzzleSetup && (
-        <div className="pt-1 border-t border-stone-800/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-          {!validation.valid ? (
-            <div className="flex items-center gap-1.5 text-red-300 font-medium">
-              <ShieldAlert className="w-3.5 h-3.5 text-red-400 shrink-0" />
-              <span>{validation.errors.join(' · ')}</span>
-            </div>
-          ) : (
-            <span className="text-stone-400">
-              Kéo quân từ khay 2 bên vào bàn cờ · Giữ chuột trái để dời quân trên bàn · Chuột phải để xóa quân
-            </span>
-          )}
-        </div>
+        <PuzzleValidationStrip valid={validation.valid} errors={validation.errors} />
       )}
 
       {/* FEN Import/Export Modal */}
-      {isFenModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl bg-[#1C1815] border border-amber-500/40 shadow-2xl p-5 flex flex-col gap-3">
-            <div className="flex items-center justify-between pb-2 border-b border-stone-800">
-              <h3 className="font-display-serif text-base font-bold text-amber-200 flex items-center gap-2">
-                <FileCode className="w-4 h-4 text-amber-400" />
-                <span>Nhập / Xuất FEN Cờ Thế</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsFenModalOpen(false)}
-                className="text-stone-400 hover:text-stone-200 text-sm font-bold px-2 py-0.5 rounded cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-xs text-stone-400">
-              Dán chuỗi FEN để nạp nhanh thế cờ hoặc sao chép chuỗi FEN của bàn cờ hiện tại:
-            </p>
-
-            <textarea
-              value={fenInput}
-              onChange={(e) => {
-                setFenInput(e.target.value);
-                setFenError(null);
-              }}
-              rows={3}
-              placeholder="Ví dụ: 3ak4/4a4/9/9/9/9/9/4N4/4p4/4K4 w"
-              className="w-full bg-[#120F0D] text-amber-100 font-mono text-xs rounded-xl p-3 border border-stone-700 focus:border-amber-400 focus:outline-none resize-none"
-            />
-
-            {fenError && <p className="text-xs text-red-400">{fenError}</p>}
-
-            <div className="flex items-center justify-between gap-2 pt-2">
-              <button
-                type="button"
-                onClick={handleCopyFen}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#26201C] hover:bg-stone-800 text-stone-200 border border-stone-700 transition-colors cursor-pointer"
-              >
-                {copiedFen ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Đã sao chép!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Sao chép FEN hiện tại</span>
-                  </>
-                )}
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsFenModalOpen(false)}
-                  className="px-3 py-2 rounded-lg text-xs font-medium text-stone-400 hover:text-stone-200 cursor-pointer"
-                >
-                  Đóng
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApplyFen}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer shadow-md"
-                >
-                  Áp dụng FEN
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <FenModal
+        isOpen={isFenModalOpen}
+        initialFen={currentFen}
+        currentFen={currentFen}
+        onClose={() => setIsFenModalOpen(false)}
+        onApplyFen={handleApplyFen}
+      />
     </div>
   );
 };
