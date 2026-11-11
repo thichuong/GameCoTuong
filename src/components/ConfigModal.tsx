@@ -144,12 +144,20 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     if (key === 'tt_size_mb' || key === 'threads') {
       const perWorker = key === 'tt_size_mb' ? Number(value) : currentConfig.tt_size_mb;
       const th = key === 'threads' ? Number(value) : currentConfig.threads;
-      const totalMb = perWorker * th;
-      const totalStr = totalMb >= 1024 ? `${(totalMb / 1024).toFixed(totalMb % 1024 === 0 ? 0 : 1)} GB` : `${totalMb} MB`;
-      setFeedback({
-        type: 'success',
-        message: `Đã chọn ${perWorker} MB/luồng × ${th} luồng = Tổng ${totalStr} SharedArrayBuffer. Nhấn "Áp Dụng & Đóng" để kích hoạt!`,
-      });
+      if (th === 1) {
+        setFeedback({
+          type: 'success',
+          message: `Đã chọn ${perWorker} MB cho 1 luồng đơn (Tổng RAM ước tính ${perWorker} MB). Nhấn "Áp Dụng & Đóng" để kích hoạt!`,
+        });
+      } else {
+        const sabMb = perWorker * th;
+        const totalRam = sabMb * 2;
+        const totalStr = totalRam >= 1024 ? `${(totalRam / 1024).toFixed(totalRam % 1024 === 0 ? 0 : 1)} GB` : `${totalRam} MB`;
+        setFeedback({
+          type: 'success',
+          message: `Đã chọn ${perWorker} MB/luồng × ${th} luồng. Tổng RAM ước tính: ${totalStr} (${sabMb} MB SharedArrayBuffer + ${sabMb} MB cho ${th} TT riêng). Nhấn "Áp Dụng & Đóng" để kích hoạt!`,
+        });
+      }
     }
   };
 
@@ -492,16 +500,42 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                       </code>
                     </div>
                     <p className="text-[11px] text-stone-400 mt-0.5">
-                      Dung lượng Transposition Table cho <strong>mỗi</strong> Web Worker. Tổng bộ nhớ chia sẻ sẽ là <strong className="text-amber-400">{currentConfig.tt_size_mb * currentConfig.threads} MB</strong>.
+                      {currentConfig.threads === 1 ? (
+                        <>
+                          Dung lượng Transposition Table cho 1 luồng đơn. Tổng RAM AI sử dụng ước tính là{' '}
+                          <strong className="text-amber-400">{currentConfig.tt_size_mb} MB</strong>.
+                        </>
+                      ) : (
+                        <>
+                          Dung lượng Transposition Table cho <strong>mỗi</strong> Web Worker ({currentConfig.tt_size_mb} MB/luồng). Khi chạy {currentConfig.threads} luồng, tổng RAM ước tính là{' '}
+                          <strong className="text-amber-400">
+                            {currentConfig.tt_size_mb * currentConfig.threads * 2 >= 1024
+                              ? `${((currentConfig.tt_size_mb * currentConfig.threads * 2) / 1024).toFixed(currentConfig.tt_size_mb * currentConfig.threads * 2 % 1024 === 0 ? 0 : 1)} GB`
+                              : `${currentConfig.tt_size_mb * currentConfig.threads * 2} MB`}
+                          </strong>{' '}
+                          (gồm <span className="text-stone-300 font-mono">{currentConfig.tt_size_mb * currentConfig.threads} MB</span> SharedArrayBuffer +{' '}
+                          <span className="text-stone-300 font-mono">{currentConfig.tt_size_mb * currentConfig.threads} MB</span> cho {currentConfig.threads} bảng TT riêng).
+                        </>
+                      )}
                     </p>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
                   <div className="text-sm font-mono font-bold text-amber-400">
-                    {currentConfig.tt_size_mb} MB
+                    {currentConfig.tt_size_mb} MB / luồng
                   </div>
                   <div className="text-[11px] font-mono text-stone-400 mt-0.5">
-                    × {currentConfig.threads} luồng = {currentConfig.tt_size_mb * currentConfig.threads} MB tổng
+                    {currentConfig.threads === 1 ? (
+                      <span>Tổng RAM: <strong className="text-stone-200">{currentConfig.tt_size_mb} MB</strong> (1 luồng)</span>
+                    ) : (
+                      <span>
+                        Tổng RAM: <strong className="text-stone-200">
+                          {currentConfig.tt_size_mb * currentConfig.threads * 2 >= 1024
+                            ? `${((currentConfig.tt_size_mb * currentConfig.threads * 2) / 1024).toFixed(currentConfig.tt_size_mb * currentConfig.threads * 2 % 1024 === 0 ? 0 : 1)} GB`
+                            : `${currentConfig.tt_size_mb * currentConfig.threads * 2} MB`}
+                        </strong>
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -536,7 +570,16 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   ))}
                 </div>
                 <div className="text-[10px] font-mono text-amber-400/80 bg-stone-900/80 px-2 py-0.5 rounded border border-stone-800">
-                  Tổng SharedArrayBuffer: {currentConfig.tt_size_mb * currentConfig.threads} MB
+                  {currentConfig.threads === 1 ? (
+                    <span>RAM ước tính: {currentConfig.tt_size_mb} MB (1 luồng)</span>
+                  ) : (
+                    <span>
+                      RAM ước tính: {currentConfig.tt_size_mb * currentConfig.threads * 2 >= 1024
+                        ? `${((currentConfig.tt_size_mb * currentConfig.threads * 2) / 1024).toFixed(currentConfig.tt_size_mb * currentConfig.threads * 2 % 1024 === 0 ? 0 : 1)} GB`
+                        : `${currentConfig.tt_size_mb * currentConfig.threads * 2} MB`}{' '}
+                      ({currentConfig.tt_size_mb}MB × {currentConfig.threads} luồng × 2)
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
