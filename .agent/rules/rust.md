@@ -21,6 +21,16 @@ description: Các quy tắc bắt buộc (Mandatory Rules) về an toàn, xử l
     - `src/wasm/enginePolyfill.ts` & `src/wasm/cotuong_core.ts`
     - `src/components/ConfigModal.tsx` (nếu liên quan đến `EngineConfig`)
   - Nếu có môi trường Rust/wasm-bindgen, chạy `npm run build:wasm` để cập nhật gói WASM. Không sửa thủ công các file `.wasm` hoặc bindings sinh tự động từ `wasm-bindgen`.
+- **Đồng bộ Tài liệu Kiến trúc & Agent Skills (Documentation & Skill Sync)**:
+  - Mỗi khi có thay đổi về **kiến trúc hệ thống, cấu trúc thư mục/module, DTO/API, tham số cấu hình (`EngineConfig`), hoặc luồng xử lý dữ liệu/tìm kiếm AI**, **BẮT BUỘC** phải cập nhật đồng bộ ngay trong cùng tác vụ cho:
+    1. `ARCHITECTURE.md` (sơ đồ Mermaid, bảng cấu trúc file, mô tả module và luồng tuần tự).
+    2. `README.md` (nếu thay đổi tính năng, cấu trúc thư mục, tham số `EngineConfig`, Preset hoặc lệnh CLI).
+    3. Các **Agent Skill** tương ứng trong `.agent/skills/`:
+       - Thay đổi luật cờ, bàn cờ `Board`, FEN/Puzzle → `.agent/skills/game_logic_rules/SKILL.md`
+       - Thay đổi thuật toán tìm kiếm Alpha-Beta/Lazy SMP, `TranspositionTable`, `EngineConfig`, mạng NNUE hoặc `cotuong_trainer` → `.agent/skills/xiangqi_engine_tuning/SKILL.md`
+       - Thay đổi cầu nối `wasm.rs`, `enginePolyfill.ts`, `aiPoolManager.ts`, `ai.worker.ts`, `modelStorage.ts` → `.agent/skills/wasm_client_ui/SKILL.md`
+       - Thay đổi giao diện, bố cục `sides`/`stacked`, component React/Tailwind → `.agent/skills/react_ui_design/SKILL.md`
+       - Thay đổi quy chuẩn Rust, lints, hoặc quy trình kiểm thử/benchmark → `.agent/skills/rust_development/SKILL.md`
 
 ## 3. Language Standards (Tiêu chuẩn Ngôn ngữ)
 - **Communication (Trao đổi)**:
@@ -33,8 +43,8 @@ description: Các quy tắc bắt buộc (Mandatory Rules) về an toàn, xử l
 - **No Unnecessary Allocations in Engine Hot Paths**:
   - **CẤM** cấp phát bộ nhớ heap (`Vec::new`, `String::clone`, `Box::new`) bên trong vòng lặp tìm kiếm (`alpha_beta`, `quiescence`, `EngineMoveGen`, `evaluate_dual_forward`).
   - *Hành động*: Sử dụng `MoveList` (mảng tĩnh trên stack `[Move; 128]`), cập nhật tăng dần `NnueAccumulator` và `zobrist_hash` trong `Board::apply_move` / `Board::undo_move`.
-- **Non-blocking UI**:
-  - Mọi tác vụ tìm kiếm nước đi của AI bắt buộc phải chạy trên Web Worker (`src/workers/ai.worker.ts`), tuyệt đối không chạy `WasmEngine.search()` trực tiếp trên luồng giao diện chính (main thread).
+- **Non-blocking UI & Multi-threaded Worker Pool**:
+  - Mọi tác vụ tìm kiếm nước đi của AI bắt buộc phải chạy bất đồng bộ qua `AiPoolManager` (`src/workers/aiPoolManager.ts`) và các Web Worker (`src/workers/ai.worker.ts`), tuyệt đối không chạy `WasmEngine.search()` trực tiếp trên luồng giao diện chính (main thread).
 
 ## 5. Code Style & Idioms (Phong cách & Cấu trúc Code)
 - **Rust**:
@@ -50,6 +60,6 @@ description: Các quy tắc bắt buộc (Mandatory Rules) về an toàn, xử l
   - Sau khi hoàn thành viết code hoặc refactor ở Rust hoặc TypeScript, **BẮT BUỘC** phải kiểm tra:
     1. `cargo fmt --check` (hoặc `cargo fmt`): Định dạng chuẩn Rust.
     2. `cargo clippy --workspace --all-targets -- -D warnings` và `cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings`: Kiểm tra lint nghiêm ngặt cho cả native (`cotuong_core`, `cotuong_trainer`) và WASM.
-    3. `cargo test --workspace`: Chạy toàn bộ unit tests và mate-solving tests của Rust.
+    3. `cargo test --workspace`: Chạy toàn bộ unit tests, mate-solving tests, property-based tests và fuzz tests của Rust.
     4. `npm test`, `npm run lint` & `npm run build`: Chạy unit tests TypeScript, kiểm tra kiểu (`tsc --noEmit`) và đóng gói Vite production.
   - Có thể chạy nhanh quy trình kiểm tra toàn diện bằng script `./test_all.sh`.

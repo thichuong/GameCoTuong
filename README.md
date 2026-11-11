@@ -25,10 +25,10 @@
 |-----------|----------------|
 | 🎮 **4 Chế độ chơi** | **Người đấu với Máy** (chọn cầm quân Đỏ đi tiên hoặc Đen đi hậu), **Máy đấu với Máy** (AI vs AI có nút Bắt đầu/Tạm dừng), **Hai người chơi** trên cùng thiết bị, và **Giải Cờ Thế (Puzzle Mode)** |
 | 🧩 **Xếp & Giải Cờ Thế** | Tự do kéo-thả hoặc nhấp chọn quân từ khay vào bàn cờ, di chuyển quân trên bàn, click chuột phải để xóa quân, nạp **Thế cờ mẫu kinh điển**, kiểm tra hợp lệ thế cờ theo thời gian thực và Nhập/Xuất chuỗi **FEN** |
-| 🧠 **AI Alpha-Beta + Dual-Head HalfKP NNUE v3** | Kết hợp tìm kiếm Negamax PVS, Iterative Deepening, Transposition Table, Null-Move Pruning, LMR, Sách khai cuộc cùng mạng nơ-ron **HalfKP NNUE v3** (`10,530 → 192×2 → 32 → 32 → 1` + 8-Bucket Phase PSQT) |
-| 🧠 **Mô Hình NNUE Chuẩn SIMD** | Tối ưu hóa chuẩn Stockfish / Pikafish NNUE (`default.nnue` ~4.0MB), tính toán thuần số nguyên, nhúng trực tiếp trong WebAssembly Engine |
+| 🧠 **AI Alpha-Beta + Dual-Head HalfKP NNUE v3** | Kết hợp tìm kiếm Negamax PVS, Iterative Deepening, Lockless Atomic Transposition Table, Null-Move Pruning, LMR, Sách khai cuộc cùng mạng nơ-ron **HalfKP NNUE v3** (`10,530 → 192×2 → 32 → 32 → 1` + 8-Bucket Phase PSQT) |
+| ⚡ **Đa Luồng Lazy SMP & IndexedDB NNUE Cache** | Hỗ trợ tìm kiếm song song đa luồng (`1–16` Web Workers) với **Cooperative Multi-Search Lazy SMP** và phân vùng `SharedArrayBuffer`; tách nhẹ gói `.wasm` (~335KB) và tự động lưu đệm mô hình `default.nnue` (~4.0MB) trong **IndexedDB** giúp khởi động tức thì |
 | 🎯 **5 Cấp độ khó** | Từ **Cấp 1 · Nhập môn (1s)** đến **Cấp 5 · Đại sư (20s)** điều chỉnh thời gian suy nghĩ tối đa mỗi nước của AI |
-| ⚙️ **Tùy biến AI Đỏ & Đen độc lập** | Tinh chỉnh riêng hoặc đồng bộ cho từng bên (`tt_size_mb`, `mate_score`, `nnue_weight`) kèm 4 Preset định sẵn và Nhập/Xuất file `.json` |
+| ⚙️ **Tùy biến AI Đỏ & Đen độc lập** | Tinh chỉnh riêng hoặc đồng bộ cho từng bên (`tt_size_mb`, `mate_score`, `nnue_weight`, `threads`) kèm các Preset tự động tương thích phần cứng thiết bị, cơ chế xác nhận **"Áp Dụng & Đóng"** và Nhập/Xuất file `.json` |
 | 🎨 **Bàn cờ Canvas 1:1 & Khay Quân Thích ứng** | Vẽ trên HTML5 Canvas chuẩn HiDPI/Retina, tự động giữ tỉ lệ vuông `1:1`, xoay chiều bàn cờ theo phe người chơi, hiển thị khay quân ăn được và ưu thế vật chất theo bố cục **Tự động / Hai bên / Trên dưới** |
 | 📊 **HUD Tiến trình AI & Biên bản Ngăn kéo** | Lớp phủ HUD trực quan ngay trên bàn cờ khi AI đang tính nước; thanh biên bản gọn gàng phía dưới bàn cờ mở lên dạng ngăn kéo trượt (Slide-Up Drawer) |
 | 🏋️ **Pipeline Huấn luyện NNUE (`cotuong_trainer`)** | Crate huấn luyện riêng bằng Rust hỗ trợ học giám sát từ kỳ phổ, chưng cất tri thức (Teacher Distillation) với Pikafish/Fairy-Stockfish (UCCI/UCI), đấu tập đối kháng và lượng tử hóa đa định dạng |
@@ -88,17 +88,18 @@ Dự án là một Rust Workspace gồm 2 crates (`cotuong_core` và `cotuong_tr
 ```
 GameCoTuong/
 ├── cotuong_core/                  # 🦀 Rust Core Library (Game Logic + AI Engine + NNUE + WASM)
-│   ├── assets/                    # Trọng số mạng nơ-ron nhúng sẵn (default.nnue, model_f32.bin)
+│   ├── assets/                    # Trọng số mạng nơ-ron cho native/trainer (default.nnue, model_f32.bin)
+│   ├── fuzz/                      # Cấu hình cargo-fuzz (fuzz_fen, fuzz_json, fuzz_uci)
 │   ├── src/
 │   │   ├── lib.rs                 # Điểm xuất module: engine, logic, wasm
 │   │   ├── wasm.rs                # Cầu nối #[wasm_bindgen]: WasmGameState & WasmEngine
 │   │   ├── engine/                # Bộ tìm kiếm AI & Mạng lượng giá NNUE
-│   │   │   ├── config.rs          # EngineConfig (mate_score, tt_size_mb, nnue_weight)
-│   │   │   ├── search.rs          # AlphaBetaEngine (Negamax, PVS, Iterative Deepening, LMR, NMP)
-│   │   │   ├── eval.rs            # SimpleEvaluator (điều phối trọng số NNUE & hệ số khuếch đại)
-│   │   │   ├── nnue.rs            # Mạng Dual-Head HalfKP NNUE v3 (SIMD Incremental Accumulator)
+│   │   │   ├── config.rs          # EngineConfig (mate_score, tt_size_mb, nnue_weight, threads)
+│   │   │   ├── search.rs          # AlphaBetaEngine (Negamax, PVS, Iterative Deepening, LMR, NMP, Lazy SMP)
+│   │   │   ├── eval.rs            # SimpleEvaluator & EvalCache (điều phối trọng số NNUE & hệ số khuếch đại)
+│   │   │   ├── nnue.rs            # Mạng Dual-Head HalfKP NNUE v3 (SIMD Incremental Accumulator & Batched Eval)
 │   │   │   ├── movegen.rs         # EngineMoveGen (sinh nước đi kèm điểm Move Ordering)
-│   │   │   ├── tt.rs              # Transposition Table (bảng băm thế cờ)
+│   │   │   ├── tt.rs              # Lockless Atomic Transposition Table (bảng băm thế cờ)
 │   │   │   ├── zobrist.rs         # Zobrist Hashing 64-bit
 │   │   │   └── move_list.rs       # Stack-allocated [Move; 128] (không cấp phát heap)
 │   │   └── logic/                 # Luật Cờ Tướng & Biểu diễn Bàn cờ
@@ -110,7 +111,10 @@ GameCoTuong/
 │   │       ├── eval_constants.rs  # Hằng số điểm quân cờ & bảng vị trí (PST)
 │   │       └── opening.rs         # Sách khai cuộc (Opening Book theo FEN)
 │   └── tests/
-│       └── mate_solving.rs        # Kiểm thử giải cờ thế / chiếu bí
+│       ├── mate_solving.rs        # Kiểm thử giải cờ thế / chiếu bí
+│       ├── property_tests.rs      # Kiểm thử bất biến (Property-based tests)
+│       ├── fuzz_tests.rs          # Kiểm thử Fuzzing chống panic với dữ liệu biên
+│       └── profiling_bench.rs     # Đo hiệu năng chuyên sâu (Profiling & NPS Benchmarks)
 ├── cotuong_trainer/               # 🏋️ Rust NNUE Trainer CLI (Huấn luyện, Chưng cất & Lượng tử hóa)
 │   ├── data/                      # Kho kỳ phổ mẫu (curated_master_games.txt, sample_master_games.txt)
 │   └── src/
@@ -119,7 +123,7 @@ GameCoTuong/
 │       └── protocol.rs            # Giao tiếp UCCI / UCI với Engine ngoài (Pikafish, Fairy-Stockfish)
 ├── src/                           # ⚛️ React 18 + TypeScript Frontend
 │   ├── main.tsx                   # Entry point khởi tạo React
-│   ├── App.tsx                    # Điều phối trạng thái ván cờ, 4 chế độ chơi, bố cục & Web Worker
+│   ├── App.tsx                    # Điều phối trạng thái ván cờ, 4 chế độ chơi, bố cục & Worker Pool
 │   ├── App.css                    # Tailwind CSS v4 & hiệu ứng chuyển động
 │   ├── components/
 │   │   ├── BoardCanvas.tsx        # Bàn cờ HTML5 Canvas 1:1, hỗ trợ kéo-thả xếp cờ thế & xoay góc nhìn
@@ -128,19 +132,21 @@ GameCoTuong/
 │   │   ├── PuzzleSetupArea.tsx    # Bảng công cụ xếp cờ thế, kiểm tra hợp lệ & nạp FEN/thế cờ mẫu
 │   │   ├── ThinkingIndicator.tsx  # Lớp phủ HUD hiển thị tiến trình suy nghĩ của AI
 │   │   ├── LogPanel.tsx           # Biên bản ván đấu thu gọn ở đáy & ngăn kéo trượt (Drawer)
-│   │   └── ConfigModal.tsx        # Hộp thoại tùy chỉnh EngineConfig & chọn model f32/int16/int8
+│   │   └── ConfigModal.tsx        # Hộp thoại tùy chỉnh EngineConfig (TT, Mate, NNUE Weight, Đa luồng)
 │   ├── workers/
-│   │   └── ai.worker.ts           # Web Worker chạy tìm kiếm AI ở luồng nền
+│   │   ├── aiPoolManager.ts       # Quản lý Web Worker Pool đa luồng, SharedArrayBuffer & Lazy SMP
+│   │   └── ai.worker.ts           # Web Worker chạy tìm kiếm AI ở luồng nền & nạp NNUE động
 │   ├── types/
 │   │   ├── game.ts                # Các interface TypeScript & DEFAULT_ENGINE_CONFIG
-│   │   └── config.test.ts         # Kiểm thử đồng bộ cấu hình EngineConfig
+│   │   └── config.test.ts         # Kiểm thử đồng bộ cấu hình EngineConfig & bộ nhớ TT
 │   ├── utils/
 │   │   ├── capturedPieces.ts      # Tính toán quân bị ăn, ưu thế vật chất & kích thước bàn cờ tối ưu
 │   │   ├── fen.ts                 # Chuyển đổi FEN, kiểm tra thế cờ hợp lệ & kho thế cờ kinh điển
+│   │   ├── modelStorage.ts        # Tải & lưu đệm mô hình `/assets/default.nnue` trong IndexedDB
 │   │   ├── export.ts              # Xuất biên bản CSV & cấu hình JSON
 │   │   └── sound.ts               # Quản lý âm thanh hiệu ứng
 │   └── wasm/                      # Cầu nối WASM (cotuong_core.ts) & Polyfill Engine (enginePolyfill.ts)
-├── public/                        # Tài nguyên tĩnh (manifest.json, sw.js, icon.png, sounds/)
+├── public/                        # Tài nguyên tĩnh (assets/default.nnue, _headers, manifest.json, sw.js, sounds/)
 ├── train.sh                       # Script tự động hóa toàn bộ pipeline huấn luyện NNUE
 ├── train_ai.ipynb                 # Jupyter Notebook huấn luyện AI trên Google Colab
 ├── test_all.sh                    # Script chạy toàn bộ kiểm thử Rust & React build
@@ -153,30 +159,32 @@ GameCoTuong/
 
 ## 🧠 Tùy chỉnh Tham số AI (`EngineConfig`)
 
-Nhấn nút **"Cấu hình AI"** trên thanh công cụ để mở bảng tinh chỉnh chuyên sâu cho **AI Đỏ (Red)** và **AI Đen (Black)** (hỗ trợ bật/tắt **Đồng bộ 2 bên**). Các tham số khớp 100% với struct `EngineConfig` trong `cotuong_core`:
+Nhấn nút **"Cấu hình AI"** trên thanh công cụ để mở bảng tinh chỉnh chuyên sâu cho **AI Đỏ (Red)** và **AI Đen (Black)** (hỗ trợ bật/tắt **Đồng bộ 2 bên**). Các thay đổi được giữ ở trạng thái nháp và chỉ tái cấp phát bộ nhớ khi người dùng nhấn **"Áp Dụng & Đóng"**. Các tham số khớp 100% với struct `EngineConfig` trong `cotuong_core`:
 
 ### 1. Các Tham số Cốt lõi
 
 | Tham số | Kiểu dữ liệu | Mặc định | Phạm vi UI | Ý nghĩa |
 |---------|-------------|----------|------------|---------|
-| `tt_size_mb` | `usize` | `256` | `16 – 512 MB` | Dung lượng bảng băm Zobrist (Transposition Table) lưu trữ thế cờ đã duyệt và nhánh cắt tỉa |
+| `tt_size_mb` | `usize` | `512` | `16 – 1024 MB` | Dung lượng bảng băm Zobrist (Transposition Table) cấp phát cho **mỗi luồng** Web Worker |
 | `mate_score` | `i32` | `300,000` | `50,000 – 500,000` | Điểm cơ sở khi phát hiện chiếu bí (`mate_score - ply`, càng sát nước thắng điểm càng cao) |
 | `nnue_weight` | `i32` | `100` | `50% – 150%` | Hệ số khuếch đại độ nhạy điểm số của mạng nơ-ron HalfKP NNUE v3 theo công thức `(raw * nnue_weight) / 100` |
+| `threads` | `usize` | `1` (Rust) / `cores / 4` (UI) | `1 – 16 luồng` | Số luồng Web Worker tìm kiếm song song theo cơ chế **Cooperative Lazy SMP** |
 
-### 2. Các Preset Định sẵn
+### 2. Các Preset Định sẵn (Tự động lọc theo phần cứng thiết bị)
 
-- **Tiêu Chuẩn (Mặc định)**: `tt_size_mb: 256`, `mate_score: 300000`, `nnue_weight: 100`.
-- **Tấn Công / Chuẩn Xác Cao**: `tt_size_mb: 256`, `mate_score: 400000`, `nnue_weight: 120`.
-- **Tiết Kiệm RAM**: `tt_size_mb: 64`, `mate_score: 200000`, `nnue_weight: 90` (tối ưu bộ nhớ bảng băm cho máy yếu/thiết bị di động).
-- **Sát Cục / Giải Cờ Thế**: `tt_size_mb: 512`, `mate_score: 500000`, `nnue_weight: 110`.
+- **Tiết Kiệm (1 luồng)**: `tt_size_mb: 256`, `mate_score: 200000`, `nnue_weight: 90`, `threads: 1` (tối ưu cho thiết bị di động hoặc máy yếu).
+- **Tiêu Chuẩn (2 luồng)**: `tt_size_mb: 256`, `mate_score: 300000`, `nnue_weight: 100`, `threads: 2`.
+- **Cao (4 luồng)**: `tt_size_mb: 512`, `mate_score: 400000`, `nnue_weight: 110`, `threads: 4`.
+- **Cực cao (8 luồng)**: `tt_size_mb: 512`, `mate_score: 500000`, `nnue_weight: 120`, `threads: 8`.
 
 ### 3. Định dạng JSON Nhập / Xuất
 
 ```json
 {
   "mate_score": 300000,
-  "tt_size_mb": 256,
-  "nnue_weight": 100
+  "tt_size_mb": 512,
+  "nnue_weight": 100,
+  "threads": 2
 }
 ```
 
@@ -214,13 +222,16 @@ Script `test_all.sh` kiểm tra định dạng code Rust, chạy Clippy nghiêm 
 # Chạy tất cả unit tests và bài test giải cờ thế trong toàn workspace
 cargo test --workspace
 
-# Chạy kiểm tra theo từng phân hệ
+# Chạy kiểm tra theo từng phân hệ (Logic, Engine, Giải cờ thế, Property-based & Fuzzing)
 cargo test -p cotuong_core logic::
 cargo test -p cotuong_core engine::
 cargo test -p cotuong_core --test mate_solving
+cargo test -p cotuong_core --test property_tests
+cargo test -p cotuong_core --test fuzz_tests
 
 # Chạy benchmark đo tốc độ duyệt nút (NPS - Nodes Per Second) ở chế độ Release
 cargo test --release -p cotuong_core -- engine::bench_test --nocapture
+cargo test --release -p cotuong_core --test profiling_bench -- --nocapture
 
 # Kiểm tra định dạng và Clippy lints
 cargo fmt --check

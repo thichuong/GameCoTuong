@@ -29,8 +29,8 @@ description: Senior-level guidelines for high-performance Rust & WebAssembly dev
 - **Nesting Limit**: Avoid deep nesting (max 2–3 levels of `if/else`). Extract complex logic into helper functions.
 
 ## 4. Testing & Verification
-- **Unit & Mate Tests**: Verify `Board` rules, repetition detection, `NnueAccumulator` incremental accuracy (`test_accumulator_incremental_vs_refresh`), 3 model variants loading (`test_load_all_three_model_variants`), and checkmate solving (`cotuong_core/tests/mate_solving.rs`).
-- **Benchmarking**: When modifying `search.rs`, `nnue.rs`, `eval.rs`, or `movegen.rs`, run `cargo test --release -p cotuong_core -- engine::bench_test --nocapture` to verify that nodes-per-second (NPS) has not degraded.
+- **Unit, Property, Fuzz & Mate Tests**: Verify `Board` rules, repetition detection, `NnueAccumulator` incremental accuracy (`test_accumulator_incremental_vs_refresh`), checkmate solving (`cotuong_core/tests/mate_solving.rs`), property-based invariants (`cotuong_core/tests/property_tests.rs`), and adversarial fuzzing inputs (`cotuong_core/tests/fuzz_tests.rs` & `cotuong_core/fuzz/`).
+- **Benchmarking**: When modifying `search.rs`, `nnue.rs`, `eval.rs`, or `movegen.rs`, run `cargo test --release -p cotuong_core -- engine::bench_test --nocapture` or `cargo test --release -p cotuong_core --test profiling_bench -- --nocapture` to verify that nodes-per-second (NPS) has not degraded.
 - **Full Suite Verification**: Run `./test_all.sh` to execute:
   1. `cargo fmt --check`
   2. `cargo clippy --workspace --all-targets -- -D warnings`
@@ -43,7 +43,7 @@ description: Senior-level guidelines for high-performance Rust & WebAssembly dev
 
 ## 6. Module Architecture Guidelines
 - **Core Logic (`cotuong_core/src/logic/`)**: Pure Xiangqi rules, board state, FEN parsing, opening book, and legal move generation (`MoveGenerator`).
-- **AI Engine & NNUE (`cotuong_core/src/engine/`)**: Search (`AlphaBetaEngine`), evaluation (`SimpleEvaluator`), Dual-Head HalfKP NNUE v3 (`nnue.rs`), scored move generation (`EngineMoveGen`), transposition table (`tt.rs`), and Zobrist hashing (`zobrist.rs`).
-- **NNUE Trainer (`cotuong_trainer/src/`)**: Supervised learning from master game records (`dataset.rs`), UCCI/UCI teacher distillation & sparring (`protocol.rs`), and standard SIMD NNUE quantization in `main.rs`.
+- **AI Engine & NNUE (`cotuong_core/src/engine/`)**: Search (`AlphaBetaEngine` with Cooperative Lazy SMP), evaluation (`SimpleEvaluator` & `EvalCache`), Dual-Head HalfKP NNUE v3 (`nnue.rs`), scored move generation (`EngineMoveGen`), lockless atomic transposition table (`tt.rs`), and Zobrist hashing (`zobrist.rs`).
+- **NNUE Trainer (`cotuong_trainer/src/`)**: Supervised learning from master game records (`dataset.rs`), UCCI/UCI teacher distillation & sparring (`protocol.rs`), and standard SIMD NNUE quantization exporting to both `cotuong_core/assets/default.nnue` and `public/assets/default.nnue` in `main.rs`.
 - **WASM Bridge & Polyfill (`cotuong_core/src/wasm.rs` & `src/wasm/`)**: `#[wasm_bindgen]` wrappers (`WasmGameState`, `WasmEngine`) and TypeScript polyfill (`enginePolyfill.ts`).
-- **React Frontend (`src/`)**: Modular UI components (`src/components/`), Web Worker (`src/workers/ai.worker.ts`), utilities (`src/utils/`), and strong TypeScript interfaces (`src/types/game.ts`).
+- **React Frontend (`src/`)**: Modular UI components (`src/components/`), Multi-threaded Worker Pool (`src/workers/aiPoolManager.ts` & `src/workers/ai.worker.ts`), IndexedDB NNUE cache (`src/utils/modelStorage.ts`), utilities (`src/utils/`), and strong TypeScript interfaces (`src/types/game.ts`).

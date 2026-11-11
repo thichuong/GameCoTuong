@@ -40,3 +40,5 @@ description: Các quy tắc bắt buộc (Mandatory Rules) về thiết kế gia
 - **Strict Typing & Verification**:
   - Không dùng `any`; mọi props và state phải định nghĩa rõ trong `src/types/game.ts` hoặc interface của component.
   - Sau mỗi lần chỉnh sửa UI, bắt buộc chạy `npm test`, `npm run lint` và `npm run build` để đảm bảo không phát sinh lỗi kiểu hoặc lỗi đóng gói.
+- **Architecture & Skill Synchronization (Đồng bộ Kiến trúc & Agent Skill)**:
+  - Khi thêm/xóa/tái cấu trúc Component, thay đổi luồng tương tác UI ↔ Web Worker Pool (`AiPoolManager`), hoặc thay đổi giao diện cấu hình `ConfigModal.tsx`, **BẮT BUỘC** cập nhật đồng bộ `ARCHITECTURE.md` và các Agent Skill liên quan (`.agent/skills/react_ui_design/SKILL.md`, `.agent/skills/wasm_client_ui/SKILL.md`).

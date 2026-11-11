@@ -12,19 +12,19 @@ graph TB
         Controls["ControlsArea.tsx & PuzzleSetupArea.tsx<br/>(Modes, Puzzle Tools, FEN, Side, Difficulty)"]
         Overlay["ThinkingIndicator.tsx<br/>(Board HUD Overlay)"]
         Log["LogPanel.tsx<br/>(Collapsible Bottom Dock & Drawer)"]
-        Config["ConfigModal.tsx<br/>(Red/Black EngineConfig & f32/int16/int8 Model Selector)"]
-        Worker["ai.worker.ts<br/>(Background Web Worker)"]
+        Config["ConfigModal.tsx<br/>(Red/Black EngineConfig: TT, Mate, NNUE Weight, Threads)"]
+        Pool["aiPoolManager.ts & ai.worker.ts<br/>(Multi-Threaded Worker Pool, SharedArrayBuffer & IndexedDB Model Cache)"]
     end
 
     subgraph WasmBridge["WASM Bridge & Polyfill (cotuong_core/src/wasm.rs & src/wasm/)"]
         WGS["WasmGameState / PolyfillGameState<br/>(Board, Strictly Legal Moves, History, FEN/JSON)"]
-        WE["WasmEngine / PolyfillEngine<br/>(AlphaBeta Search & EngineConfig)"]
+        WE["WasmEngine / PolyfillEngine<br/>(AlphaBeta Lazy SMP Search, Dynamic NNUE Loader & EngineConfig)"]
     end
 
     subgraph Core["Rust Core Crate (cotuong_core)"]
         Logic["logic/<br/>(Board u128, Rules, MoveGenerator, Opening Book, 3-Fold Repetition)"]
-        Engine["engine/<br/>(AlphaBetaEngine, SimpleEvaluator, EngineMoveGen, TT, Zobrist)"]
-        NNUE["engine/nnue.rs<br/>(Dual-Head HalfKP NNUE v3: f32, int16, int8)"]
+        Engine["engine/<br/>(AlphaBetaEngine, SimpleEvaluator + EvalCache, EngineMoveGen, Atomic TT, Zobrist)"]
+        NNUE["engine/nnue.rs<br/>(Dual-Head HalfKP NNUE v3: SIMD i16/i8 & Batched Forward Pass)"]
     end
 
     subgraph Trainer["Rust NNUE Trainer Crate (cotuong_trainer)"]
@@ -38,15 +38,15 @@ graph TB
     App --> Log
     App --> Config
     App -->|"Main Thread Calls"| WGS
-    App <-->|"postMessage (JSON)"| Worker
-    Worker -->|"Worker Thread Calls"| WE
-    Worker -->|"Reconstruct State"| WGS
+    App <-->|"Async Pool Search"| Pool
+    Pool -->|"Worker Thread Calls"| WE
+    Pool -->|"Reconstruct State"| WGS
     WGS --> Logic
     WE --> Engine
     Engine --> Logic
     Engine --> NNUE
     Logic -->|"Incremental Accumulator"| NNUE
-    TrainMain -->|"Exports .nnue / .bin"| NNUE
+    TrainMain -->|"Exports default.nnue / model_f32.bin"| NNUE
 
     style Core fill:#2d6a4f,color:#fff
     style Trainer fill:#0f4c5c,color:#fff
@@ -69,15 +69,19 @@ GameCoTuong/
 ├── train.sh                    # Pipeline tự động huấn luyện & lượng tử hóa mạng NNUE
 ├── train_ai.ipynb              # Notebook huấn luyện AI trên Google Colab
 ├── cotuong_core/               # Crate Rust trung tâm (Game Logic + AI Engine + NNUE + WASM)
-│   ├── Cargo.toml
-│   ├── assets/                 # Trọng số NNUE nhúng sẵn: default.nnue (~4.0MB), model_f32.bin (~8.1MB)
+│   ├── Cargo.toml              # Feature `embed-model` (mặc định cho native; tắt khi build WASM nhẹ)
+│   ├── assets/                 # Trọng số NNUE cho native/trainer: default.nnue (~4.0MB), model_f32.bin (~8.1MB)
+│   ├── fuzz/                   # Cấu hình cargo-fuzz (fuzz_fen, fuzz_json, fuzz_uci)
 │   ├── src/
 │   │   ├── lib.rs              # Re-exports: engine, logic, wasm (cfg wasm32)
 │   │   ├── wasm.rs             # #[wasm_bindgen] exports: WasmGameState, WasmEngine
-│   │   ├── engine/             # Bộ tìm kiếm AI Alpha-Beta & Mạng nơ-ron HalfKP NNUE v3
+│   │   ├── engine/             # Bộ tìm kiếm AI Alpha-Beta (Lazy SMP) & Mạng nơ-ron HalfKP NNUE v3
 │   │   └── logic/              # Biểu diễn bàn cờ Bitboard u128, luật Cờ Tướng, khai cuộc
 │   └── tests/
-│       └── mate_solving.rs     # Bộ test giải cờ thế / chiếu bí
+│       ├── mate_solving.rs     # Bộ test giải cờ thế / chiếu bí
+│       ├── property_tests.rs   # Kiểm thử bất biến (Property-based testing: FEN, Zobrist, NNUE, Undo)
+│       ├── fuzz_tests.rs       # Kiểm thử Fuzzing & dữ liệu biên chống panic
+│       └── profiling_bench.rs  # Đo lường hiệu năng chuyên sâu (Profiling & NPS Benchmarks)
 ├── cotuong_trainer/            # Crate Rust huấn luyện mạng nơ-ron NNUE
 │   ├── Cargo.toml
 │   ├── data/                   # Dữ liệu kỳ phổ mẫu (curated_master_games.txt, sample_master_games.txt)
@@ -87,7 +91,7 @@ GameCoTuong/
 │       └── protocol.rs         # Giao tiếp UCCI/UCI với engine ngoài (Pikafish, Fairy-Stockfish)
 ├── src/                        # Giao diện React 18 + TypeScript
 │   ├── main.tsx                # Điểm khởi chạy React DOM
-│   ├── App.tsx                 # Component điều phối chính (4 chế độ chơi, bố cục thích ứng, Worker)
+│   ├── App.tsx                 # Component điều phối chính (4 chế độ chơi, bố cục thích ứng, Worker Pool)
 │   ├── App.css                 # Tailwind CSS v4 & custom animations
 │   ├── components/
 │   │   ├── BoardCanvas.tsx     # Bàn cờ HTML5 Canvas 1:1, hỗ trợ kéo-thả xếp cờ thế & xoay chiều
@@ -96,24 +100,26 @@ GameCoTuong/
 │   │   ├── PuzzleSetupArea.tsx # Khu vực thiết lập thế cờ, kiểm tra hợp lệ & nạp FEN/thế cờ mẫu
 │   │   ├── ThinkingIndicator.tsx # HUD hiển thị tiến trình suy nghĩ của AI trên bàn cờ
 │   │   ├── LogPanel.tsx        # Thanh biên bản thu gọn ở đáy & ngăn kéo trượt (Drawer)
-│   │   └── ConfigModal.tsx     # Cửa sổ tinh chỉnh EngineConfig & chọn model f32/int16/int8
+│   │   └── ConfigModal.tsx     # Cửa sổ tinh chỉnh EngineConfig (TT, Mate, NNUE Weight, Đa luồng)
 │   ├── workers/
-│   │   └── ai.worker.ts        # Web Worker chạy tìm kiếm AI bất đồng bộ
+│   │   ├── aiPoolManager.ts    # Điều phối Web Worker Pool đa luồng, SharedArrayBuffer & Lazy SMP
+│   │   └── ai.worker.ts        # Web Worker chạy tìm kiếm AI bất đồng bộ & nạp NNUE động
 │   ├── types/
 │   │   ├── game.ts             # Định nghĩa kiểu TypeScript & DEFAULT_ENGINE_CONFIG
-│   │   └── config.test.ts      # Unit tests kiểm tra cấu hình EngineConfig
+│   │   └── config.test.ts      # Unit tests kiểm tra cấu hình EngineConfig & tính toán bộ nhớ TT
 │   ├── utils/
 │   │   ├── capturedPieces.ts   # Trích xuất quân ăn được, tính ưu thế & kích thước bàn cờ tối ưu
 │   │   ├── capturedPieces.test.ts
 │   │   ├── fen.ts              # Phân tích/xuất FEN, kiểm tra thế cờ hợp lệ & kho CLASSIC_PUZZLES
 │   │   ├── fen.test.ts
+│   │   ├── modelStorage.ts     # Quản lý tải và lưu đệm (IndexedDB cache) mô hình `/assets/default.nnue`
 │   │   ├── sound.ts            # Quản lý hiệu ứng âm thanh (move, capture, check, checkmate)
 │   │   └── export.ts           # Xuất biên bản CSV & cấu hình JSON
 │   └── wasm/
 │       ├── cotuong_core.ts     # Module xuất WasmGameState & WasmEngine
 │       ├── enginePolyfill.ts   # Bản cài đặt Polyfill TypeScript tương thích 100% API WASM
 │       └── enginePolyfill.test.ts
-└── public/                     # Tài nguyên tĩnh (PWA manifest, sw.js, icon.png, sounds/*.mp3)
+└── public/                     # Tài nguyên tĩnh (assets/default.nnue, _headers COOP/COEP, PWA manifest, sw.js, sounds/*.mp3)
 ```
 
 Workspace-level lints trong `Cargo.toml` **deny** toàn bộ `warnings`, `clippy::all`, `clippy::pedantic`, `clippy::nursery`, `clippy::unwrap_used`, `clippy::expect_used`, và `clippy::indexing_slicing`.
@@ -132,12 +138,12 @@ cotuong_core/src/
 ├── wasm.rs                     # WasmGameState, WasmEngine (serde-wasm-bindgen DTOs)
 ├── engine/
 │   ├── mod.rs                  # Traits: Evaluator, Searcher; Structs: Move, SearchLimit, SearchStats
-│   ├── config.rs               # EngineConfig (mate_score, tt_size_mb, nnue_weight, model_type)
-│   ├── search.rs               # AlphaBetaEngine – Negamax + PVS + Iterative Deepening
-│   ├── eval.rs                 # SimpleEvaluator – Lượng giá thế cờ bằng mạng HalfKP NNUE v3
-│   ├── nnue.rs                 # NnueWeights, NnueAccumulator, Dual-Head HalfKP forward pass
+│   ├── config.rs               # EngineConfig (mate_score, tt_size_mb, nnue_weight, threads)
+│   ├── search.rs               # AlphaBetaEngine – Negamax + PVS + Iterative Deepening + Lazy SMP
+│   ├── eval.rs                 # SimpleEvaluator & EvalCache – Lượng giá thế cờ bằng mạng HalfKP NNUE v3
+│   ├── nnue.rs                 # NnueWeights, NnueAccumulator, Dual-Head HalfKP SIMD & Batched forward pass
 │   ├── movegen.rs              # EngineMoveGen – Sinh nước đi kèm chấm điểm sắp xếp (Move Ordering)
-│   ├── tt.rs                   # TranspositionTable – Bảng băm lưu trữ thế cờ đã duyệt
+│   ├── tt.rs                   # TranspositionTable – Bảng băm Atomic lockless lưu trữ thế cờ đã duyệt
 │   ├── zobrist.rs              # ZobristKeys – Mã băm thế cờ 64-bit (XorShift64 RNG)
 │   ├── move_list.rs            # MoveList – Danh sách nước đi cấp phát trên stack [Move; 128]
 │   ├── bench_test.rs           # Đo hiệu năng NPS (Nodes Per Second)
@@ -260,11 +266,11 @@ flowchart LR
     L4 --> Sum
 ```
 
-- **Mô Hình Trọng Số NNUE Chuẩn Nhúng Trực Tiếp (`cotuong_core/assets/default.nnue`)**:
+- **Mô Hình Trọng Số NNUE Chuẩn SIMD (`default.nnue`) & Cơ chế Nạp Động qua IndexedDB**:
   - `default.nnue` (magic `XNNU` v3, dung lượng ~4.0 MB): Trọng số lượng tử hóa số nguyên chuẩn SIMD (Feature Transformer $W_1$ là `i16`, các tầng FC $W_2, W_3$ là `i8`, $W_4$ là `i16`).
-  - Toàn bộ pipeline forward pass chạy thuần túy số nguyên (integer arithmetic), không phát sinh bất kỳ phép tính số thực (float) nào trong vòng lặp tìm kiếm Alpha-Beta.
-  - Được khởi tạo lười (lazy initialization) một lần duy nhất qua `OnceLock<NnueWeights>` (`NNUE_INSTANCE`).
-  - Nhúng trực tiếp trong file nhị phân WebAssembly, giúp nạp tức thì trong Web Worker mà không cần fetch thêm qua mạng.
+  - Toàn bộ pipeline forward pass chạy thuần túy số nguyên (integer arithmetic) kết hợp `EvalCache`, không phát sinh bất kỳ phép tính số thực (float) nào trong vòng lặp tìm kiếm Alpha-Beta.
+  - **Trong bản Native (`embed-model` feature)**: Trọng số được nhúng trực tiếp và khởi tạo lười một lần qua `OnceLock<NnueWeights>` (`NNUE_INSTANCE`).
+  - **Trong bản WebAssembly (`--no-default-features`)**: File `.wasm` được tách nhẹ (~335 KB) giúp khởi tạo Web Worker tức thì; trọng số `/assets/default.nnue` được tải một lần duy nhất, lưu đệm cục bộ vào **IndexedDB** (`src/utils/modelStorage.ts`) và truyền vào từng Worker qua `WasmEngine::load_weights_bytes()`.
 
 ### 2.5. Cầu nối WebAssembly & Polyfill (`cotuong_core/src/wasm.rs` & `src/wasm/`)
 
@@ -275,7 +281,8 @@ Module `wasm.rs` đóng gói logic Rust thành 2 lớp xuất qua `#[wasm_bindge
    - Truy vấn bàn cờ & luật: `get_board()`, `turn()`, `status()`, `is_in_check()`, `get_legal_moves(row, col)`, `is_move_legal(from_r, from_c, to_r, to_c)`, `get_strictly_legal_moves_flat()`.
    - Thực thi & lịch sử: `make_move(from_r, from_c, to_r, to_c)`, `undo_move()`, `get_history()`, `history_len()`, `annotate_last_move(note)`, `get_book_move()`.
 2. **`WasmEngine`**:
-   - Khởi tạo và chạy tìm kiếm AI bên trong Web Worker: `new(config_json)`, `update_config(config_json)`, `search(game_state, time_limit_ms, max_depth)`.
+   - Khởi tạo và quản lý cấu hình/bộ nhớ: `new(config_json)`, `update_config(config_json)`, `clear_tt()`, `load_weights_bytes(bytes)`, `is_nnue_active()`.
+   - Đa luồng & Tìm kiếm AI: `set_thread_id(thread_id)`, `thread_id()`, `search(game_state, time_limit_ms, max_depth)`, `search_with_partition(game_state, time_limit_ms, max_depth, allowed_moves_flat)`.
 
 ---
 
@@ -288,20 +295,21 @@ Crate `cotuong_trainer` cung cấp công cụ dòng lệnh tốc độ cao (sử
 | `dataset` | Huấn luyện có giám sát (Supervised Learning) trên kho kỳ phổ đại kiện tướng (`curated_master_games.txt`, `sample_master_games.txt`) với lan truyền ngược (Backpropagation) qua cả 2 nhánh Đỏ/Đen |
 | `teacher` | Chưng cất tri thức (Teacher Knowledge Distillation) bằng cách giao tiếp qua giao thức **UCCI / UCI** (`protocol.rs`) với các Engine mạnh như **Pikafish** hoặc **Fairy-Stockfish** |
 | `sparring` | Tổ chức các trận đấu tập đối kháng tự động giữa mạng NNUE hiện tại với Engine đối thủ để đánh giá tỷ lệ thắng thực chiến |
-| `quantize` | Lượng tử hóa mô hình Float32 (`.f32`) sang Mô Hình NNUE Chuẩn (`default.nnue`) chuẩn SIMD và bản sao lưu `model_f32.bin` |
+| `quantize` | Lượng tử hóa mô hình Float32 (`.f32`) sang Mô Hình NNUE Chuẩn (`default.nnue`) chuẩn SIMD (đồng thời lưu vào cả `cotuong_core/assets/default.nnue` và `public/assets/default.nnue`) cùng bản sao lưu `model_f32.bin` |
 
 ---
 
 ## 4. Giao diện React + TypeScript (`src/`)
 
-### 4.1. Luồng tương tác giữa UI, WASM và Web Worker
+### 4.1. Luồng tương tác giữa UI, WASM và Multi-Threaded Worker Pool
 
 ```mermaid
 sequenceDiagram
     participant User as Người chơi
     participant App as App.tsx (Main Thread)
     participant WGS as WasmGameState
-    participant Worker as ai.worker.ts (Web Worker)
+    participant Pool as AiPoolManager (aiPoolManager.ts)
+    participant Worker as ai.worker.ts (Workers 0..N-1)
     participant WE as WasmEngine (in Worker)
 
     User->>App: Click chọn quân & ô đích trên BoardCanvas
@@ -316,12 +324,17 @@ sequenceDiagram
         App->>WGS: make_move(...) + annotate_last_move("📖 Khai cuộc (Book Move)")
     else Không có trong sách khai cuộc (hoặc đang ở chế độ Giải Cờ Thế)
         App->>WGS: to_json() & to_fen()
-        App->>Worker: postMessage({ type: 'SEARCH', stateJson, fen, timeLimitMs, configJson })
+        App->>Pool: search({ state, stateJson, fen, timeLimitMs, configJson, threads })
         Note over App: Hiển thị ThinkingIndicator HUD trên bàn cờ
-        Worker->>WE: ensureInitialized(configJson)
-        Worker->>WE: search(WasmGameState.from_json(stateJson), timeLimitMs)
-        WE-->>Worker: SearchResultDto { move, stats }
-        Worker-->>App: postMessage({ type: 'SEARCH_SUCCESS', result })
+        Pool->>Pool: adjustPoolSize(threads) & ensureSharedBuffer(tt_size_mb * threads)
+        par Cooperative Multi-Search Lazy SMP (Thread 0..N-1)
+            Pool->>Worker: postMessage({ type: 'SEARCH', stateJson, threadId, sharedBuffer, ... })
+            Worker->>WE: ensureInitialized(configJson, threadId) & ensureModelLoaded() (IndexedDB)
+            Worker->>WE: search(WasmGameState.from_json(stateJson), timeLimitMs)
+            WE-->>Worker: SearchResultDto { move, stats }
+            Worker-->>Pool: postMessage({ type: 'SEARCH_SUCCESS', result, threadId })
+        end
+        Pool-->>App: Tổng hợp nodes, maxDepth & chọn nước đi tối ưu nhất
         App->>WGS: make_move(...) + annotate_last_move("🤖 Độ sâu, Nodes, Thời gian")
         App->>App: Ẩn ThinkingIndicator, cập nhật bàn cờ & phát âm thanh
     end
@@ -336,7 +349,8 @@ sequenceDiagram
 | `ControlsArea.tsx` & `PuzzleSetupArea.tsx` | Quản lý 4 chế độ chơi (`Người đấu với Máy`, `Máy đấu với Máy`, `Hai người chơi`, `Giải Cờ Thế`), chọn thế cờ mẫu (`CLASSIC_PUZZLES`), kiểm tra hợp lệ thế cờ (`validateBoardSetup`), hộp thoại Nhập/Xuất FEN, chọn bên đi tiên và độ khó AI. |
 | `ThinkingIndicator.tsx` | Hiển thị lớp phủ HUD trực tiếp ở trung tâm bàn cờ khi AI đang tính toán: đồng hồ đếm thời gian thực, thanh tiến trình, cấp độ khó và thông số độ sâu / số nút duyệt. |
 | `LogPanel.tsx` | Thanh biên bản thu gọn ở dưới bàn cờ; khi nhấn vào sẽ mở ngăn kéo trượt (Slide-Up Drawer) hiển thị chi tiết từng hiệp đấu, quân bị ăn, thống kê AI và nút xuất CSV. |
-| `ConfigModal.tsx` | Cho phép tinh chỉnh độc lập hoặc đồng bộ cấu hình `EngineConfig` cho **AI Đỏ** và **AI Đen** (`tt_size_mb`, `mate_score`, `nnue_weight`), áp dụng nhanh 4 Preset, hiển thị thông số kiến trúc NNUE Chuẩn và Nhập/Xuất file JSON. |
+| `ConfigModal.tsx` | Cho phép tinh chỉnh độc lập hoặc đồng bộ cấu hình `EngineConfig` cho **AI Đỏ** và **AI Đen** (`tt_size_mb` mỗi luồng, `mate_score`, `nnue_weight`, `threads` đa luồng), áp dụng nhanh các Preset lọc tự động theo phần cứng thiết bị, và chỉ tái cấp phát bộ nhớ khi nhấn **"Áp Dụng & Đóng"**. |
+| `AiPoolManager` & `modelStorage.ts` | Quản lý nhóm Web Worker đa luồng (`1–16` luồng), cấp phát phân vùng `SharedArrayBuffer` cho từng Worker, tự động hồi sinh (respawn) Worker nếu gặp lỗi, và lưu đệm trọng số `/assets/default.nnue` trong IndexedDB. |
 
 ---
 
@@ -344,11 +358,11 @@ sequenceDiagram
 
 | Tác vụ | Lệnh thực thi | Ghi chú |
 |---|---|---|
-| Chạy Dev Server | `npm run dev` | Khởi chạy Vite dev server tại cổng `3000` |
-| Biên dịch lại WASM | `npm run build:wasm` | Build `cotuong_core` (`--release`) và xuất bindings ra `src/wasm/` |
+| Chạy Dev Server | `npm run dev` | Khởi chạy Vite dev server tại cổng `3000` (kèm headers COOP/COEP cho `SharedArrayBuffer`) |
+| Biên dịch lại WASM | `npm run build:wasm` | Build `cotuong_core` (`--release --no-default-features`) và xuất bindings ra `src/wasm/` |
 | Chạy Test Frontend | `npm test` | Chạy bộ unit tests TypeScript (`tsx --test src/**/*.test.ts`) |
 | Kiểm tra TypeScript | `npm run lint` | Chạy `tsc --noEmit` |
 | Build Production | `npm run build` | Kiểm tra TypeScript và đóng gói ứng dụng vào `dist/` |
-| Chạy Test Rust | `cargo test --workspace` | Chạy toàn bộ unit tests của `cotuong_core` và `cotuong_trainer` |
+| Chạy Test Rust | `cargo test --workspace` | Chạy toàn bộ unit tests, mate-solving, property-based tests và fuzz tests |
 | Huấn luyện AI NNUE | `npm run train` | Chạy script `./train.sh` huấn luyện và lượng tử hóa mạng NNUE |
 | Kiểm thử Toàn diện | `./test_all.sh` | Chạy lần lượt `cargo fmt --check`, `cargo clippy` (native & wasm32), `cargo test --workspace`, và `npm run build` |

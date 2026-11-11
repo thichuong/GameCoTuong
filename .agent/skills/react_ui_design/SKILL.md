@@ -16,7 +16,7 @@ This skill covers all visual, layout, and interactive frontend components in `sr
 - `src/components/PuzzleSetupArea.tsx` – Dedicated Puzzle board editor, piece palette, setup validator feedback, and FEN import/export
 - `src/components/ThinkingIndicator.tsx` – Board-centered AI thinking HUD overlay with live elapsed timer and search stats
 - `src/components/LogPanel.tsx` – Collapsible bottom move log summary bar and slide-up drawer sheet
-- `src/components/ConfigModal.tsx` – Per-side Red/Black `EngineConfig` tuning modal with 2-side sync, presets, and JSON payload preview
+- `src/components/ConfigModal.tsx` – Per-side Red/Black `EngineConfig` tuning modal (`tt_size_mb`, `mate_score`, `nnue_weight`, `threads`) with draft state committed on explicit "Áp Dụng & Đóng", 2-side sync, hardware-filtered presets, and JSON payload preview
 - `src/utils/capturedPieces.ts` – Layout orientation calculation (`determineLayoutOrientation`, `calculateOptimalBoardSize`) and captured/off-board piece grouping
 
 ## Design System & Aesthetics

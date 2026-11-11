@@ -9,32 +9,36 @@ description: Guidelines for modifying the WebAssembly/Polyfill bridge, Web Worke
 
 ## Scope
 
-This skill covers the WebAssembly/Polyfill data bridge, background Web Worker, and state synchronization layer:
+This skill covers the WebAssembly/Polyfill data bridge, multi-threaded Web Worker pool, IndexedDB model caching, and state synchronization layer:
 - `cotuong_core/src/wasm.rs` – `#[wasm_bindgen]` exports (`WasmGameState`, `WasmEngine`) and DTO serialization
 - `src/wasm/cotuong_core.ts` & `src/wasm/enginePolyfill.ts` – WASM bridge entry and pure TypeScript fallback/polyfill implementation (`PolyfillGameState`, `PolyfillEngine`)
-- `src/workers/ai.worker.ts` – Background Web Worker running `WasmEngine.search()` off the main thread
-- `src/types/game.ts` & `src/types/config.test.ts` – Shared TypeScript DTO interfaces (`Piece`, `Square`, `GameMode`, `PuzzleStage`, `PuzzleSubMode`, `Difficulty`, `GameStatus`, `HistoryRecord`, `SearchStats`, `ModelType`, `EngineConfig`)
-- `src/App.tsx` – Game state synchronization (`syncGameState`), opening book check, AI worker message lifecycle, and fallback move recovery
+- `src/workers/aiPoolManager.ts` & `src/workers/ai.worker.ts` – Multi-threaded Web Worker pool (`AiPoolManager`) with `SharedArrayBuffer` partitioning and background Web Workers running `WasmEngine` off the main thread
+- `src/utils/modelStorage.ts` – IndexedDB caching and streaming manager (`getOrFetchNnueModel`) for `/assets/default.nnue`
+- `src/types/game.ts` & `src/types/config.test.ts` – Shared TypeScript DTO interfaces (`Piece`, `Square`, `GameMode`, `PuzzleStage`, `PuzzleSubMode`, `Difficulty`, `GameStatus`, `HistoryRecord`, `SearchStats`, `EngineConfig`)
+- `src/App.tsx` – Game state synchronization (`syncGameState`), opening book check, `AiPoolManager` lifecycle, and fallback move recovery
 - `src/utils/fen.ts` & `src/utils/export.ts` – FEN serialization/validation and CSV/JSON data export utilities
 
 ## Architecture Context
 
-### Web Worker Communication (`App.tsx` ↔ `ai.worker.ts`)
+### Multi-Threaded Web Worker Pool (`App.tsx` ↔ `aiPoolManager.ts` ↔ `ai.worker.ts`)
 ```
-App (Main Thread)                                  ai.worker.ts (Worker Thread)
-       |                                                         |
-       |── 1. Check state.get_book_move() (standard game only)   |
-       |      & verify with state.is_move_legal(...)             |
-       |── 2. postMessage({ type: 'SEARCH', stateJson,           |
-       |        fen, timeLimitMs, configJson }) ───────────────→ |
-       |                                                         |── ensureInitialized(configJson)
-       |                                                         |── WasmGameState.from_json(stateJson)
-       |                                                         |   (or WasmGameState.from_fen(fen))
-       |                                                         |── WasmEngine.search(state, timeLimitMs)
-       |   ←── postMessage({ type: 'SEARCH_SUCCESS', result }) ──|
-       |                                                         |
-       |── 3. state.make_move(...) + annotate_last_move(...)     |
-       |      (with get_strictly_legal_moves_flat() fallback)    |
+App (Main Thread)                 AiPoolManager                   ai.worker.ts (Worker Pool 0..N-1)
+       |                                |                                         |
+       |── 1. Check get_book_move()     |                                         |
+       |      (standard game only)      |                                         |
+       |── 2. pool.search(req) ────────→|── Adjust pool size (1..16 threads)      |
+       |                                |── Allocate SharedArrayBuffer            |
+       |                                |   (tt_size_mb * threads)                |
+       |                                |── postMessage({ type: 'SEARCH',         |
+       |                                |     stateJson, fen, timeLimitMs,        |
+       |                                |     configJson, threadId, sharedBuffer  |
+       |                                |   }) ──────────────────────────────────→|── ensureInitialized(configJson, threadId)
+       |                                |                                         |── ensureModelLoaded() via IndexedDB
+       |                                |                                         |   (/assets/default.nnue -> load_weights_bytes)
+       |                                |                                         |── WasmEngine.search() (Cooperative Lazy SMP)
+       |                                |←─ postMessage({ type: 'SEARCH_SUCCESS' })|
+       |←─ Aggregate stats & best move ─|                                         |
+       |── 3. state.make_move(...)      |                                         |
 ```
 
 ### WASM ↔ Polyfill Parity (`wasm.rs` & `enginePolyfill.ts`)
@@ -47,7 +51,11 @@ Both `WasmGameState` (Rust WASM) and `PolyfillGameState` (TypeScript) expose the
 Both `WasmEngine` and `PolyfillEngine` expose:
 - `new(config_json?)`
 - `update_config(config_json)`
+- `clear_tt()`
+- `load_weights_bytes(bytes)` / `is_nnue_active()`
+- `set_thread_id(thread_id)` / `thread_id()`
 - `search(game_state, time_limit_ms, max_depth?)`
+- `search_with_partition(game_state, time_limit_ms, max_depth?, allowed_moves_flat?)`
 
 ## Common Tasks
 
