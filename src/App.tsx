@@ -6,6 +6,7 @@ import { BoardPlayArea } from './components/BoardPlayArea.js';
 import { LogPanel } from './components/LogPanel.js';
 import { ConfigModal } from './components/ConfigModal.js';
 import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
+import { useBoardViewMode } from './hooks/useBoardViewMode.js';
 import { useXiangqiGame } from './hooks/useXiangqiGame.js';
 import { exportCsv } from './utils/export.js';
 import './App.css';
@@ -20,6 +21,8 @@ export const App: React.FC = () => {
     layoutOrientation,
     boardSize,
   } = useResponsiveLayout();
+
+  const { boardViewMode, setBoardViewMode } = useBoardViewMode();
 
   const {
     gameMode,
@@ -88,6 +91,8 @@ export const App: React.FC = () => {
         boardSize={boardSize}
         layoutOverride={layoutOverride}
         setLayoutOverride={setLayoutOverride}
+        boardViewMode={boardViewMode}
+        setBoardViewMode={setBoardViewMode}
         isInCheck={isInCheck}
         status={status}
         isPuzzleSetup={isPuzzleSetup}
@@ -139,6 +144,7 @@ export const App: React.FC = () => {
 
         <BoardPlayArea
           layoutOrientation={layoutOrientation}
+          boardViewMode={boardViewMode}
           boardSize={boardSize}
           board={board}
           playerSide={playerSide}

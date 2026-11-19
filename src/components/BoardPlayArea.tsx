@@ -1,5 +1,6 @@
 import React from 'react';
 import type {
+  BoardViewMode,
   Difficulty,
   GameMode,
   GameStatus,
@@ -19,6 +20,7 @@ import { GameOverOverlay } from './GameOverOverlay.js';
 
 export interface BoardPlayAreaProps {
   layoutOrientation: LayoutOrientation;
+  boardViewMode: BoardViewMode;
   boardSize: number;
   board: Square[];
   playerSide: PieceColor;
@@ -59,6 +61,7 @@ export interface BoardPlayAreaProps {
 
 export const BoardPlayArea: React.FC<BoardPlayAreaProps> = ({
   layoutOrientation,
+  boardViewMode,
   boardSize,
   board,
   playerSide,
@@ -130,6 +133,8 @@ export const BoardPlayArea: React.FC<BoardPlayAreaProps> = ({
         disabled={isThinking || (status.status !== 'Playing' && !isPuzzleSetup)}
         size={boardSize}
         isSetupMode={isPuzzleSetup}
+        viewMode={boardViewMode}
+        moveCount={moveCount}
       >
         <ThinkingIndicator
           isThinking={isThinking}

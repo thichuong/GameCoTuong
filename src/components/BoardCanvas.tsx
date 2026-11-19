@@ -1,11 +1,10 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import type { Piece, PieceColor, Square } from '../types/game.js';
+import type { BoardViewMode, Piece, PieceColor, Square } from '../types/game.js';
 import {
   BOARD_SIZE,
   BOARD_WIDTH,
   BOARD_HEIGHT,
   getVisualCoords,
-  getLogicCoords,
 } from './board/boardCoords.js';
 import {
   getPieceCursorStyle,
@@ -14,6 +13,33 @@ import {
   drawLastMoveBox,
   drawLegalMoveMarkers,
 } from './board/boardRenderer.js';
+import {
+  type CameraParams,
+  VIEW_MODE_CAMERAS,
+  isPerspectiveCamera,
+  lerpCameraParams,
+  unprojectToBoard,
+  pickBoardSquare,
+} from './board/boardProjection.js';
+import {
+  type MoveAnimationState,
+  type CameraTransitionState,
+  CAMERA_TRANSITION_MS,
+  MOVE_ANIMATION_MS,
+  easeOutCubic,
+  easeInOutCubic,
+  computeArcLiftZ,
+  prefersReducedMotion,
+} from './board/boardAnimation.js';
+import {
+  sortSquaresBackToFront,
+  drawTabletopBackground,
+  drawBoardSlab3D,
+  drawLastMoveBox3D,
+  drawLegalMoveMarkers3D,
+  drawHoverAndSetupHighlights3D,
+  drawPiece3D,
+} from './board/boardRenderer3d.js';
 
 export { getPieceCursorStyle };
 
@@ -33,6 +59,8 @@ export interface BoardCanvasProps {
   size?: number;
   children?: React.ReactNode;
   isSetupMode?: boolean;
+  viewMode?: BoardViewMode;
+  moveCount?: number;
 }
 
 export const BoardCanvas: React.FC<BoardCanvasProps> = ({
@@ -51,6 +79,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   size,
   children,
   isSetupMode = false,
+  viewMode = '2.5d',
+  moveCount = 0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [internalSize, setInternalSize] = useState<number>(() =>
@@ -75,6 +105,15 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   const [hoverTarget, setHoverTarget] = useState<[number, number] | null>(null);
   const [trayDragPos, setTrayDragPos] = useState<{ x: number; y: number } | null>(null);
   const suppressNextClickRef = useRef(false);
+
+  // Camera & piece flight animation refs (RAF loop only runs during active animations)
+  const currentCameraRef = useRef<CameraParams>(VIEW_MODE_CAMERAS[viewMode]);
+  const prevViewModeRef = useRef<BoardViewMode>(viewMode);
+  const cameraAnimRef = useRef<CameraTransitionState | null>(null);
+  const moveAnimRef = useRef<MoveAnimationState | null>(null);
+  const prevMoveCountRef = useRef<number>(moveCount);
+  const rafIdRef = useRef<number | null>(null);
+  const drawBoardRef = useRef<() => void>(() => {});
 
   // Piece on the currently selected board square (if any)
   const selectedBoardPiece = React.useMemo(() => {
@@ -105,6 +144,84 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     }
   }, [isSetupMode]);
 
+  const stepAnimation = useCallback(() => {
+    rafIdRef.current = null;
+    drawBoardRef.current();
+    if (cameraAnimRef.current !== null || moveAnimRef.current !== null) {
+      rafIdRef.current = window.requestAnimationFrame(stepAnimation);
+    }
+  }, []);
+
+  const ensureAnimationLoop = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (
+      rafIdRef.current === null &&
+      (cameraAnimRef.current !== null || moveAnimRef.current !== null)
+    ) {
+      rafIdRef.current = window.requestAnimationFrame(stepAnimation);
+    }
+  }, [stepAnimation]);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, []);
+
+  // Trigger smooth camera tilt transition when viewMode changes
+  useEffect(() => {
+    if (prevViewModeRef.current === viewMode) return;
+    prevViewModeRef.current = viewMode;
+    const target = VIEW_MODE_CAMERAS[viewMode];
+
+    if (prefersReducedMotion()) {
+      cameraAnimRef.current = null;
+      currentCameraRef.current = target;
+      drawBoardRef.current();
+      return;
+    }
+
+    cameraAnimRef.current = {
+      from: { ...currentCameraRef.current },
+      to: target,
+      startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+      durationMs: CAMERA_TRANSITION_MS,
+    };
+    ensureAnimationLoop();
+  }, [viewMode, ensureAnimationLoop]);
+
+  // Trigger parabolic 3D flight animation on forward moves (skip Undo / New Game / Setup)
+  useEffect(() => {
+    const prevCount = prevMoveCountRef.current;
+    prevMoveCountRef.current = moveCount;
+
+    if (isSetupMode || !lastMove || moveCount <= prevCount || prefersReducedMotion()) {
+      if (isSetupMode || !lastMove || moveCount < prevCount) {
+        moveAnimRef.current = null;
+      }
+      return;
+    }
+
+    const destSq = board.find(
+      (sq) => sq.row === lastMove.to_row && sq.col === lastMove.to_col
+    );
+    if (!destSq?.piece) return;
+
+    moveAnimRef.current = {
+      fromRow: lastMove.from_row,
+      fromCol: lastMove.from_col,
+      toRow: lastMove.to_row,
+      toCol: lastMove.to_col,
+      piece: destSq.piece,
+      startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+      durationMs: MOVE_ANIMATION_MS,
+    };
+    ensureAnimationLoop();
+  }, [lastMove, moveCount, isSetupMode, board, ensureAnimationLoop]);
+
   const effectiveSize = size ?? internalSize;
 
   const getCanvasPoint = useCallback(
@@ -128,6 +245,34 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (cameraAnimRef.current) {
+      const camAnim = cameraAnimRef.current;
+      const rawT = camAnim.durationMs > 0 ? (now - camAnim.startTime) / camAnim.durationMs : 1;
+      if (rawT >= 1) {
+        currentCameraRef.current = camAnim.to;
+        cameraAnimRef.current = null;
+      } else {
+        currentCameraRef.current = lerpCameraParams(
+          camAnim.from,
+          camAnim.to,
+          easeOutCubic(rawT)
+        );
+      }
+    }
+
+    let activeMoveAnim: { anim: MoveAnimationState; t: number } | null = null;
+    if (moveAnimRef.current) {
+      const anim = moveAnimRef.current;
+      const rawT = anim.durationMs > 0 ? (now - anim.startTime) / anim.durationMs : 1;
+      if (rawT >= 1) {
+        moveAnimRef.current = null;
+      } else {
+        activeMoveAnim = { anim, t: Math.max(0, rawT) };
+      }
+    }
+
+    const cam = currentCameraRef.current;
     const dpr = window.devicePixelRatio || 1;
     const pixelSize = Math.round(effectiveSize * dpr);
     if (canvas.width !== pixelSize || canvas.height !== pixelSize) {
@@ -139,25 +284,55 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     const scale = pixelSize / BOARD_SIZE;
     ctx.scale(scale, scale);
 
-    drawBoardGridAndRiver(ctx, playerSide, isSetupMode);
-
-    // Highlight Last Move
-    if (lastMove && !isSetupMode) {
-      drawLastMoveBox(ctx, lastMove, playerSide);
-    }
-
-    // Draw Hover Target Ring when dragging or holding a selected piece
     const hasFloatingPiece =
       Boolean(boardDrag?.hasMoved) ||
       Boolean(externalDraggedPiece && trayDragPos) ||
       Boolean(activeSelectedPiece && mousePos);
 
-    if (hoverTarget && hasFloatingPiece) {
-      const canHighlightTarget =
-        isSetupMode ||
-        legalMoves.some(([r, c]) => r === hoverTarget[0] && c === hoverTarget[1]);
+    const canHighlightHover =
+      Boolean(hoverTarget && hasFloatingPiece) &&
+      (isSetupMode ||
+        (hoverTarget !== null &&
+          legalMoves.some(([r, c]) => r === hoverTarget[0] && c === hoverTarget[1])));
 
-      if (canHighlightTarget) {
+    let selectedEmptySquare: [number, number] | null = null;
+    if (isSetupMode && selectedSquare) {
+      const sq = board.find((s) => s.row === selectedSquare[0] && s.col === selectedSquare[1]);
+      if (!sq || !sq.piece) {
+        selectedEmptySquare = selectedSquare;
+      }
+    }
+
+    let floatingInfo: {
+      piece: Piece;
+      screenPt: { x: number; y: number };
+    } | null = null;
+    if (isSetupMode && boardDrag && boardDrag.hasMoved) {
+      floatingInfo = {
+        piece: boardDrag.piece,
+        screenPt: { x: boardDrag.currentX, y: boardDrag.currentY },
+      };
+    } else if (isSetupMode && externalDraggedPiece && trayDragPos) {
+      floatingInfo = {
+        piece: externalDraggedPiece,
+        screenPt: trayDragPos,
+      };
+    } else if (activeSelectedPiece && mousePos) {
+      floatingInfo = {
+        piece: activeSelectedPiece,
+        screenPt: mousePos,
+      };
+    }
+
+    if (!isPerspectiveCamera(cam)) {
+      // Pure 2D flat rendering path
+      drawBoardGridAndRiver(ctx, playerSide, isSetupMode);
+
+      if (lastMove && !isSetupMode) {
+        drawLastMoveBox(ctx, lastMove, playerSide);
+      }
+
+      if (hoverTarget && canHighlightHover) {
         const { x, y } = getVisualCoords(hoverTarget[0], hoverTarget[1], playerSide);
         ctx.save();
         ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
@@ -169,42 +344,47 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
         ctx.stroke();
         ctx.restore();
       }
-    }
 
-    // Draw Pieces on Board
-    board.forEach((sq) => {
-      if (!sq.piece) return;
-      const { x, y } = getVisualCoords(sq.row, sq.col, playerSide);
-      const isSelected =
-        selectedSquare !== null &&
-        selectedSquare[0] === sq.row &&
-        selectedSquare[1] === sq.col;
+      board.forEach((sq) => {
+        if (!sq.piece) return;
+        if (
+          activeMoveAnim &&
+          sq.row === activeMoveAnim.anim.toRow &&
+          sq.col === activeMoveAnim.anim.toCol
+        ) {
+          return;
+        }
+        const { x, y } = getVisualCoords(sq.row, sq.col, playerSide);
+        const isSelected =
+          selectedSquare !== null &&
+          selectedSquare[0] === sq.row &&
+          selectedSquare[1] === sq.col;
 
-      const isBeingDragged =
-        isSetupMode &&
-        boardDrag !== null &&
-        boardDrag.hasMoved &&
-        boardDrag.fromRow === sq.row &&
-        boardDrag.fromCol === sq.col;
+        const isBeingDragged =
+          isSetupMode &&
+          boardDrag !== null &&
+          boardDrag.hasMoved &&
+          boardDrag.fromRow === sq.row &&
+          boardDrag.fromCol === sq.col;
 
-      const isSelectedWithCursorFollower = isSelected && mousePos !== null;
+        const isSelectedWithCursorFollower = isSelected && mousePos !== null;
 
-      if (isBeingDragged || isSelectedWithCursorFollower) {
-        ctx.save();
-        ctx.globalAlpha = 0.4;
-        drawPiece(ctx, x, y, sq.piece, true);
-        ctx.restore();
-      } else {
-        drawPiece(ctx, x, y, sq.piece, isSelected);
-      }
-    });
+        if (isBeingDragged || isSelectedWithCursorFollower) {
+          ctx.save();
+          ctx.globalAlpha = 0.4;
+          drawPiece(ctx, x, y, sq.piece, true);
+          ctx.restore();
+        } else {
+          drawPiece(ctx, x, y, sq.piece, isSelected);
+        }
+      });
 
-    // Draw Setup Mode Selected Square ring (if empty square selected)
-    if (isSetupMode && selectedSquare) {
-      const [selR, selC] = selectedSquare;
-      const sq = board.find((s) => s.row === selR && s.col === selC);
-      if (!sq || !sq.piece) {
-        const { x, y } = getVisualCoords(selR, selC, playerSide);
+      if (selectedEmptySquare) {
+        const { x, y } = getVisualCoords(
+          selectedEmptySquare[0],
+          selectedEmptySquare[1],
+          playerSide
+        );
         ctx.save();
         ctx.strokeStyle = '#F59E0B';
         ctx.lineWidth = 2.2;
@@ -214,20 +394,156 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
         ctx.stroke();
         ctx.restore();
       }
-    }
 
-    // Draw Legal Move Indicators (only in playing mode)
-    if (!isSetupMode) {
-      drawLegalMoveMarkers(ctx, legalMoves, board, playerSide);
-    }
+      if (!isSetupMode) {
+        drawLegalMoveMarkers(ctx, legalMoves, board, playerSide);
+      }
 
-    // Draw Floating Piece at Cursor (from board drag, external tray drag, or selected piece)
-    if (isSetupMode && boardDrag && boardDrag.hasMoved) {
-      drawPiece(ctx, boardDrag.currentX, boardDrag.currentY, boardDrag.piece, true);
-    } else if (isSetupMode && externalDraggedPiece && trayDragPos) {
-      drawPiece(ctx, trayDragPos.x, trayDragPos.y, externalDraggedPiece, true);
-    } else if (activeSelectedPiece && mousePos) {
-      drawPiece(ctx, mousePos.x, mousePos.y, activeSelectedPiece, true);
+      if (activeMoveAnim) {
+        const { anim, t } = activeMoveAnim;
+        const fromPt = getVisualCoords(anim.fromRow, anim.fromCol, playerSide);
+        const toPt = getVisualCoords(anim.toRow, anim.toCol, playerSide);
+        const u = easeInOutCubic(t);
+        const px = fromPt.x + (toPt.x - fromPt.x) * u;
+        const py = fromPt.y + (toPt.y - fromPt.y) * u;
+        const popScale = 1 + 0.08 * Math.sin(Math.PI * t);
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.scale(popScale, popScale);
+        drawPiece(ctx, 0, 0, anim.piece, false);
+        ctx.restore();
+      }
+
+      if (floatingInfo) {
+        drawPiece(
+          ctx,
+          floatingInfo.screenPt.x,
+          floatingInfo.screenPt.y,
+          floatingInfo.piece,
+          true
+        );
+      }
+    } else {
+      // 2.5D / 3D perspective rendering pipeline
+      const captureTargets = new Set<string>();
+      if (!isSetupMode) {
+        for (const [mr, mc] of legalMoves) {
+          const targetSq = board.find((s) => s.row === mr && s.col === mc);
+          if (targetSq?.piece) {
+            captureTargets.add(`${mr},${mc}`);
+          }
+        }
+      }
+
+      drawTabletopBackground(ctx, cam);
+      drawBoardSlab3D(ctx, playerSide, isSetupMode, cam);
+
+      if (lastMove && !isSetupMode) {
+        drawLastMoveBox3D(ctx, lastMove, playerSide, cam);
+      }
+
+      drawHoverAndSetupHighlights3D(
+        ctx,
+        {
+          hoverTarget,
+          canHighlightHover,
+          isSetupMode,
+          selectedEmptySquare,
+          playerSide,
+        },
+        cam
+      );
+
+      if (!isSetupMode) {
+        drawLegalMoveMarkers3D(ctx, legalMoves, board, playerSide, cam);
+      }
+
+      const sortedSquares = sortSquaresBackToFront(board, playerSide);
+      for (const sq of sortedSquares) {
+        if (!sq.piece) continue;
+        if (
+          activeMoveAnim &&
+          sq.row === activeMoveAnim.anim.toRow &&
+          sq.col === activeMoveAnim.anim.toCol
+        ) {
+          continue;
+        }
+
+        const { x: bx, y: by } = getVisualCoords(sq.row, sq.col, playerSide);
+        const isSelected =
+          selectedSquare !== null &&
+          selectedSquare[0] === sq.row &&
+          selectedSquare[1] === sq.col;
+
+        const isBeingDragged =
+          isSetupMode &&
+          boardDrag !== null &&
+          boardDrag.hasMoved &&
+          boardDrag.fromRow === sq.row &&
+          boardDrag.fromCol === sq.col;
+
+        const isSelectedWithCursorFollower = isSelected && mousePos !== null;
+        const isCaptureTarget = captureTargets.has(`${sq.row},${sq.col}`);
+
+        if (isBeingDragged || isSelectedWithCursorFollower) {
+          drawPiece3D(
+            ctx,
+            bx,
+            by,
+            sq.piece,
+            { isSelected: true, liftZ: 0, alpha: 0.35 },
+            cam
+          );
+        } else {
+          drawPiece3D(
+            ctx,
+            bx,
+            by,
+            sq.piece,
+            {
+              isSelected,
+              liftZ: isSelected ? cam.pieceHeight * 0.65 : 0,
+              isCaptureTarget,
+            },
+            cam
+          );
+        }
+      }
+
+      if (activeMoveAnim) {
+        const { anim, t } = activeMoveAnim;
+        const fromPt = getVisualCoords(anim.fromRow, anim.fromCol, playerSide);
+        const toPt = getVisualCoords(anim.toRow, anim.toCol, playerSide);
+        const u = easeInOutCubic(t);
+        const bx = fromPt.x + (toPt.x - fromPt.x) * u;
+        const by = fromPt.y + (toPt.y - fromPt.y) * u;
+        const liftZ = computeArcLiftZ(t, 18 + cam.pieceHeight);
+        drawPiece3D(ctx, bx, by, anim.piece, { isSelected: false, liftZ }, cam);
+      }
+
+      if (floatingInfo) {
+        const floatLiftZ = 18;
+        const unproj = unprojectToBoard(
+          floatingInfo.screenPt.x,
+          floatingInfo.screenPt.y,
+          floatLiftZ + cam.pieceHeight,
+          cam
+        );
+        const bx = unproj
+          ? Math.max(-20, Math.min(BOARD_SIZE + 20, unproj.x))
+          : floatingInfo.screenPt.x;
+        const by = unproj
+          ? Math.max(-20, Math.min(BOARD_SIZE + 20, unproj.y))
+          : floatingInfo.screenPt.y;
+        drawPiece3D(
+          ctx,
+          bx,
+          by,
+          floatingInfo.piece,
+          { isSelected: true, liftZ: floatLiftZ },
+          cam
+        );
+      }
     }
 
     ctx.restore();
@@ -247,6 +563,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     mousePos,
   ]);
 
+  drawBoardRef.current = drawBoard;
+
   useEffect(() => {
     drawBoard();
   }, [drawBoard]);
@@ -258,7 +576,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     const pt = getCanvasPoint(e.clientX, e.clientY);
     if (!pt) return;
 
-    const coords = getLogicCoords(pt.x, pt.y, playerSide);
+    const coords = pickBoardSquare(
+      pt.x,
+      pt.y,
+      playerSide,
+      currentCameraRef.current,
+      board,
+      { prioritizePieces: true, selectedSquare }
+    );
     if (!coords) return;
 
     const [row, col] = coords;
@@ -284,7 +609,22 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     if (!pt) return;
 
     setMousePos(pt);
-    const target = getLogicCoords(pt.x, pt.y, playerSide);
+    const isDraggingBoardPiece = Boolean(isSetupMode && boardDrag);
+    const target = pickBoardSquare(
+      pt.x,
+      pt.y,
+      playerSide,
+      currentCameraRef.current,
+      board,
+      {
+        prioritizePieces: !isDraggingBoardPiece,
+        selectedSquare,
+        excludeSquare:
+          isDraggingBoardPiece && boardDrag
+            ? [boardDrag.fromRow, boardDrag.fromCol]
+            : null,
+      }
+    );
     setHoverTarget(target);
 
     if (isSetupMode && boardDrag) {
@@ -307,7 +647,12 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (disabled || !isSetupMode || !boardDrag || e.button !== 0) return;
     const pt = getCanvasPoint(e.clientX, e.clientY);
-    const target = pt ? getLogicCoords(pt.x, pt.y, playerSide) : null;
+    const target = pt
+      ? pickBoardSquare(pt.x, pt.y, playerSide, currentCameraRef.current, board, {
+          prioritizePieces: false,
+          excludeSquare: [boardDrag.fromRow, boardDrag.fromCol],
+        })
+      : null;
 
     if (boardDrag.hasMoved) {
       suppressNextClickRef.current = true;
@@ -341,7 +686,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     if (!pt) return;
 
     setMousePos(pt);
-    const coords = getLogicCoords(pt.x, pt.y, playerSide);
+    const coords = pickBoardSquare(
+      pt.x,
+      pt.y,
+      playerSide,
+      currentCameraRef.current,
+      board,
+      { prioritizePieces: true, selectedSquare }
+    );
     if (coords) {
       onSquareClick(coords[0], coords[1]);
     }
@@ -355,7 +707,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     const pt = getCanvasPoint(e.clientX, e.clientY);
     if (!pt) return;
 
-    const coords = getLogicCoords(pt.x, pt.y, playerSide);
+    const coords = pickBoardSquare(
+      pt.x,
+      pt.y,
+      playerSide,
+      currentCameraRef.current,
+      board,
+      { prioritizePieces: true, selectedSquare }
+    );
     if (coords) {
       onSquareRightClick(coords[0], coords[1]);
     }
@@ -371,7 +730,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
 
     setTrayDragPos(pt);
     setMousePos(pt);
-    const coords = getLogicCoords(pt.x, pt.y, playerSide);
+    const coords = pickBoardSquare(
+      pt.x,
+      pt.y,
+      playerSide,
+      currentCameraRef.current,
+      board,
+      { prioritizePieces: true }
+    );
     setHoverTarget(coords);
   };
 
@@ -390,7 +756,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({
     setTrayDragPos(null);
     if (!pt) return;
 
-    const coords = getLogicCoords(pt.x, pt.y, playerSide);
+    const coords = pickBoardSquare(
+      pt.x,
+      pt.y,
+      playerSide,
+      currentCameraRef.current,
+      board,
+      { prioritizePieces: true }
+    );
     if (!coords) return;
 
     let droppedPiece: Piece | null = externalDraggedPiece;

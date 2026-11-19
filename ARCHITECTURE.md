@@ -7,10 +7,10 @@ graph TB
     subgraph Frontend["React 18 + TypeScript Frontend (src/)"]
         direction TB
         App["App.tsx<br/>(Root Layout Orchestrator)"]
-        Hooks["hooks/<br/>(useXiangqiGame.ts & useResponsiveLayout.ts)"]
-        Header["TopHeader.tsx<br/>(Brand, Layout Switcher, Check & Turn Status)"]
+        Hooks["hooks/<br/>(useXiangqiGame.ts, useResponsiveLayout.ts & useBoardViewMode.ts)"]
+        Header["TopHeader.tsx<br/>(Brand, 2D/2.5D/3D & Layout Switchers, Check & Turn Status)"]
         PlayArea["BoardPlayArea.tsx & GameOverOverlay.tsx<br/>(Unified Sides/Stacked Board + Trays Container)"]
-        Canvas["BoardCanvas.tsx & board/<br/>(1:1 Canvas, boardCoords.ts, boardRenderer.ts)"]
+        Canvas["BoardCanvas.tsx & board/<br/>(1:1 Canvas, boardCoords, boardProjection, boardAnimation, boardRenderer/3d)"]
         Trays["CapturedPiecesTray.tsx & tray/<br/>(Player Cards, Material Advantage & MiniWoodenPiece.tsx)"]
         Controls["ControlsArea.tsx, PuzzleSetupArea.tsx, controls/ & puzzle/<br/>(Modes, PuzzleSetupToolbar, FenModal, PuzzlePiecePalette, PuzzleMatchSettings)"]
         Overlay["ThinkingIndicator.tsx<br/>(Board HUD Overlay)"]
@@ -101,12 +101,14 @@ GameCoTuong/
 │   ├── App.css                 # Tailwind CSS v4 & custom animations
 │   ├── hooks/
 │   │   ├── useXiangqiGame.ts   # Custom hook quản lý WasmGameState, AiPoolManager, 4 chế độ chơi & Cờ Thế
-│   │   └── useResponsiveLayout.ts # Custom hook tính toán hướng bố cục (sides/stacked) & kích thước bàn cờ
+│   │   ├── useResponsiveLayout.ts # Custom hook tính toán hướng bố cục (sides/stacked) & kích thước bàn cờ
+│   │   ├── useBoardViewMode.ts # Custom hook quản lý chế độ hiển thị 2D/2.5D/3D (mặc định 2.5D) & localStorage
+│   │   └── useBoardViewMode.test.ts # Unit tests kiểm tra parse & fallback chế độ góc nhìn
 │   ├── components/
-│   │   ├── TopHeader.tsx       # Thanh tiêu đề, nút chuyển bố cục (Tự động/Hai bên/Trên dưới), báo chiếu & lượt đi
+│   │   ├── TopHeader.tsx       # Thanh tiêu đề, nút chuyển góc nhìn (2D/2.5D/3D), bố cục (Tự động/Hai bên/Trên dưới), báo chiếu & lượt đi
 │   │   ├── BoardPlayArea.tsx   # Khung bố cục thích ứng hợp nhất (sides & stacked) cho Bàn cờ + 2 Khay quân
 │   │   ├── GameOverOverlay.tsx # Lớp phủ thông báo Chiếu bí (Checkmate) / Hòa cờ (Stalemate) trên bàn cờ
-│   │   ├── BoardCanvas.tsx     # Component HTML5 Canvas 1:1 xử lý sự kiện chuột, kéo-thả & hiển thị bàn cờ
+│   │   ├── BoardCanvas.tsx     # Component HTML5 Canvas 1:1 xử lý sự kiện chuột, kéo-thả, hoạt ảnh & hiển thị 2D/2.5D/3D
 │   │   ├── CapturedPiecesTray.tsx # Khay quân đã ăn, ưu thế vật chất & kho quân kéo-thả ở chế độ Cờ Thế
 │   │   ├── ControlsArea.tsx    # Thanh điều khiển chế độ chơi, cầm quân, độ khó & tác vụ ván đấu
 │   │   ├── PuzzleSetupArea.tsx # Trình biên tập thế cờ chuyên dụng, kiểm tra hợp lệ & nạp thế cờ mẫu
@@ -116,7 +118,11 @@ GameCoTuong/
 │   │   ├── board/
 │   │   │   ├── boardCoords.ts  # Hằng số hình học bàn cờ, quy đổi tọa độ logic ↔ hiển thị & ký tự quân cờ
 │   │   │   ├── boardCoords.test.ts # Unit tests kiểm thử hệ tọa độ và lật góc nhìn 180°
-│   │   │   └── boardRenderer.ts # Các hàm vẽ Canvas 2D (mặt bàn gỗ, sông, Cửu Cung, quân cờ 3D, con trỏ chuột)
+│   │   │   ├── boardProjection.ts # Phép chiếu phối cảnh 2.5D/3D, nội suy camera & nhận diện click 2 pha trên quân cờ 3D
+│   │   │   ├── boardProjection.test.ts # Unit tests kiểm thử phép chiếu thuận-ngược, biên khung & pickBoardSquare
+│   │   │   ├── boardAnimation.ts # Hàm easing, quỹ đạo bay cong parabol 3D & kiểm tra prefers-reduced-motion
+│   │   │   ├── boardRenderer.ts # Các hàm vẽ Canvas 2D cổ điển & tạo con trỏ chuột quân cờ
+│   │   │   └── boardRenderer3d.ts # Bộ vẽ Canvas phối cảnh 2.5D/3D (bàn gỗ nổi khối, chỉ vàng, quân trụ tiện gỗ & bóng đổ)
 │   │   ├── config/
 │   │   │   ├── configPresets.ts # Danh sách PRESETS lọc theo phần cứng, chuẩn hóa JSON & định dạng RAM
 │   │   │   ├── ConfigPresetsSection.tsx # Lưới chọn nhanh cấu hình mẫu (Presets)
@@ -375,12 +381,13 @@ sequenceDiagram
 
 | Module / Component | Vai trò & Đặc điểm kỹ thuật |
 |---|---|
-| `App.tsx` | Component gốc gọn nhẹ (~180 dòng) kết nối `useResponsiveLayout`, `useXiangqiGame` với `TopHeader`, `ControlsArea`, `BoardPlayArea`, `LogPanel` và `ConfigModal`. |
+| `App.tsx` | Component gốc gọn nhẹ (~200 dòng) kết nối `useResponsiveLayout`, `useBoardViewMode`, `useXiangqiGame` với `TopHeader`, `ControlsArea`, `BoardPlayArea`, `LogPanel` và `ConfigModal`. |
 | `hooks/useXiangqiGame.ts` | Quản lý vòng đời `WasmGameState` và `AiPoolManager`, điều phối lượt đi AI (Book Move & Worker Pool), các thao tác Xếp/Giải Cờ Thế và lịch sử nước đi. |
 | `hooks/useResponsiveLayout.ts` | Tự động lắng nghe kích thước cửa sổ (`windowDims`), xác định hướng bố cục (`sides` / `stacked`) và tính kích thước bàn cờ vuông tối ưu (`boardSize`). |
-| `TopHeader.tsx` | Thanh tiêu đề trên cùng hiển thị thương hiệu, bộ chuyển đổi bố cục nhanh (`Tự động` / `Hai bên` / `Trên dưới`), cảnh báo `Chiếu tướng!` và huy hiệu bên đang giữ lượt. |
+| `hooks/useBoardViewMode.ts` | Quản lý góc nhìn bàn cờ (`2d` / `2.5d` / `3d`, mặc định `2.5d`) và lưu bền vững vào `localStorage`. |
+| `TopHeader.tsx` | Thanh tiêu đề trên cùng hiển thị thương hiệu, bộ chuyển góc nhìn (`2D` / `2.5D` / `3D`), bộ chuyển bố cục nhanh (`Tự động` / `Hai bên` / `Trên dưới`), cảnh báo `Chiếu tướng!` và huy hiệu bên đang giữ lượt. |
 | `BoardPlayArea.tsx` & `GameOverOverlay.tsx` | Hợp nhất cách hiển thị bàn cờ trung tâm cùng 2 khay `CapturedPiecesTray` cho cả chế độ ngang (`sides`) và dọc (`stacked`), đồng thời hiển thị `ThinkingIndicator` và lớp phủ kết thúc ván đấu (`GameOverOverlay`). |
-| `BoardCanvas.tsx` & `board/*` | Tách biệt rõ ràng: `boardCoords.ts` xử lý hình học & xoay góc nhìn 180°, `boardRenderer.ts` đảm nhiệm vẽ Canvas 2D HiDPI (mặt bàn gỗ, sông, Cửu Cung, quân cờ 3D, tạo con trỏ chuột `getPieceCursorStyle`), và `BoardCanvas.tsx` quản lý sự kiện chuột / kéo-thả. |
+| `BoardCanvas.tsx` & `board/*` | Tách biệt rõ ràng: `boardCoords.ts` xử lý hình học & xoay góc nhìn 180°, `boardProjection.ts` tính phép chiếu phối cảnh & nhận diện click 2 pha 3D, `boardAnimation.ts` điều khiển chuyển camera mượt & bay quân parabol 3D, `boardRenderer.ts` vẽ chế độ `2D` phẳng & con trỏ chuột, `boardRenderer3d.ts` vẽ bàn gỗ dày và quân trụ 3D cho `2.5D`/`3D`. |
 | `CapturedPiecesTray.tsx` & `tray/MiniWoodenPiece.tsx` | Hiển thị danh sách quân đối phương đã bị ăn (hoặc quân còn lại ngoài bàn khi xếp cờ thế) qua các quân cờ gỗ thu nhỏ (`MiniWoodenPiece`), kèm tổng điểm ăn được và ưu thế vật chất (`+ điểm`). |
 | `ControlsArea.tsx` & `controls/*` | Quản lý 4 chế độ chơi, cầm quân, độ khó AI; tách riêng thanh công cụ xếp cờ thế (`PuzzleSetupToolbar.tsx`) và hộp thoại `FenModal.tsx` dùng chung. |
 | `PuzzleSetupArea.tsx` & `puzzle/*` | Trình thiết lập thế cờ độc lập, chia thành bảng chọn quân Đỏ/Đen (`PuzzlePiecePalette.tsx`), cài đặt thông số trận đấu (`PuzzleMatchSettings.tsx`) và `FenModal.tsx`. |

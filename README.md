@@ -29,7 +29,7 @@
 | ⚡ **Đa Luồng Lazy SMP & IndexedDB NNUE Cache** | Hỗ trợ tìm kiếm song song đa luồng (`1–16` Web Workers) với **Cooperative Multi-Search Lazy SMP** và phân vùng `SharedArrayBuffer`; tách nhẹ gói `.wasm` (~335KB) và tự động lưu đệm mô hình `default.nnue` (~4.0MB) trong **IndexedDB** giúp khởi động tức thì |
 | 🎯 **5 Cấp độ khó** | Từ **Cấp 1 · Nhập môn (1s)** đến **Cấp 5 · Đại sư (20s)** điều chỉnh thời gian suy nghĩ tối đa mỗi nước của AI |
 | ⚙️ **Tùy biến AI Đỏ & Đen độc lập** | Tinh chỉnh riêng hoặc đồng bộ cho từng bên (`tt_size_mb`, `mate_score`, `nnue_weight`, `threads`) kèm các Preset tự động tương thích phần cứng thiết bị, cơ chế xác nhận **"Áp Dụng & Đóng"** và Nhập/Xuất file `.json` |
-| 🎨 **Bàn cờ Canvas 1:1 & Khay Quân Thích ứng** | Vẽ trên HTML5 Canvas chuẩn HiDPI/Retina, tự động giữ tỉ lệ vuông `1:1`, xoay chiều bàn cờ theo phe người chơi, hiển thị khay quân ăn được và ưu thế vật chất theo bố cục **Tự động / Hai bên / Trên dưới** |
+| 🎨 **Bàn cờ Canvas 1:1 (2D / 2.5D / 3D) & Khay Quân Thích ứng** | Vẽ trên HTML5 Canvas chuẩn HiDPI/Retina hỗ trợ chuyển đổi mượt **2D (Phẳng)**, **2.5D (Mặc định)** và **3D (Phối cảnh sâu)** với bàn gỗ dày nổi khối, quân trụ 3D và hoạt ảnh nhấc quân bay cong; tự động xoay chiều theo phe và thích ứng bố cục **Tự động / Hai bên / Trên dưới** |
 | 📊 **HUD Tiến trình AI & Biên bản Ngăn kéo** | Lớp phủ HUD trực quan ngay trên bàn cờ khi AI đang tính nước; thanh biên bản gọn gàng phía dưới bàn cờ mở lên dạng ngăn kéo trượt (Slide-Up Drawer) |
 | 🏋️ **Pipeline Huấn luyện NNUE (`cotuong_trainer`)** | Crate huấn luyện riêng bằng Rust hỗ trợ học giám sát từ kỳ phổ, chưng cất tri thức (Teacher Distillation) với Pikafish/Fairy-Stockfish (UCCI/UCI), đấu tập đối kháng và lượng tử hóa đa định dạng |
 | 🔊 **Âm thanh, Xuất CSV & PWA** | Hiệu ứng âm thanh riêng cho đi quân, ăn quân, chiếu tướng, chiếu bí; xuất lịch sử ván đấu ra `.csv`; hỗ trợ cài đặt PWA và chơi offline |
@@ -126,7 +126,8 @@ GameCoTuong/
 │   ├── App.tsx                    # Điều phối trạng thái ván cờ, 4 chế độ chơi, bố cục & Worker Pool
 │   ├── App.css                    # Tailwind CSS v4 & hiệu ứng chuyển động
 │   ├── components/
-│   │   ├── BoardCanvas.tsx        # Bàn cờ HTML5 Canvas 1:1, hỗ trợ kéo-thả xếp cờ thế & xoay góc nhìn
+│   │   ├── BoardCanvas.tsx        # Bàn cờ HTML5 Canvas 1:1 hỗ trợ 2D/2.5D/3D, hoạt ảnh bay quân & kéo-thả cờ thế
+│   │   ├── board/                 # Hình học bàn cờ, phép chiếu phối cảnh 3D, bộ vẽ 2D/3D & hoạt ảnh camera/quân cờ
 │   │   ├── CapturedPiecesTray.tsx # Khay quân đã ăn, điểm ưu thế & kho quân kéo-thả khi xếp cờ thế
 │   │   ├── ControlsArea.tsx       # Thanh điều khiển chế độ chơi, công cụ cờ thế, chọn quân & độ khó
 │   │   ├── PuzzleSetupArea.tsx    # Bảng công cụ xếp cờ thế, kiểm tra hợp lệ & nạp FEN/thế cờ mẫu

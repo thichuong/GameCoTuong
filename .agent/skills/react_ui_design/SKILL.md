@@ -9,17 +9,21 @@ description: Guidelines for designing, building, and modifying the React 18 + Ty
 
 This skill covers all visual, layout, and interactive frontend modules in `src/`:
 - **Root & Custom Hooks**:
-  - `src/App.tsx` – Root layout orchestrator connecting custom hooks (`useResponsiveLayout`, `useXiangqiGame`) with top-level UI regions (`TopHeader`, `ControlsArea`, `BoardPlayArea`, `LogPanel`, `ConfigModal`).
+  - `src/App.tsx` – Root layout orchestrator connecting custom hooks (`useResponsiveLayout`, `useBoardViewMode`, `useXiangqiGame`) with top-level UI regions (`TopHeader`, `ControlsArea`, `BoardPlayArea`, `LogPanel`, `ConfigModal`).
   - `src/hooks/useResponsiveLayout.ts` – Viewport resize listener, `layoutOverride` (`'auto' | 'sides' | 'stacked'`), `layoutOrientation`, and `boardSize` calculation.
+  - `src/hooks/useBoardViewMode.ts` (`& useBoardViewMode.test.ts`) – Manages `BoardViewMode` (`'2d' | '2.5d' | '3d'`, defaulting to `'2.5d'`) with `localStorage` persistence (`xiangqi_board_view_mode`).
   - `src/hooks/useXiangqiGame.ts` – Complete game state, `WasmGameState` + `AiPoolManager` integration, 4 game modes, and Puzzle setup/solving handlers.
   - `src/App.css` – Tailwind CSS v4 setup, custom font utilities (`.font-display-serif`, `.font-mono-tabular`), scrollbars, and keyframe animations.
 - **Top-Level Layout & Board Components**:
-  - `src/components/TopHeader.tsx` – Brand header, layout switcher (`Tự động` / `Hai bên` / `Trên dưới`), `Chiếu tướng!` alert badge, and active turn indicator.
+  - `src/components/TopHeader.tsx` – Brand header, 2D/2.5D/3D view-mode switcher, layout switcher (`Tự động` / `Hai bên` / `Trên dưới`), `Chiếu tướng!` alert badge, and active turn indicator.
   - `src/components/BoardPlayArea.tsx` – Unified responsive container rendering `CapturedPiecesTray` + `BoardCanvas` + `ThinkingIndicator` + `GameOverOverlay` in either `'sides'` or `'stacked'` orientation without code duplication.
   - `src/components/GameOverOverlay.tsx` – Checkmate / Stalemate overlay modal rendered inside `BoardCanvas`.
-  - `src/components/BoardCanvas.tsx` – 1:1 HTML5 Canvas Xiangqi board component managing mouse/drag-and-drop events and delegating geometry/drawing to `src/components/board/`:
+  - `src/components/BoardCanvas.tsx` – 1:1 HTML5 Canvas Xiangqi board component managing mouse/drag-and-drop events, camera transitions, move arc animations, and delegating geometry/drawing to `src/components/board/`:
     - `src/components/board/boardCoords.ts` (`& boardCoords.test.ts`) – Pure board constants (`BOARD_SIZE = 554.0`, `PADDING`, `CELL_WIDTH`, `CELL_HEIGHT`, `FIDUCIAL_POINTS`), `getPieceSymbol`, `getVisualCoords`, and `getLogicCoords`.
-    - `src/components/board/boardRenderer.ts` – Canvas 2D rendering functions (`drawBoardGridAndRiver`, `drawPiece`, `drawLastMoveBox`, `drawLegalMoveMarkers`, `drawFiducialMark`, and `getPieceCursorStyle`).
+    - `src/components/board/boardProjection.ts` (`& boardProjection.test.ts`) – Pinhole perspective camera profiles (`VIEW_MODE_CAMERAS` for `'2d'`, `'2.5d'`, `'3d'`), `projectBoardPoint`, exact algebraic `unprojectToBoard`, `lerpCameraParams`, and 2-phase 3D piece-top hit-testing (`pickBoardSquare`).
+    - `src/components/board/boardAnimation.ts` – Cubic easing helpers, parabolic lift curve (`computeArcLiftZ`), animation state types, and `prefersReducedMotion`.
+    - `src/components/board/boardRenderer.ts` – Pure 2D Canvas rendering functions (`drawBoardGridAndRiver`, `drawPiece`, `drawLastMoveBox`, `drawLegalMoveMarkers`, `drawFiducialMark`, and `getPieceCursorStyle`).
+    - `src/components/board/boardRenderer3d.ts` – 2.5D/3D Canvas rendering functions (`drawTabletopBackground`, `drawBoardSlab3D`, `drawLastMoveBox3D`, `drawLegalMoveMarkers3D`, `drawHoverAndSetupHighlights3D`, `drawPiece3D`, `sortSquaresBackToFront`).
 - **Captured Pieces Trays**:
   - `src/components/CapturedPiecesTray.tsx` – Responsive player card & captured/off-board piece tray (`sides` vertical sidebar vs. `stacked` horizontal bar).
   - `src/components/tray/MiniWoodenPiece.tsx` – Draggable/clickable 3D miniature wooden piece badge (`MiniWoodenPiece`) and `getTrayRoleLabel` helper.
@@ -72,19 +76,25 @@ This skill covers all visual, layout, and interactive frontend modules in `src/`
   - **Standard Gameplay**: Displays enemy pieces captured by that player (`extractCapturedPieces(history)`) and relative material advantage (`+điểm`).
   - **Puzzle Setup (`isSetupMode = true`)**: Displays remaining off-board pieces (`extractOffBoardPieces(board)`) from the standard 32-piece set so the user can drag or click them onto the board.
 
-## HTML5 Canvas Board (`BoardCanvas.tsx`, `boardCoords.ts`, `boardRenderer.ts`)
+## HTML5 Canvas Board (`BoardCanvas.tsx`, `boardCoords.ts`, `boardProjection.ts`, `boardRenderer.ts`, `boardRenderer3d.ts`)
 
 1. **Logical vs. Physical Coordinates (`boardCoords.ts`)**:
    - Logical canvas space is `554 × 554` (`PADDING = 34`, `CELL_WIDTH = 60.75`, `CELL_HEIGHT = 54.0`).
    - Physical canvas backing store is scaled by `window.devicePixelRatio` (`ctx.scale(dpr * scaleFactor, dpr * scaleFactor)`).
-2. **Perspective Flipping (`getVisualCoords` & `getLogicCoords`)**:
+2. **2D / 2.5D / 3D Perspective Projection (`boardProjection.ts`, `boardRenderer3d.ts`, `boardAnimation.ts`)**:
+   - `useBoardViewMode()` defaults to `'2.5d'` and persists `'2d' | '2.5d' | '3d'` in `localStorage` (`xiangqi_board_view_mode`).
+   - `'2d'` (`tiltDeg = 0`) uses flat `boardRenderer.ts` with zero projection distortion.
+   - `'2.5d'` (`tiltDeg = 25`, `pieceHeight = 13`) and `'3d'` (`tiltDeg = 39`, `pieceHeight = 17`) render a dark lacquerware tabletop backdrop, thick beveled rosewood slab with inlaid brass trim, cylindrical turned-wood pieces sorted back-to-front, and ground cast shadows.
+   - Switching modes interpolates camera parameters (`320ms`); forward moves play a parabolic 3D flight arc (`240ms`, automatically skipped when `prefers-reduced-motion` is enabled or on Undo/New Game/Setup).
+   - `pickBoardSquare()` performs 2-phase hit-testing: piece top-face ellipses and sidewalls front-to-back first, then exact algebraic unprojection (`unprojectToBoard`) onto `z = 0`.
+3. **Perspective Flipping (`getVisualCoords` & `getLogicCoords`)**:
    - Row `0` is Red's back rank; Row `9` is Black's back rank.
    - When `playerSide === 'red'`, `canvasY = PADDING + (9 - row) * CELL_HEIGHT` and `canvasX = PADDING + col * CELL_WIDTH`.
    - When `playerSide === 'black'`, both axes invert (`canvasY = PADDING + row * CELL_HEIGHT`, `canvasX = PADDING + (8 - col) * CELL_WIDTH`) so Black is at the bottom.
-3. **Interactive Visual Cues (`boardRenderer.ts`)**:
-   - **Last Move**: Dashed amber box at origin square + solid green highlight box at destination square (`drawLastMoveBox`).
-   - **Legal Moves**: Jade dot (`rgba(22, 163, 74, 0.9)`) on empty target squares; vermilion ring (`#DC2626`) on capturable enemy pieces (`drawLegalMoveMarkers`).
-   - **Puzzle Setup Hover & Drag**: Ghost preview of the piece being dragged or selected (`selectedSetupPiece` / `externalDraggedPiece`), plus dynamic CSS cursor (`getPieceCursorStyle`).
+4. **Interactive Visual Cues (`boardRenderer.ts` / `boardRenderer3d.ts`)**:
+   - **Last Move**: Dashed amber box at origin square + solid green highlight box at destination square (`drawLastMoveBox` / `drawLastMoveBox3D`).
+   - **Legal Moves**: Jade dot/disc (`rgba(22, 163, 74, 0.9)`) on empty target squares; vermilion ring (`#DC2626`) on capturable enemy pieces (`drawLegalMoveMarkers` / `drawLegalMoveMarkers3D` + top-rim highlight in 3D).
+   - **Puzzle Setup Hover & Drag**: Ghost preview of the piece being dragged or selected (`selectedSetupPiece` / `externalDraggedPiece`) floating at cursor elevation (`liftZ = 18` in 2.5D/3D), plus dynamic CSS cursor (`getPieceCursorStyle`).
 
 ## Common UI Tasks
 

@@ -9,6 +9,8 @@ export type PieceType =
 
 export type PieceColor = 'red' | 'black';
 
+export type BoardViewMode = '2d' | '2.5d' | '3d';
+
 export interface Piece {
   type: PieceType;
   color: PieceColor;
